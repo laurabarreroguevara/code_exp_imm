@@ -1,0 +1,93 @@
+---
+title: "Accesses requested studies, verifies their receipt, and ensures they are saved"
+author: "Laura Andrea Barrero Guevara"
+date: '2022-08-12'
+---
+
+####################################################################################################
+Purpose: This script accesses requested studies, verifies their receipt, and ensures they are saved. 
+
+Data:
+There are two copies of the studies (zipped):
+- one in the kramer server folder
+- one in the bg/gsk_data_save server folder
+There is one working copy of the studies (unzipped and organized):
+- in the bg/gsk_data folder 
+
+Output:
+- stu_req (data frame) requested studies with receipt status
+####################################################################################################
+
+# Set the working directory to the project directory
+```{r setup}
+rm(list = ls())
+knitr::opts_knit$set(root.dir = '~/Nextcloud/Projects/_seas_imm/code_exp_imm_seas')
+```
+
+# Load packages, themes, directories, and functions
+```{r}
+source("00_pck.R")
+```
+
+# Load the list of requested studies
+```{r}
+stu_req <- read_excel(glue("{dirs$raw}/studies_requested.xlsx")) %>%
+  # Tidy study IDs
+  rename(study = study_id) %>%
+  mutate(study = str_remove(study, pattern = "GSK-"),
+         study = gsub(" .*", "", study),
+         study = case_when(study == "RTX114351" ~ "114351",
+                           study == "V72P12" ~ "205399",
+                           study == "V72P13E1" ~ "205453",
+                           study == "V72P13" ~ "205450",
+                           TRUE ~ as.character(study)),
+         study = str_replace(study, "/", "-"))
+```
+
+# Load studies from the two "saved zipped" folders and check for overlap
+```{r}
+# Studies in Kramer's server zipped data
+save_kramer_l <- str_subset(list.files(glue("{dirs$server_save_kramer}")), negate = TRUE, 
+                            "allStudies_Apr.csv|resources_for_Laura.zip|seasonal_immunogenicity|vacc_con dataset")
+# Studies in Barrero Guevaras's server zipped data (classified)
+save_bg_l <- sapply(list.files(glue("{dirs$server_save_bg}")), simplify = FALSE,
+                    function(x) list.files(glue("{dirs$server_save_bg}/{x}")))
+
+# Check that all studies are saved in both kramer and bg zipped folders
+all(str_sort(unlist(save_bg_l)) == str_sort(save_kramer_l))
+```
+Note: There is a folder with 12 studies "unclassified", which includes studies for which newer 
+versions were received. The newer versions are the ones analyzed.
+
+# Check if the requested studies were received
+```{r}
+# Load requested studies and mark receipt status
+stu_req <- mutate(stu_req, received = study %in% str_subset(save_kramer_l, "new", negate = T)) %>%
+  left_join(bind_rows(lapply(save_bg_l, data.frame), .id = "stu_pat_tidy") %>%
+              rename(study = 2))
+
+# Display studies not received (8 studies)
+filter(stu_req, received == F)
+```
+
+# Load studies from the "working unzipped" folder and check overlap with received studies
+```{r}
+working_l <- sapply(list.files(glue("{dirs$server_bg}")), 
+               function(x) list.files(glue("{dirs$server_bg}/{x}")), simplify = FALSE)
+
+length(unlist(working_l)) == length(filter(stu_req, received == TRUE)[[1]])
+```
+
+# Save the data frame of requested and received studies
+```{r}
+saveRDS(stu_req, file = glue("{dirs$processed}/stu_req.rds"))
+```
+
+####################################################################################################
+# END
+####################################################################################################
+
+
+
+
+

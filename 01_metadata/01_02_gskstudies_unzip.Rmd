@@ -1,0 +1,139 @@
+---
+title: "Unzip study folders and save data frames as rds"
+author: "Laura Andrea Barrero Guevara"
+date: '2022-08-12'
+---
+
+####################################################################################################
+Purpose: To unzip the folders with the data frames of each study and save them as rds.
+
+Data:
+The working copy of the studies (unzipped and organized):
+- in the bg/gsk_data folder 
+The working copy of the vacc_con files of some studies (unzipped):
+- in the bg/vacc_con_data folder 
+
+Output:
+For each study folder and the vacc_con folder, the unziped, rds files from the data frames. 
+####################################################################################################
+
+# Set the working directory to the project directory
+```{r setup}
+rm(list = ls())
+knitr::opts_knit$set(root.dir = '~/Nextcloud/Projects/_seas_imm/code_exp_imm_seas')
+```
+
+# Load packages, themes, directories, and functions
+```{r}
+source("00_pck.R")
+library(haven)
+```
+
+# Get the list of zipped and unzipped study files
+```{r}
+# List all study folders
+studies_folders <- sapply(list.files(glue("{dirs$server_bg}")), simplify = FALSE,
+                          function(x) list.files(glue("{dirs$server_bg}/{x}")))
+
+# Identify already unzipped study folders (at the moment, all unzipped)
+unziped_studies <- list()
+for (pat in names(studies_folders)) {
+  for (stu in studies_folders[[pat]]) {
+    if(any(str_detect(list.files(glue("{dirs$server_bg}/{pat}/{stu}")), ".rds")) == TRUE) {
+      unziped_studies[[pat]] <- c(unziped_studies[[pat]], stu) }
+  }}
+
+# Identify zipped study folders
+ziped_studies <- lapply(studies_folders, function(x) {
+  x[!(x %in% unlist(unziped_studies))]
+})
+
+ziped_studies
+```
+
+# Unzip folders with study data frames and save the data frames as RDS
+Note: Run only once. SAS files cannot be reopened after being saved.
+```{r}
+# Unzip study folders
+for (pat in names(ziped_studies)) {
+  for (stu in ziped_studies[[pat]]) {
+    study.mod <- str_replace_all(stu, "-", "_")
+    study.folders <- list.files(glue("{dirs$server_bg}/{pat}/{stu}"))
+    study.zip <- study.folders[str_detect(study.folders,"zip")]
+    unzip(glue("{dirs$server_bg}/{pat}/{stu}/{study.zip}"),
+      exdir = glue("{dirs$server_bg}/{pat}/{stu}"))
+}}
+
+# Open the data frames and convert to RDS format
+for (pat in names(ziped_studies)) {
+  for (stu in ziped_studies[[pat]]) {
+    study.mod <- str_replace_all(stu, "-", "_")
+    study.folder <- list.files(glue("{dirs$server_bg}/{pat}/{stu}"))
+    study.dfolder <- list.files(glue("{dirs$server_bg}/{pat}/{stu}"))
+    study.dfolder <- study.dfolder[!str_detect(study.dfolder,"zip")]
+    study.dfolder <- study.dfolder[str_detect(study.dfolder,"Datasets|CSV|datasets")]
+    study.exp.file <- list.files(
+      glue("{dirs$server_bg}/{pat}/{stu}/{study.dfolder}"))
+    # Process SAS files
+    for (doc in study.exp.file) {
+      if(str_detect(doc, "sas") == T) {
+        doc.new <- str_replace(doc,".sas7bdat",".rds")
+        read_sas(glue("{dirs$server_bg}/{pat}/{stu}/{study.dfolder}/{doc}")) %>%
+          saveRDS(glue("{dirs$server_bg}/{pat}/{stu}/{doc.new}"))
+      } else
+    # Process CSV files
+      if(str_detect(doc, "sas") != T) {
+        doc.new <- str_replace(doc,".csv",".rds")
+        read.csv(glue("{dirs$server_bg}/{pat}/{stu}/{study.dfolder}/{doc}")) %>%
+          saveRDS(glue("{dirs$server_bg}/{pat}/{stu}/{doc.new}"))
+      }
+    }
+  }
+}
+```
+
+# Verify the number of unzipped files matches the number of new RDS files
+```{r}
+allrds <- data.frame(pathogen = character(), study = character(), n_same = logical())
+for (pat in names(studies_folders)) {
+  for (stu in studies_folders[[pat]]) {
+    study.folder <- str_subset(list.files(glue("{dirs$server_bg}/{pat}/{stu}")), "zip", negate = T)
+    study.zip <- list.files(
+      glue("{dirs$server_bg}/{pat}/{stu}/{str_subset(study.folder, 'Datasets|CSV|datasets')}")) %>%
+      str_remove(".sas7bdat|.csv")
+    study.rds <- str_subset(study.folder, "rds") %>%
+      str_remove(".rds")
+    allrds <- rbind(allrds, data.frame(pathogen = pat, study = stu, 
+                                       n_same = all(study.zip == study.rds)))
+}}
+all(allrds$n_same)
+```
+
+# Save the data frames from vacc_con folder as RDS
+Note: Run only once. SAS files cannot be reopened after being saved.
+These data frames with concomitant vaccines where obtained at a later point and, therefore, sent 
+separately for some studies. They are unzipped and moved into the corresponding study folder.
+```{r}
+# Convert vacc_con files to RDS format
+for (vacc_con in list.files(glue("{dirs$server_vacc_con}/gsk_vacc_con datasets/"))) {
+  if(!file.exists(glue("{dirs$server_vacc_con}/{str_replace(vacc_con,'.sas7bdat|.csv','.rds')}"))) {
+    # Process SAS files
+    if(str_detect(vacc_con, "sas") == T) {
+      vacc_con.new <- str_replace(vacc_con,".sas7bdat",".rds")
+      read_sas(glue("{dirs$server_vacc_con}/gsk_vacc_con datasets/{vacc_con}")) %>%
+        saveRDS(glue("{dirs$server_vacc_con}/{vacc_con.new}"))
+    } else
+    # Process CSV files
+    if(str_detect(vacc_con, "csv") == T) {
+      vacc_con.new <- str_replace(vacc_con,".csv",".rds")
+      read.csv(glue("{dirs$server_vacc_con}/gsk_vacc_con datasets/{vacc_con}")) %>%
+        saveRDS(glue("{dirs$server_vacc_con}/{vacc_con.new}"))
+    }
+  }    
+}
+```
+
+####################################################################################################
+# END
+####################################################################################################
+

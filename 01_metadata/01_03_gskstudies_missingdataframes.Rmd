@@ -1,0 +1,100 @@
+---
+title: "Missed data frames per study"
+author: "Laura Andrea Barrero Guevara"
+date: '2022-08-12'
+---
+
+####################################################################################################
+Purpose: To check missing data frames in each study
+
+This data was used to request missing data, exclude studies or fix missing data in some studies. 
+
+Data:
+The working copy of the studies (unzipped and organized):
+- in the bg/gsk_data folder 
+The working copy of the vacc_con files of some studies (unzipped):
+- in the bg/vacc_con_data folder 
+####################################################################################################
+
+# Set the working directory to the project directory
+```{r setup}
+rm(list = ls())
+knitr::opts_knit$set(root.dir = '~/Nextcloud/Projects/_seas_imm/code_exp_imm_seas')
+```
+
+# Load packages, themes, directories, and functions
+```{r}
+source("00_pck.R")
+```
+
+# Load list of all study folders and files in the vacc_con directory
+```{r}
+# List all study folders
+studies_folders <- sapply(list.files(glue("{dirs$server_bg}")), simplify = FALSE,
+                          function(x) list.files(glue("{dirs$server_bg}/{x}")))
+
+# List all vacc_con files from the vacc_con directory
+studies_vacc_con <- list.files(glue("{dirs$server_vacc_con}")) %>%
+  str_remove_all("gsk_|_vacc_con.|csv|sas7bdat|v02.|rds") %>%
+  str_replace("_", "-")
+```
+
+# Check the number of files for each expected data frame
+```{r}
+stu_missings <- list()
+for (pat in names(studies_folders)) {
+  for (stu in studies_folders[[pat]]) {
+    stu.files <- str_subset(list.files(glue("{dirs$server_bg}/{pat}/{stu}")) ,"rds")
+    stu_missings[[stu]] <- list(
+      # Pathogen classification
+      pathogen = pat,
+      # Study ID
+      study = stu,
+      # Number of info files
+      files.info = length(str_subset(stu.files, "info")),
+      # Number of data files (excluding info files)
+      files.data = length(str_subset(stu.files, "info", negate = TRUE)), 
+      # Number of files for each expected data frame 
+      # DF codelist: codes and meanings for the columns and values of the other data frames
+      codelist = length(str_subset(str_subset(stu.files, "info", negate = TRUE), "codelist")),
+      # DF pid: data of the participants, center, country, rct group, and treatment
+      pid = length(str_subset(str_subset(stu.files, "info", negate = TRUE), "pid")),
+      # DF demog: data of the participants, sex, age, date of enrollment 
+      demog = length(str_subset(str_subset(stu.files, "info", negate = TRUE), "demog")),
+      # DF dates: data of the vaccination, serology and other dates
+      dates = length(str_subset(str_subset(stu.files, "info", negate = TRUE), "dates|date")),
+      # DF expo_gn: data of the vaccine, administration, and dates
+      expo_gn = length(str_subset(str_subset(stu.files, "info", negate = TRUE), "expo_gn|treatmnt")),
+      # DF sero_cod: data of the immunogenicity, serology name, method, and results
+      sero_cod = length(str_subset(str_subset(stu.files, "info", negate = TRUE), "sero_cod|labo_res|serology|labo")),
+      # DF medic: data of concomitant medications
+      medic = length(str_subset(str_subset(stu.files, "info", negate = TRUE), "medic")),
+      # DF unsol: data of adverse events 
+      unsol = length(str_subset(str_subset(stu.files, "info", negate = TRUE), "unsol|_ae.rds|reac")),
+      # DF vacc_con: data of concomitant vaccinations
+      vacc_con = length(str_subset(str_subset(stu.files, "info", negate = TRUE), "vacc_con")),
+      # Check if the files have CDI format
+      cdi = length(str_subset(str_subset(stu.files, "info", negate = TRUE), "_adac")))
+  }
+} 
+
+# Add additional vacc_con files
+stu_missings <- bind_rows(stu_missings) %>%
+  mutate(
+    files.data = case_when(study %in% studies_vacc_con ~ files.data + 1, .default = files.data),
+    vacc_con = case_when(study %in% studies_vacc_con ~ vacc_con + 1, .default = vacc_con)) %>%
+  mutate(sum_true = codelist + pid + demog + dates + expo_gn + sero_cod + medic + unsol + vacc_con)
+
+stu_missings
+```
+
+# Save data
+```{r}
+# Save tidy preliminary data of the requested studies 
+saveRDS(stu_missings, file = glue("{dirs$processed}/stu_missingdfs.rds"))
+```
+
+####################################################################################################
+# END
+####################################################################################################
+

@@ -1,0 +1,268 @@
+---
+title: "Metadata of GSK studies (sourced from GSK)"
+author: "Laura Andrea Barrero Guevara"
+date: '2022-08-12'
+---
+
+####################################################################################################
+Purpose: To tidy up and explore the metadata of GSK studies sourced from GSK
+https://clinicalstudydatarequest.com/SearchAllPostings.aspx
+
+Data:
+- `studies_all`: Metadata of all GSK studies.
+
+Output:
+- `stu_meta_gsk.rds`: Data frame containing metadata of GSK studies with information on pathogens,
+vaccines, study phase, study date, linked studies, and links to databases.
+- `stu_meta_gsk_{x}.txt`: Data frame containing metadata of GSK studies per pathogen classification.
+####################################################################################################
+
+# Set wd to project directory
+```{r setup}
+rm(list = ls())
+knitr::opts_knit$set(root.dir = '~/Nextcloud/Projects/_seas_imm/code_exp_imm_seas')
+```
+
+# Load packages, themes, directories, and functions
+```{r}
+source("00_pck.R")
+```
+
+# Load data 
+```{r}
+# Load data frame of requested and received studies
+stu_req <- readRDS(glue("{dirs$processed}/stu_req.rds"))
+
+# Load metadata of the studies (sourced from GSK)
+stu_meta_gsk <- read_excel(glue("{dirs$raw}/studies_all.xls")) %>%
+  # Fix column names
+  set_names("post_id", "stu_spo", "stu_tit", "stu_vacc", "study", "nctid", "stu_pat", "tri_pha",
+            "tri_link", "tri_link.gov", "tri_link.ct", "dat_ana_red", "rep_annotated", "rep_clin",
+            "dat_speci", "prot_amen", "dat_raw", "rep_plan", "add", "date") %>%
+  # Tidy study IDs
+  mutate(study = str_remove(study, pattern = "GSK-"),
+         study = gsub(" .*", "", study),
+         study = case_when(study == "RTX114351" ~ "114351",
+                           study == "V72P12" ~ "205399",
+                           study == "V72P13E1" ~ "205453",
+                           study == "V72P13" ~ "205450",
+                           TRUE ~ as.character(study)),
+         study = str_replace(study, "/", "-")) %>%
+  # Filter only the requested files 
+  filter(study %in% stu_req$study)
+
+# Ensure no study is missing (should be 265 studies)
+stopifnot(length(unique(stu_req$study)) == length(unique(stu_meta_gsk[[1]])))
+length(unique(stu_req$study))
+```
+
+# Create tidy pathogen classification of the study (stu_pat_tidy)
+```{r}
+stu_meta_gsk <- stu_meta_gsk %>%
+  # Create summarized classification column 
+  mutate(
+    stu_pat_tidy = tolower(stu_pat),
+    stu_pat_tidy = case_when(stu_pat_tidy == "measles, mumps, rubella" ~ "measles; mumps; rubella",
+                             .default = stu_pat_tidy)) %>%
+  # Separate the column with grouped pathogens to tidy up names
+  separate_longer_delim(stu_pat_tidy, delim = ";") %>%
+  mutate(stu_pat_tidy = str_remove_all(stu_pat_tidy, " |,")) %>%
+  mutate(stu_pat_tidy = case_when(
+    stu_pat_tidy %in% c("infectionsstreptococcal") ~ "strep",
+    stu_pat_tidy %in% c("acellularpertussis", "wholecellpertussis") ~ "pertussis",
+    stu_pat_tidy %in% c("hepatitisb") ~ "hbv",
+    stu_pat_tidy %in% c("poliomyelitis") ~ "polio",
+    stu_pat_tidy %in% c("haemophilusinfluenzaetypeb") ~ "hib",
+    stu_pat_tidy %in% c("neisseriameningitidis", "infectionsmeningococcal", 
+                        "meningococcaldisease") ~ "men",
+    stu_pat_tidy %in% c("infectionsrotavirus") ~ "rota",
+    stu_pat_tidy %in% c("hepatitisa") ~ "hav",
+    stu_pat_tidy %in% c("varicella") ~ "vzv",
+    .default = stu_pat_tidy)) %>%
+  group_by(across(c(-stu_pat_tidy))) %>%
+  # Mark combined vaccines (MMR, DTP)
+  mutate(
+    mmr = any(stu_pat_tidy == "measles") & any(stu_pat_tidy == "mumps") & any(stu_pat_tidy == "rubella"),
+    dtp = any(stu_pat_tidy == "diphtheria") & any(stu_pat_tidy == "tetanus") & any(stu_pat_tidy == "pertussis")) %>%
+  mutate(stu_pat_tidy = case_when(
+    stu_pat_tidy %in% c("measles", "mumps", "rubella") & mmr == TRUE ~ "mmr",
+    stu_pat_tidy %in% c("diphtheria", "tetanus", "pertussis") & dtp == TRUE ~ "dtp",
+    .default = stu_pat_tidy)) %>%
+  select(-c(mmr, dtp)) %>%
+  distinct() %>%
+  # Arrange alphabetically
+  arrange(study, stu_pat_tidy) %>%
+  # Create the column with grouped pathogens
+  summarise(stu_pat_tidy = str_c(stu_pat_tidy, collapse = "_")) %>%
+  ungroup()
+
+# Summarize the number of studies per pathogen classification
+stu_meta_gsk %>%
+  group_by(stu_pat_tidy) %>%
+  summarise(n())
+```
+
+# Save the tidy metadata
+```{r}
+# Save the complete tidy metadata as an RDS file
+saveRDS(stu_meta_gsk, file = glue("{dirs$processed}/stu_meta_gsk.rds"))
+
+# Save the tidy metadata for each pathogen classification group as text files
+lapply(unique(stu_meta_gsk$stu_pat_tidy), function(x) {
+  write.table(filter(stu_meta_gsk, stu_pat_tidy == x), sep = "\t",
+              file = glue("{dirs$processed}/00_meta_gsk/stu_meta_gsk_{x}.txt"))
+  return(filter(stu_meta_gsk, stu_pat_tidy == x))
+})
+```
+
+# Exploratory plots ================================================================================
+ 
+## Columns with data unique or shared by all the studies
+Columns unique (ids):
+- post_id: Post identifier
+- stu_id: Study identifier (preferred)
+
+Columns shared by all the studies: 
+- stu_spo: GSK sponsor
+- dat_speci: Datasets with specifications
+- dat_raw: Raw data available
+```{r}
+# Check number of unique values per column
+stu_meta_gsk %>%
+  summarise(across(everything(),~length(unique(.x)))) %>%
+  pivot_longer(everything(), values_to = "unique")
+
+# Eliminate columns that do not add significant information
+stu_meta_gsk <- stu_meta_gsk %>%
+  select(-c(post_id, stu_spo, dat_speci, dat_raw))
+```
+
+# Studies pathogens 
+There are 19 pathogen groups
+```{r}
+# Frequency of pathogen groups 
+pat_g <- stu_meta_gsk %>%
+  group_by(stu_pat_tidy) %>%
+  summarise(n = n()) %>%
+  arrange(n)
+
+# Plot frequency
+pl_g <- pat_g %>%
+  ggplot(aes(x = n, y = reorder(stu_pat_tidy,n), fill = reorder(stu_pat_tidy,n)))+
+    geom_bar(stat = "identity") + 
+    scale_y_discrete("") + 
+  scale_x_continuous("Number of studies", expand = c(0,0), limits = c(0,50)) + 
+    scale_fill_viridis_d(option = "magma", direction = -1) + 
+    theme(legend.position = "none") +
+    ggtitle("Total studies per pathogen")
+print(pl_g)
+```
+
+There are 14 pathogens (regardless of groups)
+```{r}
+# Frequency of pathogen individually 
+pat_i <- pat_g %>%
+  mutate(stu_pat_tidy = str_replace(stu_pat_tidy, "dtp", "d_t_p"),
+         stu_pat_tidy = str_replace(stu_pat_tidy, "mmr", "me_mu_r")) %>%
+  separate_longer_delim(stu_pat_tidy, delim = "_") %>%
+  group_by(stu_pat_tidy) %>%
+  summarise(n = sum(n)) %>%
+  arrange(-n)
+
+# Plot frequency
+pl_i <- pat_i %>%
+  mutate(stu_pat_tidy = factor(
+    stu_pat_tidy,
+    levels = c("hbv","t","p", "d", "hib", "polio","strep", "men", "r", "mu", "me", "rota", 
+               "vzv", "hav"),
+    labels = c("Hepatitis B virus", "Clostridium tetani", "Bordetella pertussis", "Corynebacterium diphtheriae", 
+               "Haemophilus influenza type B", "Poliovirus", "Streptococcus pneumoniae", "Neisseria meningitidis", 
+               "Rubella virus", "Mumps virus", "Measles virus", "Rotavirus", 
+               "Varicella Zoster Virus", "Hepatitis A virus"))) %>%
+  ggplot(aes(x = n, y = reorder(stu_pat_tidy,n), fill = reorder(stu_pat_tidy,n)))+
+  geom_bar(stat = "identity") + 
+  scale_y_discrete(" ") + 
+  scale_x_continuous("Number of studies", expand = c(0,0), limits = c(0,100)) + 
+  scale_fill_viridis_d(option = "magma", direction = -1) + 
+  theme(legend.position = "none") +
+  ggtitle("Total studies per pathogen")
+print(pl_i)
+```
+
+# Studies vaccines
+```{r}
+vac_g <- stu_meta_gsk %>%
+  group_by(stu_pat_tidy) %>%
+  mutate(stu_pat_n = n()) %>%
+  group_by(stu_vacc, stu_pat_tidy, stu_pat_n) %>%
+  summarise(n = n()) %>%
+  arrange(stu_pat_tidy)
+  
+vac_g %>%
+  ungroup() %>%
+  group_by(stu_pat_tidy) %>%
+  summarise(stu_vacc_n = n()) %>%
+  arrange(-stu_vacc_n)
+
+pl_v <- vac_g %>%
+  ggplot(aes(y = stu_vacc, x = n, fill = reorder(stu_pat_tidy, -stu_pat_n))) + 
+  geom_bar(stat = "identity") +
+  facet_grid(reorder(stu_pat_tidy, -stu_pat_n)~., scales = "free_y", space = "free_y") +
+  scale_fill_viridis_d(option = "magma") + 
+  theme(strip.text.y = element_text(angle = 0, hjust = 0), 
+        legend.position = "none")
+print(pl_v)
+```
+
+# Other preliminary information from the studies 
+```{r}
+pl_o <- stu_meta_gsk %>%
+  pivot_longer(cols = c(tri_pha, dat_ana_red, rep_annotated, 
+                        rep_clin, prot_amen, rep_plan)) %>%
+  mutate(name = case_when(name == "tri_pha" ~ "Phase",
+                          name == "dat_ana_red" ~ "Analysis-ready dataset",
+                          name == "rep_annotated" ~ "Annotated case report form",
+                          name == "rep_clin" ~ "Clinical study report",
+                          name == "prot_amen" ~ "Protocol with any amendments",
+                          name == "rep_plan" ~ "Reporting and analysis plan")) %>%
+  ggplot(aes(y = value)) +
+  geom_bar() + 
+  scale_y_discrete("") + 
+  facet_wrap(name~., scales = "free_y")
+print(pl_o)
+```
+
+## Date of the RCTs (it is not the data of the rct, but date of introduction to database)
+```{r}
+stu_meta_gsk %>%
+  ggplot(aes(x = date)) +
+  geom_bar()
+```
+
+## Clinical trials information
+There are 31 studies that share the clinical trial id and link.   
+```{r}
+stu_meta_gsk %>%
+  group_by(tri_link.gov, nctid) %>%
+  summarise(n = n()) %>%
+  filter(n > 1) %>%
+  arrange(-n) %>%
+  ungroup() %>%
+  mutate(sum(n) - 76)
+```
+
+# Plot
+```{r}
+wrap_elements((pl_g / pl_i) | pl_v) + wrap_elements(pl_o) + plot_layout(heights = c(1,0.5), ncol = 1)
+```
+
+####################################################################################################
+# END
+####################################################################################################
+
+
+
+
+
+
+

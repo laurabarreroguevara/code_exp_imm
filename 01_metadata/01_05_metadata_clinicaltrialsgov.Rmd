@@ -1,0 +1,197 @@
+---
+title: "Metadata of GSK studies (sourced from clinicaltrialsgov)"
+author: "Laura Andrea Barrero Guevara"
+date: '2022-08-12'
+---
+
+####################################################################################################
+Purpose:
+- Extract metadata from ClinicalTrials.gov into a SQLite database (only available for 189 out 
+of 265 studies).
+- (Experimental) Summarize information using OpenAI GPT.
+
+Output:
+- `stu_meta_ctgov.rds`: Data frame containing metadata of GSK studies with protocol information.
+- `stu_meta_ctgov_query_n.rds`: Data frame containing query length for each NCT link.
+- `stu_meta_ctgov_query_success.rds`: Data frame containing query success status for each NCT link.
+- `stu_meta_ctgov_sqlite.rds`: SQLite database with successful queries for each NCT link.
+- `stu_meta_ctgov_criteriaeligibility.csv`: Data frame containing eligibility criteria per study.
+- `stu_meta_ctgov_criteriaincluexclu.csv`: Data frame with two columns, separating eligibility 
+criteria into inclusion and exclusion criteria per study.
+####################################################################################################
+
+# Set wd to project directory
+```{r setup}
+rm(list = ls())
+knitr::opts_knit$set(root.dir = '~/Nextcloud/Projects/_seas_imm/code_exp_imm_seas')
+```
+
+# Load packages, themes, directories, and functions
+```{r}
+source("00_pck.R")
+library("ctrdata")
+library("RSQLite")
+library("jsonlite")
+library("httr")
+```
+
+# Load metadata sourced from GSK to obtain the links to databases
+```{r}
+stu_meta_gsk <- readRDS(glue("{dirs$processed}/stu_meta_gsk.rds"))
+```
+
+# Extract metadata from ClinicalTrials.gov using the "ctrdata" package
+This section uses the NCT id, or if not available the GSK id, from the clinical trials to access the 
+database of clinicaltrials.gov.
+Only when the query is accessing the unique corresponding study, we accessed the data (189 out of 265 
+studies).
+We create a SQLite database with a collection holding the data of all accessed studies. This data 
+includes information of the participants, rct, results, etc. 
+We only used this data to check for the inclusion and exclusion criteria, but this was later doubled 
+checked in the protocols. 
+```{r}
+# Tidy up the NCT ID
+stu_nctid <- stu_meta_gsk %>%
+  select(study, nctid) %>%
+  mutate(nctid = str_replace(nctid, " .*", ""))
+
+# Filter to only include studies with non-missing NCT IDs (189 studies)
+filter(stu_nctid, !is.na(nctid)) # 189 studies
+
+# Check the URLs for each study using NCT ID or study ID
+ctgov_query_n <- pomp::bake(glue("{dirs$processed}/00_meta_ctgov/stu_meta_ctgov_query_n.rds"), {
+  stu_query_n <- list()
+  for(i in 1:length(stu_nctid$study)) {
+    q_study <- ctrGetQueryUrl(url = glue("id={stu_nctid$study[i]}"), register = "CTGOV2")
+    q_nctid <- ctrGetQueryUrl(url = glue("id={stu_nctid$nctid[i]}"), register = "CTGOV2")
+    stu_query_n[[i]] <- list(
+      "study" = stu_nctid$study[i],
+      "q_study" = ctrLoadQueryIntoDb(queryterm = q_study, only.count = TRUE)$n,
+      "q_nctid" = ctrLoadQueryIntoDb(queryterm = q_nctid, only.count = TRUE)$n)
+  }
+  return(stu_query_n)
+})
+
+# Check if more than one ID can be used for querying (we only access records when only 1 URL is 
+# available)
+bind_rows(ctgov_query_n) %>%
+  left_join(stu_nctid, by = join_by(study)) %>%
+  filter(q_nctid != 1) %>%
+  filter(q_study != 1)
+
+# Connect to the SQLite database and choose a collection (table)
+db_ctgov <- nodbi::src_sqlite(dbname = glue("{dirs$processed}/00_meta_ctgov/stu_meta_ctgov_sqlite.sql"), 
+                              collection = "ctgov") 
+
+# Create the database if it does not exist yet
+if (length(dbListTables(db_ctgov$con)) == 0) {
+
+db_query_l <- list()
+  for(i in 1:length(stu_nctid$study)) {
+    # Obtain URL for the study from NCT ID
+    q_study <- ctrGetQueryUrl(url = glue("id={stu_nctid$nctid[i]}"), register = "CTGOV2")
+    # If NCT ID is not available (more than 1 ID found in querying), try using study ID
+    if(ctrLoadQueryIntoDb(queryterm = q_study, only.count = TRUE)$n != 1) {
+      q_study <- ctrGetQueryUrl(url = glue("id={stu_nctid$study[i]}"), register = "CTGOV2")
+    }
+    # Only if one URL is available, retrieve records and download into database
+    if(ctrLoadQueryIntoDb(queryterm = q_study, only.count = TRUE)$n == 1) {
+      db_query <- ctrLoadQueryIntoDb(queryterm = q_study, con = db_ctgov)
+      db_query_l[[i]] <- list("study" = stu_nctid$study[i],
+                              "n" = db_query$n,
+                              "success" = db_query$success,
+                              "failed" = db_query$failed,
+                              "queryterm" = db_query$queryterm)
+    } }
+}
+
+# Load and save query success information
+db_query_success <- pomp::bake(glue("{dirs$processed}/00_meta_ctgov/stu_meta_ctgov_query_success.rds"), {
+  bind_rows(db_query_l)
+})
+
+# Obtain metadata of the GSK studies (sourced from clinicaltrialsgov) and save as an RDS file
+stu_meta_ctgov <- pomp::bake(glue("{dirs$processed}/stu_meta_ctgov.rds"), {
+  dbGetFieldsIntoDf("protocolSection", con = db_ctgov) %>%
+  rename(success = "_id") %>%
+  left_join(db_query_success) %>%
+  select(study, success, everything()) 
+})
+
+# Close the database connection
+dbDisconnect(db_ctgov$con)
+# Optionally, delete the SQLite database file
+# unlink(db_ctgov$dbname)
+```
+
+# Extract information using OpenAI GPT (experimental)
+```{r}
+# Function to ask GPT to summarize metadata from ClinicalTrials.gov
+fun_askgpt <- function(fun_data_df = stu_meta_ctgov, fun_prompt = "ask", api_key = api_key) {
+  # Arguments:
+  # - fun_data_df: (data frame) Text on which to base the response
+  # - fun_prompt: (string) Question/Prompt to send to GPT
+  # - api_key: (string) API key for OpenAI GPT
+  # Output:
+  # - result: (string) GPT answer
+  
+  # Send a request to the OpenAI GPT API
+  response <- POST(
+    url = "https://api.openai.com/v1/chat/completions", # API endpoint
+    add_headers(Authorization = paste("Bearer", api_key)), # API key for authorization
+    encode = "json", # Request body encoding
+    # Request 
+    body = list(
+      model = "gpt-4o-mini", # Model to use (see https://platform.openai.com/docs/models)
+      temperature = 0, # Control the creativity of the response
+      messages = list(
+        list(role = "user", content = fun_prompt),  # User's prompt
+        list(role = "assistant", content = paste0("vectorstore:", toJSON(fun_data_df))) # Data on which to base the response
+        )
+      ))
+  
+  # Parse the response
+  result <- content(response, as = "parsed")
+  # Return the answer as a string
+  return(result$choices[[1]]$message$content)
+}
+
+# API key for OpenAI GPT
+api_key <- "sk-proj-9wN8Jd69zHiPkQe1K8E8T3BlbkFJJN3KljiZY76fLQ6t1E9a"
+
+# Extract only inclusion and exclusion criteria
+ctgov_inclusionexclusion <- stu_meta_ctgov %>%
+  select(study, success, protocolSection.eligibilityModule.eligibilityCriteria) %>%
+  rename(inclusion = protocolSection.eligibilityModule.eligibilityCriteria) %>%
+  mutate(
+    inclusion = str_remove_all(tolower(inclusion), "\n|\\*"),
+    exclusion = str_remove_all(inclusion,".*exclusion|criteria: "),
+    inclusion = str_remove_all(inclusion,"exclusion.*|inclusion criteria: "))
+
+# Write CSV file with eligibility criteria
+write.csv(select(stu_meta_ctgov, study, success, protocolSection.eligibilityModule.eligibilityCriteria), 
+          glue("{dirs$processed}/00_meta_ctgov/stu_meta_ctgov_criteriaeligibility.csv"))
+# Write CSV file with inclusion and exclusion criteria
+write.csv(ctgov_inclusionexclusion, 
+          glue("{dirs$processed}/00_meta_ctgov/stu_meta_ctgov_criteriaincluexclu.csv"))
+
+# Use GPT to analyze the inclusion and exclusion criteria
+answers <- list()
+for (i in 1:2) {
+  answers[[i]] <- lapply(c(
+    "Does the inclusion criteria mentiones previous vaccination or doses or biologicals? Answer with a quote",
+    "Does the inclusion criteria requires previous vaccination or doses or biologicals? Answer with a quote"), 
+    function(x) {  
+      c(fun_askgpt(fun_data_df = ctgov_inclusionexclusion[i, "inclusion"], 
+                        fun_prompt = x, api_key))
+    })
+}
+
+# Flatten the list of answers into a single vector
+unlist(answers, recursive = TRUE)
+```
+
+####################################################################################################
+# END
+####################################################################################################
+

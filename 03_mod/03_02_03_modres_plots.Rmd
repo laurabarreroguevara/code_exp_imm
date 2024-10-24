@@ -1,0 +1,529 @@
+---
+title: "BRMS plots"
+author: "Laura Andrea Barrrero Guevara"
+date: "2023-02-23"
+output: html_document
+---
+
+################################################################################
+Purpose of script: To check the model results and plot it 
+################################################################################
+
+```{r}
+rm(list = ls())
+source("../00_pck.R")
+source("fun_mod_pl.R")
+library(colorspace)
+theme_set(theme_classic() + theme(strip.background = element_blank()))
+
+dirs$outputs <- "../outputs"
+```
+
+# Raw data 
+```{r}
+# Define pathogen
+selpat_l <- c("rota", "vzv", "measl", "mumps", "rubel", "hav", "men", "strep", "polio", "hib",
+              "ipv", "opv", "dipht", "dtpa", "dtpw", "tetan", "pertu", "hbv",
+              "multi_ipv", "multi_pertu", "multi_men", "multi_polio", "multi_opv",
+              "multi_dtp", "multi_dtpa", "multi_dtpw", "multi_hib-men", "multi_mmr", "multi_mmr-vzv")
+
+# Define vaccination
+vac_l <-  case_when(
+  selpat_l %in% c("vzv", "measl", "mumps", "rubel", "multi_mmr", "hav", "multi_mmr-vzv") ~ "v1",
+  .default = "vl")
+names(vac_l) <- selpat_l
+
+# Read in the data 
+dat_l <- sapply(selpat_l, function(x) {
+  readRDS(glue("{dirs$outputs}/perpathogen/{x}/data_brms_{x}_{vac_l[[x]]}_s08.rds"))}, simplify = FALSE)
+# Read in the convergence
+df_rhats_cs <- readRDS(glue("{dirs$outputs}/modres_rhats/df_rhats_cs.rds"))
+# Read in the waic 
+df_waic <- sapply(selpat_l, function(x) {
+  readRDS(glue("{dirs$outputs}/modres_waic/{x}_tbl_waic_models.rds"))}, simplify = FALSE)
+# Select min waic
+df_minwaic <- bind_rows(df_waic, .id = "pathogen") %>%
+  group_by(pathogen) %>%
+  filter(waic == min(waic))
+```
+
+# Function to check gaps 
+```{r}
+fun_checkgaps <- function(x) {
+  # Sort the vector
+  sorted_x <- sort(x)
+  # Compute the differences between consecutive elements
+  gaps <- diff(sorted_x)
+  # Check the gap between the last element and the first element, considering the circularity (52 back to 1)
+  circular_gap <- (52 - max(sorted_x)) + (min(sorted_x) - 1)
+  # Check if any gap is larger than 25, including the circular gap
+  any(gaps > 25) || circular_gap > 25
+}
+```
+
+# Function to read conditional effects 
+```{r}
+fun_condeffects <- function(mod = mod, clu_name = NA, multi = FALSE, pat = "rota") {
+  
+  # Take out gauss if necessary
+  clu_name <- str_remove(clu_name, "_gauss")
+  
+  # Prepare data 
+  dat <- mutate(dat_l[[pat]], pi_vac_week_v1 = round(pi_vac_week_v1, digits = 11)) %>%
+    distinct(vac_week_v1, pi_vac_week_v1)
+  pref_clu_name <- if(!is.na(clu_name)) paste0(":", clu_name) else ""
+  # Create group vector 
+  var_vector <- c()
+  
+  # Extract conditional effects 
+  if(multi) {
+    ce_effects <- lapply(
+      conditional_effects(mod, resolution = 52, effects = glue("pi_vac_week_v1{pref_clu_name}")),
+      as.data.frame) %>%
+      bind_rows(.id = "imm_name") %>%
+      mutate(imm_name = str_extract(imm_name, "(?<=\\.immvals1anti).+?(?=_pi)"))
+    # Attach imm_name to group vector 
+    var_vector <- c(var_vector, "imm_name")
+  } else {
+    ce_effects <- conditional_effects(mod, resolution = 52, effects = glue("pi_vac_week_v1{pref_clu_name}"))[[1]]
+  }
+  
+  # Prepare clusters if necessary
+  if(!is.na(clu_name)) {
+    # Create cluster variable 
+    ce_effects <- ce_effects %>%
+      rename(clu = all_of(clu_name)) %>%
+      mutate(clu = as.character(clu))
+    # Create df of total values per week
+    dat_tot <- dat_l[[pat]] %>%
+      rename(clu = all_of(clu_name)) %>%
+      mutate(clu = as.character(clu)) %>%
+      mutate(pi_vac_week_v1 = round(pi_vac_week_v1, digits = 11)) %>%
+      group_by(pi_vac_week_v1, vac_week_v1, clu) %>%
+      summarise(tot = n(), .groups = "drop") %>%
+      group_by(clu) %>%
+      mutate(clu_checkgaps = fun_checkgaps(vac_week_v1)) %>%
+      ungroup()
+    
+    # Attach cluster to group vector 
+    var_vector <- c(var_vector, "clu")
+  } else {
+    # Create df of total values per week
+    dat_tot <- dat_l[[pat]] %>%
+      mutate(pi_vac_week_v1 = round(pi_vac_week_v1, digits = 11)) %>%
+      group_by(pi_vac_week_v1, vac_week_v1) %>%
+      summarise(tot = n(), .groups = "drop")
+  }
+  
+  # Obtain estimates 
+  ce_effects <- ce_effects %>%
+    mutate(pi_vac_week_v1 = round(pi_vac_week_v1, digits = 11)) %>%
+    select(pi_vac_week_v1, estimate__, lower__, upper__, all_of(var_vector)) %>%
+    left_join(dat, by = join_by(pi_vac_week_v1)) %>%
+    left_join(dat_tot) %>%
+    mutate(estimate_tot = case_when(is.na(tot) ~ NA, .default = estimate__),
+           lower_tot = case_when(is.na(tot) ~ NA, .default = lower__),
+           upper_tot = case_when(is.na(tot) ~ NA, .default = upper__))
+  
+  return(ce_effects)
+}
+```
+
+# Read models and extract conditional effects ======================================================
+```{r}
+# Select only models cs or csi that converged 
+# df_converged <- filter(df_rhats_cs, Rhat == FALSE, str_detect(mod, "_cs\\.|_csi_")) %>%
+#   mutate(reg = case_when(str_detect(mod, "reg") ~ sub(".*(reg.*)\\.rds.*", "\\1", mod))) %>%
+#   filter(pathogen != "multi_pertu")
+
+# Select only models base, cs or csi that converged 
+df_converged <- filter(df_rhats_cs, Rhat == FALSE, str_detect(mod, "_cs\\.|_csi_|base")) %>%
+  mutate(reg = case_when(str_detect(mod, "reg") ~ sub(".*(reg.*)\\.rds.*", "\\1", mod),
+                         str_detect(mod, "base") ~ sub(".*(base.*)\\.rds.*", "\\1", mod))) %>%
+  filter(pathogen != "multi_pertu")
+
+# Which are cosines
+csmod <- which(!(df_converged$reg %in% c("base","base_gauss")) | (is.na(df_converged$reg)))
+
+# Obtain the conditional effects for each photo period 
+ce_dat_l <- sapply(csmod, function(x) {
+  pat <- df_converged[x, 'pathogen']
+  name_reg <- if(is.na(df_converged[x, "reg"])) "cs" else paste0("csi_", df_converged[x, "reg"])
+  # Obtain conditional effects   
+  pomp::bake(file = glue(
+    "{dirs$outputs}/modres_condeffects/ce_dat_{pat}_{name_reg}.rds"), {
+    # Read model
+    mod <- readRDS(glue("{dirs$outputs}/perpathogen/{pat}/bm{vac_l[[pat]]}_s08_{pat}_{name_reg}.rds"))
+    # Obtain conditional effects
+    ce_dat <- fun_condeffects(mod = mod, clu_name = df_converged[x, "reg"], 
+                              multi = str_detect(pat, "multi"), pat = pat)
+    return(ce_dat)
+  })
+}, simplify = FALSE)
+names(ce_dat_l) <- df_converged$mod[csmod]
+```
+
+# Plot one
+```{r}
+mod <- "bmvl_s08_rota_csi_reg_6.rds"
+
+# Plot conditional effects 
+ce_dat_l[[mod]] %>%
+  ggplot(aes(x = vac_week_v1, y = log(estimate__))) + 
+    geom_ribbon(aes(ymin = log(lower__), ymax = log(upper__)), 
+                alpha = 0.2, color = "white") + 
+    geom_line() + 
+    geom_point(data = filter(ce_dat_l[[mod]], !is.na(tot)),
+               aes(y = -Inf), alpha = 0.4, shape = "|", size = 6) +
+    scale_y_continuous("Conditional effect\non ab titers (log)") + 
+    scale_x_continuous("Week", breaks = c(1, 18, 35, 52), limits = c(1,52)) + 
+    facet_wrap(.~clu, scales = "free", nrow = 1)
+```
+
+# Read models and extracting coefficients ==========================================================
+```{r}
+# Obtain the coefficients for each model
+coef_l <- sapply(1:length(df_converged[[1]]), function(x) {
+  pat <- df_converged[x, 'pathogen']
+  #name_reg <- if(is.na(df_converged[x, "reg"])) "cs" else paste0("csi_", df_converged[x, "reg"])
+  name_reg <- case_when(
+    is.na(df_converged[x, "reg"]) ~ "cs",
+    str_detect(df_converged[x, "reg"], "reg") ~ paste0("csi_", df_converged[x, "reg"]),
+    str_detect(df_converged[x, "reg"], "base") ~ df_converged[x, "reg"])
+  # Obtain conditional effects   
+  pomp::bake(file = glue("{dirs$outputs}/modres_coef/coef_{pat}_{name_reg}.rds"), {
+    # Read model
+    mod <- readRDS(glue("{dirs$outputs}/perpathogen/{pat}/bm{vac_l[[pat]]}_s08_{pat}_{name_reg}.rds"))
+    # Obtain conditional effects
+    sum_coef <- summary(mod)
+    return(sum_coef)
+  })
+}, simplify = FALSE)
+names(coef_l) <- df_converged$mod
+```
+
+# Extract coefficients for the cosinor =============================================================  
+```{r}
+# Extract coefficients for the cosinor and obtain amplitude and phase
+coef_cosine_l <- lapply(coef_l, function(x) rownames_to_column(x$fixed, var = "parameter")) %>%
+  bind_rows(.id = "mod") %>%
+  # Coefficients of the cosinor only 
+  filter(str_detect(parameter, "cos|sin")) %>%
+  mutate(param = case_when(str_detect(parameter, "cos") ~ "p_cos",
+                           str_detect(parameter, "sin") ~ "p_sin")) %>%
+  # Attach pathogen and reg 
+  left_join(select(df_converged, -Rhat), by = join_by(mod)) %>%
+  # Extract the imm_name and clu from the parameter name
+  mutate(
+    imm_name = str_extract(parameter, "(?<=immvals1anti)[^_]+"),
+    clu = str_remove_all(parameter, "reg|_2|_3|_4|_6|cospi_vac_week_v1|sinpi_vac_week_v1|:|immvals1anti|_gauss"),
+    clu = case_when(!is.na(imm_name) ~ str_remove_all(clu, imm_name), .default = clu),
+    clu = sub("^_", "", clu),
+    clu = case_when(
+      str_detect(reg, "reg_2") & clu == "" ~ "1_North",
+      str_detect(reg, "reg_3|reg_4|reg_6") & clu == "" ~ "1_Temperate",
+      !is.na(reg) & clu != "" ~ clu)) %>%
+  select(pathogen, mod, param, reg, clu, imm_name, Estimate) %>%
+  pivot_wider(names_from = param, values_from = Estimate) %>%
+  # Estimate amplitude and phase
+  mutate(
+    amp = sqrt((p_cos^2) + (p_sin^2)),
+    # Periodic phi in radians
+    periodic_phi = case_when(
+      p_cos > 0 ~ atan((-1*p_sin)/(p_cos)),
+      p_cos < 0 ~ atan((-1*p_sin)/(p_cos)) - pi),
+    # Periodic phi in weeks
+    periodic_phi_week = 52*(periodic_phi*-1)/(2*pi)) %>%
+  # Estimate phi empirically 
+  rowwise() %>%
+  mutate(phi_emp = which(p_cos*cos(2*pi*(1:52)/52) + p_sin*sin(2*pi*(1:52)/52) == 
+                           max(p_cos*cos(2*pi*(1:52)/52) + p_sin*sin(2*pi*(1:52)/52)))) %>%
+  ungroup() %>%
+  # Estimate phi 
+  mutate(
+    phi = case_when(
+      periodic_phi_week < 0 ~ periodic_phi_week + 52,
+      periodic_phi_week > 0 ~ periodic_phi_week,
+      periodic_phi_week == 0 ~ 0),
+    phi = case_when(phi > 0 & phi < 1 ~ 52, .default = phi)) %>%
+  # Create column for waic over baseline model or not
+  mutate(minwaic = !(pathogen %in% df_minwaic[str_detect(df_minwaic$mod, "base"),]$pathogen))
+
+saveRDS(coef_cosine_l, glue("{dirs$outputs}/modres_coef_cosine.rds"))
+```
+
+# Plot conditional effects 
+```{r}
+clu_name <- "reg_6"
+
+dat_plot <- ce_dat_l[str_subset(names(ce_dat_l), clu_name)] %>%
+  bind_rows(.id = "mod") %>%
+  left_join(df_converged) %>%
+  mutate(pathogen_imm = glue("{pathogen}_{imm_name}")) %>%
+  group_by(pathogen, pathogen_imm, clu) %>%
+  filter(clu_checkgaps == FALSE) %>%
+  mutate(clu = str_remove_all(clu, " ")) %>%
+  left_join(filter(coef_cosine_l, str_detect(reg, clu_name))) %>%
+  ungroup() %>%
+  mutate(phase_group = case_when(
+    phi >= 6 & phi < 20 ~ "2spring",
+    phi >= 20 & phi < 33 ~ "3summer",
+    phi >= 33 & phi < 46 ~ "4autumn",
+    phi < 6 | phi >= 46 ~ "1winter"))
+
+#for(i in unique(dat_plot$clu)) {
+pl <- dat_plot %>%
+  filter(pathogen %in% c("multi_dtpa", "hav", "hbv", "hib", "ipv", "multi_mmr", "men",
+                         "rota", "vzv")) %>%
+  filter(clu == "1_Temperate") %>%
+   ggplot(aes(x = vac_week_v1, y = log(estimate__), color = phase_group, fill = phase_group)) + 
+    geom_ribbon(aes(ymin = log(lower__), ymax = log(upper__)), alpha = 0.2, color = "white") + 
+    geom_line() + 
+    scale_y_continuous("Conditional effect\non ab titers (log)") + 
+    scale_x_continuous("Week", breaks = c(1, 18, 35, 52), limits = c(1,52)) + 
+    facet_wrap(reorder(pathogen_imm, as.numeric(factor(phase_group)))~., scales = "free", nrow = 3, dir = "v") + 
+  ggtitle("1_Temperate")
+print(pl)
+#}
+```
+
+# Extract spaghetti conditional effects ============================================================
+```{r}
+# Select only models cs or csi that converged 
+df_converged_sel <- filter(df_rhats_cs, Rhat == FALSE, str_detect(mod, "_cs\\.|_csi_")) %>%
+  mutate(reg = case_when(str_detect(mod, "reg") ~ sub(".*(reg.*)\\.rds.*", "\\1", mod))) %>%
+  filter(pathogen != "multi_pertu") %>%
+  filter(str_detect(mod, clu_name))
+
+# Obtain the conditional effects with spaguetti 
+spa_dat_l <- sapply(1:length(df_converged_sel[[1]]), function(x) {
+  pat <- df_converged_sel[x, 'pathogen']
+  name_reg <- if(is.na(df_converged_sel[x, "reg"])) "cs" else paste0("csi_", df_converged_sel[x, "reg"])
+  pomp::bake(file = glue(
+    "{dirs$outputs}/modres_condeffects/ce_dat_spa_{pat}_{name_reg}.rds"), {
+    # Read model
+    pref_clu_name <- if(!is.na(clu_name)) paste0(":", clu_name) else ""
+    mod <- readRDS(glue("{dirs$outputs}/perpathogen/{pat}/bm{vac_l[[pat]]}_s08_{pat}_{name_reg}.rds"))
+    # Obtain spaghetti conditional effects
+    ce_dat_spa <- conditional_effects(mod, resolution = 52, effects = glue("pi_vac_week_v1{pref_clu_name}"), 
+                                      spaghetti = TRUE, ndraws = 100, re_formula = NULL)
+    spa_dat <- sapply(ce_dat_spa, function(subx) {
+        attr(subx, "spaghetti") %>%
+          group_by(all_of(clu_name), sample__) %>%
+          mutate(estimate_norm = (estimate__/mean(estimate__, na.rm = TRUE)))
+      }, simplify = FALSE) %>%
+      bind_rows(.id = "imm_name")
+    
+    return(spa_dat)
+  }) 
+}, simplify = FALSE)
+names(spa_dat_l) <- df_converged_sel$mod
+```
+
+# Tidy names for plots 
+```{r}
+# pat_tidy_names <- c("Rotavirus", "Varicella zoster virus", "Measles virus", "Mumps virus", 
+#               "Rubella virus", "C. diphtheriae", "C. tetani", "B. pertussis", 
+#               "S. pneumoniae", "H. influenzae Type B", 
+#               "N. meningitidis \n (serotypes c and a)", "Hepatitis B virus",
+#               "Polio virus \n (serotypes 1, 2 and 3)")
+# names(pat_tidy_names) <- c("rota", "vzv", "measles", "mumps", "rubella", "dipht", "tetan", 
+#                      "pertupt", "pn", "hib", "multi_men", "hbv","multi_ipv")
+
+pat_tidy_names <- c("Rotavirus", "Varicella zoster virus", "Measles virus", "Mumps virus", 
+              "Rubella virus", "C. diphtheriae", "C. tetani", "B. pertussis", 
+              "H. influenzae Type B", 
+              "N. meningitidis \n (serotype c)", "Hepatitis B virus", "Hepatitis A virus",
+              "Polio virus \n (serotype 1)")
+
+names(pat_tidy_names) <- c("rota", "vzv", "measl", "mumps", "rubel", "dipht", "tetan", 
+                     "pertupt", "hib", "men", "hbv", "hav", "ipv")
+```
+
+## Data for the plot 
+```{r}
+dat_pl1 <- bind_rows(spa_dat_l, .id = "mod") %>%
+  ungroup() %>%
+  rename(clu = all_of(clu_name)) %>%
+  mutate(clu = str_remove_all(clu, " ")) %>%
+  left_join(df_converged_sel, by = join_by(mod)) %>%
+  mutate(imm_name = str_extract(imm_name, "(?<=immvals1anti).+?(?=\\.)"),
+         pi_vac_week_v1 = round(pi_vac_week_v1, digits = 11)) %>%
+  select(pathogen, imm_name, pi_vac_week_v1, clu, estimate__, sample__, estimate_norm) %>%
+  left_join(rename(dat_plot, estimate_mean = estimate__), by = join_by(pathogen, imm_name, pi_vac_week_v1, clu)) %>%
+  group_by(pathogen, imm_name, clu) %>%
+  mutate(estimate_mean_norm = estimate_mean/mean(estimate_mean, na.rm = TRUE)) %>%
+  ungroup() %>%
+  #filter(minwaic) %>%
+  filter(pathogen %in% c("multi_dtpa", "hav", "hbv", "hib", "ipv", "multi_mmr", "men",
+                         "rota", "vzv")) %>%
+  mutate(imm_name = replace_na(imm_name, ""), 
+         sam_imm = paste0(sample__, "_", pathogen, imm_name), 
+         pat_tidy = case_when(pathogen %in% c("multi_mmr", "multi_dtpa") ~ imm_name,
+                              .default = pathogen),
+         pat_tidy = factor(pat_tidy,  levels = names(pat_tidy_names), labels = pat_tidy_names),
+         imm_tidy = case_when(pathogen %in% c("multi_men", "multi_ipv") ~ imm_name,
+                              .default = NA)) %>%
+  filter(!is.na(mod))
+```
+
+```{r}
+library(viridis)
+dat_pl1 %>%
+  filter(clu == unique(dat_pl1$clu)[1]) %>%
+  group_by(sam_imm) %>%
+  mutate(date_min = vac_week_v1[estimate_norm == min(estimate_norm)],
+         date_max = vac_week_v1[estimate_norm == max(estimate_norm)]) %>%
+  group_by(pat_tidy) %>%
+  mutate(date_min_mean = mean(date_min)) %>% 
+  ggplot(aes(x = vac_week_v1, y = estimate_norm - 1, group = sam_imm, color = date_max)) + 
+    #geom_line(alpha = 0.2) + 
+    geom_point(shape = ".", size = 4, alpha = 0.2) + 
+    geom_line(aes(y = estimate_mean_norm - 1, group = imm_tidy), size = 1) +
+    scale_x_continuous("Week of vaccination", breaks = c(1,18,35,52), limits = c(1,52)) + 
+    scale_y_continuous("Conditional effect in temperate regions") + 
+    scale_color_gradientn("Peak timing",
+                          breaks = c(1,18,35,52), limits = c(1,52),
+                          colours = c(viridis(100, begin = 0, option = "C"), 
+                                    rev(viridis(100, begin = 0, option = "C"))),
+                          guide = guide_colorbar(title.position = "top",
+                                                 title.hjust = 0.5,
+                                                 barheight = 0.8)) + 
+  geom_point(aes(y = -Inf), shape = "|", size = 3) +
+    facet_wrap(reorder(pat_tidy, as.numeric(factor(phase_group)))~., scales = "free", nrow = 3) + 
+  theme(legend.position = "top")
+```
+
+```{r}
+dat_pl1 %>%
+  filter(pathogen == "rota") %>%
+  group_by(sam_imm) %>%
+  mutate(date_min = vac_week_v1[estimate_norm == min(estimate_norm)],
+         date_max = vac_week_v1[estimate_norm == max(estimate_norm)]) %>%
+  group_by(pat_tidy) %>%
+  mutate(date_min_mean = mean(date_min)) %>% 
+  mutate(clu = factor(clu, levels = c("3_Tropical", "2_Subtropical", "1_Temperate", 
+                                      "4_Tropicalsouth", "5_Subtropicalsouth"),
+                      labels = c("Tropical north", "Subtropical north", "Temperate north",
+                                 "Tropical south", "Subtropical south"))) %>%
+  ggplot(aes(x = vac_week_v1, y = estimate_norm - 1, group = sam_imm, color = date_max)) + 
+    geom_line(alpha = 0.2) + 
+    geom_line(aes(y = estimate_mean_norm - 1, group = imm_tidy), color = "white", size = 0.5) +
+    scale_x_continuous("Week of vaccination", breaks = c(1,18,35,52), limits = c(1,52)) + 
+    scale_y_continuous("Conditional effect in temperate regions") + 
+    scale_color_gradientn("Peak timing",
+                          breaks = c(1,18,35,52), limits = c(1,52),
+                          colours = c(viridis(100, begin = 0, option = "C"), 
+                                    rev(viridis(100, begin = 0, option = "C"))),
+                          guide = guide_colorbar(title.position = "top",
+                                                 title.hjust = 0.5,
+                                                 barheight = 0.8)) + 
+  geom_point(aes(y = -Inf, size = tot)) +
+    facet_wrap(reorder(clu, as.numeric(as.factor(clu)))~., scales = "free", dir = "h", ncol = 3) + 
+  theme(legend.position = "top")
+```
+
+# Conditional effects for the covars ===============================================================
+
+# Read models and extracting coefficients for base models
+```{r}
+df_fixed <- sapply(coef_l, function(x) {
+  x$fixed %>%
+    rownames_to_column("parameter") %>%
+    filter(str_detect(parameter, "age|sex|vac_conc|time_v1_v2|time_v2_v3|time_vl_s1"))}, 
+  simplify = FALSE) %>%
+  bind_rows(.id = "mod") %>%
+  # Attach pathogen and reg 
+  left_join(select(df_converged, -Rhat), by = join_by(mod)) %>%
+  # Extract the imm_name and clu from the parameter name
+  mutate(imm_name = str_extract(parameter, "(?<=immvals1anti)[^_]+"),
+         parameter = case_when(!is.na(imm_name) ~ str_remove_all(parameter, imm_name),
+                               .default = parameter),
+         parameter = str_remove_all(parameter, "immvals1anti_")) 
+  
+df_fixed %>%
+  ggplot(aes(x = Estimate, y = imm_name, color = reg)) + 
+    geom_vline(aes(xintercept = 0), color = "grey", linetype = "dotted") + 
+    geom_point() + 
+    geom_segment(aes(x = `l-95% CI`, xend = `u-95% CI`, yend = imm_name)) + 
+  facet_grid(pathogen+imm_name~parameter, scales = "free", switch = "y") + 
+  theme(axis.text.y = element_blank(),
+        axis.title.y = element_blank(),
+        axis.ticks.y = element_blank(), 
+        axis.line.y = element_blank(),
+        strip.text.y.left = element_text(angle = 0))
+```
+
+```{r}
+pat_tidy_names <- c("Rotavirus", "Varicella zoster virus", "Measles virus", "Mumps virus", 
+              "Rubella virus", "C. diphtheriae", "C. tetani", "B. pertussis", 
+              "S. pneumoniae", "H. influenzae Type B", 
+              "N. meningitidis \n (serotypes c and a)", "Hepatitis B virus",
+              "Polio virus \n (serotypes 1, 2 and 3)")
+names(pat_tidy_names) <- c("rota", "varicella", "measles", "mumps", "rubella", "dipht", "tetan", 
+                     "pertupt", "pn", "hib", "multi_men", "hbv","multi_ipv") 
+
+for (i in unique(df_fixed$parameter)) {
+pl <- df_fixed %>%
+  filter(parameter == i)  %>%
+  filter(reg == "base") %>%
+  mutate(effect_cuali = case_when(`l-95% CI` < 0 & `u-95% CI` < 0 ~ "negative",
+                                  `l-95% CI` > 0 & `u-95% CI` > 0 ~ "positive",
+                                  .default = "nonsig")) %>%
+  ggplot(aes(x = Estimate, y = reorder(pathogen, Estimate), color = effect_cuali)) + 
+    geom_vline(aes(xintercept = 0), color = "grey", linetype = "dotted") + 
+    geom_segment(aes(x = `l-95% CI`, xend = `u-95% CI`, yend = pathogen), alpha = 0.8) + 
+    geom_point(size = 4, color = "white") + 
+    geom_point(size = 2, alpha = 0.8) + 
+    scale_color_manual(values = c("orange", "grey", "#0D0887FF")) + 
+    scale_x_continuous("Estimated effect") + 
+  theme(#axis.text.y = element_blank(),
+        axis.title.y = element_blank(),
+        axis.ticks.y = element_blank(), 
+        axis.line.y = element_blank(),
+        strip.text.y.left = element_text(angle = 0),
+        legend.position = "none") + 
+  ggtitle(i)
+print(pl)
+}
+```
+
+# Checking the correlation matrices ================================================================
+```{r}
+library(corrplot)
+library("ggcorrplot")
+
+df_converged_multi <- df_converged %>%
+  filter(str_detect(reg, "base") & str_detect(pathogen, "multi")) %>%
+  filter(!(pathogen %in% c("multi_dtp", "multi_polio")))
+
+# Obtain the correlation matrix from the base models
+corrmatrix_l <- sapply(1:length(df_converged_multi[[1]]), function(x) {
+  pat <- df_converged_multi[x, 'pathogen']
+  name_reg <- df_converged_multi[x, "reg"]
+  # Obtain conditional effects   
+  pomp::bake(file = glue("{dirs$outputs}/modres_coef/corrmatrix_{pat}_{name_reg}.rds"), {
+    # Read model
+    mod <- readRDS(glue("{dirs$outputs}/perpathogen/{pat}/bm{vac_l[[pat]]}_s08_{pat}_{name_reg}.rds"))
+    # Obtain correlation matrix
+    corrmatrix <- as.data.frame(VarCorr(mod)$residual__$cor) %>%
+      select(starts_with("Estimate"))
+    return(corrmatrix)
+  })
+}, simplify = FALSE)
+names(corrmatrix_l) <- df_converged_multi$pathogen
+
+corrmatrix_pl <- lapply(1:length(corrmatrix_l), function(x) {
+  names(corrmatrix_l[[x]]) <- str_remove(names(corrmatrix_l[[x]]), "Estimate.immvals1anti")
+  rownames(corrmatrix_l[[x]]) <- str_remove(rownames(corrmatrix_l[[x]]), "immvals1anti")
+  ggcorrplot(corrmatrix_l[[x]], hc.order = TRUE, lab = TRUE) +
+    theme(legend.position = "none") + 
+      ggtitle(names(corrmatrix_l)[[x]])})
+wrap_plots(corrmatrix_pl)
+```
+
+
+
+
+
+

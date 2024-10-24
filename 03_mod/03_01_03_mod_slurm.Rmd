@@ -1,0 +1,72 @@
+---
+title: "BRMS"
+author: "Laura Andrea Barrrero Guevara"
+date: "2023-02-23"
+output: html_document
+---
+
+################################################################################
+Purpose of script: To fit brms models to all the studies
+################################################################################
+
+# Set up
+```{r}
+rm(list = ls())
+source("../00_pck.R")
+source("fun_write_slurm_sh.R")
+dirs$outputs <- "../outputs"
+
+# pat_l <- c("rota", "vzv", "measl", "mumps", "rubel", "hav", "men", "strep", "polio", "hib",
+#            "ipv", "opv", "dipht", "dtpa", "dtpw", "tetan", "pertu", "hbv")
+
+# pat_l <- c("multi_ipv", "multi_pertu", "multi_men", "multi_polio", "multi_opv",
+#            "multi_dtp", "multi_dtpa", "multi_dtpw", "multi_hib-men", "multi_mmr", "multi_mmr-vzv")
+
+# pat_l <- c("dipht", "dtpa", "rota", "polio", "hib", "ipv", "pertu", "hbv", "strep", "men")
+
+# pat_l <- c("multi_dtp", "multi_dtpa", "multi_men", "multi_pertu", "multi_polio")
+```
+
+# Loop it s08 sub kgc 
+```{r}
+for (pathogen in pat_l) {
+  # Read formulas 
+  l_formula <- readRDS(glue("{dirs$outputs}/perpathogen/{pathogen}/formula_brms_{pathogen}_l.rds"))
+  already_runned <- str_remove(str_remove(list.files(glue("{dirs$outputs}/slurm_sh/runned")), ".sh"), 
+                               glue("run_{pathogen}_brms_"))
+  l_formula <- l_formula[!(names(l_formula) %in% already_runned)]
+  
+  # Loop over each model name
+  walk(names(l_formula), function(args_fo) {
+    # Determine the vaccine dose and data frame 
+    vac <- case_when(str_detect(args_fo, "bmvl") ~ "vl",
+                     str_detect(args_fo, "bmv1") ~ "v1")
+    dfk <- case_when(str_detect(args_fo, "dfkgc1") ~ "_kgc_1",
+                     str_detect(args_fo, "dfkgc2") ~ "_kgc_2",
+                     str_detect(args_fo, "dfkgc3") ~ "_kgc_3",
+                     TRUE ~ "")
+    # Write SLURM script
+    fun_write_slurm_sh(args_fo = args_fo, dat_name = glue("data_brms_{pathogen}_{vac}_s08{dfk}.rds"), 
+                       pathogen = pathogen, time = "24:00:00")
+  })
+}  
+```
+
+# Get lines to run in the cluster
+```{r}
+for (i in list.files(glue("{dirs$outputs}/slurm_sh"))) {
+ print(glue("sbatch ~/projects/_seas_imm/{i}"))
+}
+```
+
+
+
+
+
+
+
+
+
+
+
+

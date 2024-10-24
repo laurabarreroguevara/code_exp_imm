@@ -1,0 +1,943 @@
+---
+title: "BRMS WAIC results"
+author: "Laura Andrea Barrrero Guevara"
+date: "2023-02-23"
+output: html_document
+---
+
+################################################################################
+Purpose of script: To check the waic results of the experiments 
+################################################################################
+
+```{r}
+rm(list = ls())
+source("../00_pck.R")
+library(colorspace)
+
+theme_set(theme_classic() + theme(strip.background = element_blank()))
+dirs$outputs <- "../outputs/perpathogen"
+dirs$tables <- "../outputs/tables"
+
+pat_l <- c("rota", "vzv", "measl", "mumps", "rubel", "hav", "men", "strep", "polio", "hib",
+           "ipv", "opv", "dipht", "dtpa", "dtpw", "tetan", "pertu", "hbv",
+           "multi_ipv", "multi_pertu", "multi_men", "multi_polio", "multi_opv",
+           "multi_dtp", "multi_dtpa", "multi_dtpw", "multi_hib-men", "multi_mmr", "multi_mmr-vzv")
+```
+
+# Formulas 
+```{r}
+fun_waic_df <- function(pathogen = "rota") {
+  
+  file_path <- glue("{dirs$tables}/{pathogen}_tbl_waic_models.rds")
+  
+  # Create file if it does not exist 
+  if (!file.exists(file_path)) {
+    # Create the file
+    waic_l <- data.frame()
+    saveRDS(waic_l, file_path)
+    cat("File created:", file_path)
+  } else {
+    waic_l <- readRDS(file_path)
+    cat("File already exists:", file_path)
+  }
+  
+  mod_files_l <- str_subset(str_subset(list.files(glue("{dirs$outputs}/{pathogen}")), "rds"), 
+                            "bmv")
+  mod_miss_l <- setdiff(mod_files_l, waic_l$mod)
+  
+  waic_miss_l <- sapply(mod_miss_l, function(miss) {
+    readRDS(glue("{dirs$outputs}/{pathogen}/{miss}"))$criteria$waic$waic 
+  }, simplify = F)
+  
+  if(length(waic_miss_l) > 0) {
+    waic_miss_l <- bind_rows(waic_miss_l) %>%
+    pivot_longer(cols = everything(), names_to = "mod", values_to = "waic")
+  }
+  
+  waic_l <- bind_rows(waic_miss_l, waic_l) %>%
+    distinct() %>%
+    arrange(-waic) %>%
+    mutate(delta_waic = waic - waic[1]) 
+  
+  saveRDS(waic_l, file_path)
+  return(waic_l)
+}
+```
+
+# Extracting WAIC 
+```{r}
+# List of pathogens and extract waic
+lapply(pat_l, fun_waic_df)
+
+# One pathogen example 
+fun_waic_df("rota") %>%
+  filter(str_detect(mod, "csni", negate = TRUE)) %>%
+  arrange(waic) %>%
+  mutate(delta_waic = waic - waic[1])
+
+# All pathogens comparison 
+all_waic <- sapply(pat_l, function(x) {
+  fun_waic_df(x) %>%
+    filter(str_detect(mod, "csni", negate = TRUE)) %>%
+    arrange(waic) %>%
+    mutate(delta_waic = waic - waic[1])
+}, simplify = FALSE)
+
+bind_rows(all_waic, .id = "pathogen") %>%
+  group_by(pathogen) %>%
+  mutate(rn = row_number()) %>%
+  filter(rn == 1)
+```
+
+# Sanity check:  Checking if the models converged 
+```{r}
+df_rhats_cs <- readRDS("outputs/_mcom/rhats/df_rhats_cs.rds")
+
+bind_rows(all_waic, .id = "pathogen") %>%
+  left_join(df_rhats_cs) %>%
+  filter(Rhat == FALSE) %>%
+  mutate(mod = str_replace(mod, "multi_", "multi"),
+         mod = str_replace(mod, "reg_", "reg"),
+         mod = str_remove_all(mod, ".rds|_gauss"),
+         mod = str_replace(mod, "csi_", "csi")) %>%
+  separate(mod, into = c("vac", "s", "pathogen", "mod")) %>%
+  select(-s) %>%
+  filter(!(pathogen %in% c("multimmrv", "multihibmen"))) %>%
+  mutate(vac = str_remove(vac, "bm")) %>%
+  mutate(pathogen = factor(pathogen,
+                           levels = c("rota", "varicella",
+                                      "multimmr", "measles", "mumps", "rubella",
+                                      "multidtp", "dipht", "tetan", "multipertu", "pertu",
+                                      "hbv", "hib",
+                                      "multimen", "men",
+                                      "multipn", "pn",
+                                      "multipolio", "polio", "multiipv", "ipv", "multiopv", "opv"))) %>%
+  group_by(pathogen) %>%
+  arrange(waic) %>%
+  mutate(delta_waic = waic - waic[1]) %>%
+  ggplot(aes(x = delta_waic, y = pathogen, color = mod)) +
+  geom_point() + 
+  scale_x_continuous(trans = "log10") + 
+  scale_color_manual(values = c("black", "grey", "pink","pink", "red", "darkred"))
+  #facet_wrap(pathogen~.)
+```
+
+# For per pathogen only 
+```{r}
+selpat_l <- c("rota", "varicella", "measles", "mumps", "rubella", "dipht", "tetan", "pertu", 
+              "hbv", "men", "hib", "pn", "polio", "ipv", "opv")
+
+selpat_l <- c("rota", "varicella", "multimmr", "multidtp", "pn", "hib", 
+              "multimen", "hbv", "multiipv")
+
+all_waic_df <- bind_rows(all_waic, .id = "pathogen") %>%
+  left_join(df_rhats_cs) %>%
+  filter(Rhat == FALSE) %>%
+  mutate(mod = str_replace(mod, "multi_", "multi"),
+         mod = str_replace(mod, "reg_", "reg"),
+         mod = str_remove_all(mod, ".rds|_gauss"),
+         mod = str_replace(mod, "csi_", "csi")) %>%
+  separate(mod, into = c("vac", "s", "pathogen", "mod")) %>%
+  select(-s) %>%
+  filter(pathogen %in% selpat_l) %>%
+  filter(mod %in% c("base", "cs", "csireg2b", "csireg3")) %>%
+  mutate(vac = str_remove(vac, "bm")) %>%
+  mutate(pathogen = factor(pathogen, levels = selpat_l)) %>%
+  group_by(pathogen) %>%
+  arrange(waic) %>%
+  mutate(delta_waic = waic - waic[1])
+
+pl_waic <- all_waic_df %>%
+  filter(mod %in% c("cs", "base")) %>%
+  mutate(delta_waic = waic - waic[1]) %>%
+  ggplot(aes(x = delta_waic, y = mod, color = mod)) +
+  geom_vline(aes(xintercept = 1), color = "grey", linetype = "dotted") + 
+  geom_point(size = 2) +
+  geom_segment(aes(xend = 0, yend = mod), size = 2.5, alpha = 0.3) + 
+  scale_x_continuous("Delta WAIC (log10)", trans = "log10") + 
+  scale_color_manual(values = c("black", "grey", "red","red", "red", "red")) +
+  facet_grid(pathogen~., scales = "free") + 
+  theme(legend.position = "none",
+        axis.title.y = element_blank(),
+        strip.text.y = element_blank()) | all_waic_df %>%
+  ggplot(aes(x = delta_waic, y = mod, color = mod)) +
+  geom_vline(aes(xintercept = 1), color = "grey", linetype = "dotted") + 
+  geom_point(size = 2) +
+  geom_segment(aes(xend = 0, yend = mod), size = 2.5, alpha = 0.3) + 
+  scale_x_continuous("Delta WAIC (log10)", trans = "log10") + 
+  scale_color_manual(values = c("black", "grey", "red","red", "red", "red")) +
+  facet_grid(pathogen~., scales = "free") + 
+  theme(legend.position = "none",
+        axis.title.y = element_blank()) 
+  
+
+ggsave(pl_waic, file = glue("outputs/figures/all_asel_mod_waic_sel.pdf"),
+       height = 20, width = 5)
+```
+
+
+```{r}
+lapply
+readRDS()
+```
+
+
+
+# Checking the correlation matrices 
+```{r}
+library(corrplot)
+
+# Base models 
+mod_base_l <- list()
+for (i in multipat_l) {
+  if(i %in% c("multi_mmrv", "multi_mmr")) { vtype = "v1" } else { vtype = "vl" }
+  mod_base_l[[i]] <- as.data.frame(VarCorr(readRDS(glue("{dirs$outputs}/{i}/bm{vtype}_s08_{i}_base_gauss.rds")))$residual__$cor) %>%
+  select(starts_with("Estimate"))
+}
+
+mod_base_l
+
+mod_base_pl <- list()
+for (i in multipat_l) {
+  names(mod_base_l[[i]]) <- str_remove(names(mod_base_l[[i]]), "Estimate.immvals1anti")
+  rownames(mod_base_l[[i]]) <- str_remove(rownames(mod_base_l[[i]]), "immvals1anti")
+  mod_base_pl[[i]] <- corrplot(as.matrix(mod_base_l[[i]]), method = "number", type = 'lower', col = COL2('PRGn'))
+}
+
+mod_base_pl
+
+selpat_l <- c("multi_mmr", "multi_dtp", "multi_men", "multi_ipv")
+
+mod_reg_l <- list()
+for (i in selpat_l) {
+  if(i %in% c("multi_mmrv", "multi_mmr")) { vtype = "v1" } else { vtype = "vl" }
+  mod_reg_l[[i]] <- as.data.frame(VarCorr(readRDS(glue("{dirs$outputs}/perpathogen/{i}/bm{vtype}_s08_{i}_csi_reg_3_gauss.rds")))$residual__$cor) %>%
+  select(starts_with("Estimate"))
+}
+
+mod_reg_l
+
+mod_reg_pl <- list()
+for (i in multipat_l) {
+  names(mod_reg_l[[i]]) <- str_remove(names(mod_reg_l[[i]]), "Estimate.immvals1anti")
+  rownames(mod_reg_l[[i]]) <- str_remove(rownames(mod_reg_l[[i]]), "immvals1anti")
+  mod_reg_pl[[i]] <- corrplot(as.matrix(mod_reg_l[[i]]), method = "number", type = 'lower', col = COL2('PRGn'))
+}
+
+mod_reg_pl
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+```{r}
+library(corrplot)
+
+# Base models 
+mod_base_l <- list()
+for (i in multipat_l) {
+  if(i %in% c("multi_mmrv", "multi_mmr")) { vtype = "v1" } else { vtype = "vl" }
+  mod_base_l[[i]] <- as.data.frame(VarCorr(readRDS(glue("{dirs$outputs}/{i}/bm{vtype}_s08_{i}_base_gauss.rds")))$residual__$cor) %>%
+  select(starts_with("Estimate"))
+}
+
+mod_base_l
+
+mod_base_pl <- list()
+for (i in multipat_l) {
+  names(mod_base_l[[i]]) <- str_remove(names(mod_base_l[[i]]), "Estimate.immvals1anti")
+  rownames(mod_base_l[[i]]) <- str_remove(rownames(mod_base_l[[i]]), "immvals1anti")
+  mod_base_pl[[i]] <- corrplot(as.matrix(mod_base_l[[i]]), method = "number", type = 'lower', col = COL2('PRGn'))
+}
+
+mod_base_pl
+
+selpat_l <- c("multi_mmr", "multi_dtp", "multi_men", "multi_ipv")
+
+mod_reg_l <- list()
+for (i in selpat_l) {
+  if(i %in% c("multi_mmrv", "multi_mmr")) { vtype = "v1" } else { vtype = "vl" }
+  mod_reg_l[[i]] <- as.data.frame(VarCorr(readRDS(glue("{dirs$outputs}/perpathogen/{i}/bm{vtype}_s08_{i}_cs_gauss.rds")))$residual__$cor) %>%
+  select(starts_with("Estimate"))
+}
+
+mod_reg_l
+
+mod_reg_pl <- list()
+for (i in selpat_l) {
+  names(mod_reg_l[[i]]) <- str_remove(names(mod_reg_l[[i]]), "Estimate.immvals1anti")
+  rownames(mod_reg_l[[i]]) <- str_remove(rownames(mod_reg_l[[i]]), "immvals1anti")
+  mod_reg_pl[[i]] <- corrplot(as.matrix(mod_reg_l[[i]]), method = "number", type = 'lower', col = COL2('PRGn'))
+}
+
+mod_reg_pl$multi_mmr + mod_reg_pl$multi_dtp + mod_reg_pl$multi_men + mod_reg_pl$multi_ipv
+```
+
+
+
+
+
+
+
+# Checking if the cs2i models converged 
+```{r}
+# # Consider a single pathogen 
+# pathogen <- "opv"
+# 
+# # Read the models 
+# mod_l <- list() 
+# for (i in str_subset(list.files(glue("{dirs$outputs}/{pathogen}")), "cs2i")) {
+#   mod_l[[i]] <- list(summary(readRDS(glue("{dirs$outputs}/{pathogen}/{i}"))))
+# }
+# 
+# # Extract the maximum Rhat (>1 means that it did not converge)
+# bind_rows(lapply(mod_l, function(x) {
+#   x[[1]]$fixed %>%
+#     bind_rows(x[[1]]$spec_pars) %>%
+#     bind_rows(x[[1]]$random$study) %>%
+#     bind_rows(x[[1]]$random$`study:country:center:rct_group`) %>%
+#     filter(Rhat == max(Rhat))}), .id = "mod") %>%
+#   separate(mod, into = c("mod", "df"), sep = "_df") %>%
+#   arrange(df)
+# 
+# # Rota works until kgc3! 
+# # Polio works until kgc3 and kgc2!
+
+# # Consider a single pathogen 
+# pathogen <- "rota"
+# 
+# # Read the models 
+# mod_l <- list() 
+# for (i in str_subset(list.files(glue("{dirs$outputs}/{pathogen}")), "cs2i|all|data|formula|s08_climate|s08_photoperiod", negate = T)) {
+#   mod_l[[i]] <- list(summary(readRDS(glue("{dirs$outputs}/{pathogen}/{i}"))))
+# }
+# 
+# # Extract the maximum Rhat (>1 means that it did not converge)
+# bind_rows(lapply(mod_l, function(x) {
+#   x[[1]]$fixed %>%
+#     bind_rows(x[[1]]$spec_pars) %>%
+#     bind_rows(x[[1]]$random$study) %>%
+#     bind_rows(x[[1]]$random$`study:country:center:rct_group`) %>%
+#     filter(Rhat == max(Rhat))}), .id = "mod") %>%
+#   separate(mod, into = c("mod", "df"), sep = "_df") %>%
+#   arrange(df)
+# 
+# bind_rows(lapply(mod_l, function(x) {
+#   x[[1]]$fixed %>%
+#     bind_rows(x[[1]]$spec_pars) %>%
+#     bind_rows(x[[1]]$random$study) %>%
+#     bind_rows(x[[1]]$random$`study:country:center:rct_group`) %>%
+#     filter(Rhat == max(Rhat))}), .id = "mod") %>%
+#   separate(mod, into = c("mod", "df"), sep = "_df") %>%
+#   arrange(df)
+# 
+# mod_l$bmvl_s08_rota_base.rds[[1]]$fixed
+```
+
+
+```{r}
+mod_l <- list()
+for (i in pat_l) {
+  if(i %in% c("varicella", "mumps", "measles", "rubella", "hav")) {
+    vac = "v1" 
+  } else { vac = "vl"}
+  
+  mod_l[[i]] <- list(readRDS(glue("{dirs$outputs}/{i}/bm{vac}_s08_{i}_csi_reg_4.rds")))
+}
+
+mod_base_l <- list()
+for (i in pat_l) {
+  if(i %in% c("varicella", "mumps", "measles", "rubella", "hav")) {
+    vac = "v1" 
+  } else { vac = "vl"}
+  
+  mod_base_l[[i]] <- list(readRDS(glue("{dirs$outputs}/{i}/bm{vac}_s08_{i}_base.rds")))
+}
+
+mod_l
+```
+
+```{r}
+mod_pl_l <- list() 
+for(i in pat_l) {
+mod_pl_l[[i]] <- list(plot(conditional_effects(mod_l[[i]][[1]], ask = FALSE, effects = "pi_vac_week_v1:reg_4"))[[1]] +
+  scale_y_continuous(i, trans = "log") + 
+  facet_wrap(~reg_4, scales = "free", ncol = 4))
+}
+
+mod_tb_l <- list() 
+for(i in pat_l) {
+mod_tb_l[[i]] <- conditional_effects(mod_l[[i]][[1]], ask = FALSE, effects = "pi_vac_week_v1:reg_6a",
+                                     resolution = 52)[[1]]
+}
+
+mod_dat_l <- list() 
+for(i in pat_l) {
+mod_dat_l[[i]] <- mod_l[[i]][[1]]$data
+}
+
+mod_l[[i]][[1]]$data
+
+bind_rows(mod_dat_l, .id = "pat")  %>%
+  mutate(reg_6a = factor(reg_6a, 
+                            levels = c("1_Temperate", "2_Subtropical", "3_Tropical", "4_Tropical south", "5_Subtropical south"))) %>%
+  ggplot(aes(x = pi_vac_week_v1, fill = reg_6a)) + 
+  geom_histogram() +
+  facet_grid(pat~reg_6a, scales = "free_y")+ 
+  scale_fill_viridis_d()
+
+nas_df <- bind_rows(mod_dat_l, .id = "pat") %>%
+  group_by(pat, pi_vac_week_v1, reg_6a) %>%
+  summarise(tot = n())
+
+
+bind_rows(mod_tb_l, .id = "pat")  %>%
+  #filter(!(pat %in% c("pertu", "dipht", "tetan", "polio"))) %>%
+  left_join(nas_df) %>%
+  complete(pat, reg_6a, pi_vac_week_v1) %>%
+  mutate(effect2__ = factor(effect2__, 
+                            levels = c("1_Temperate", "2_Subtropical", "3_Tropical", "4_Tropical south", "5_Subtropical south"))) %>%
+  mutate(estimate__ = case_when(is.na(tot) ~ NA,
+                                .default = estimate__)) %>%
+  ggplot(aes(x = effect1__, y = log(estimate__), color = effect2__)) + 
+  geom_line(size = 1) + 
+  geom_ribbon(aes(ymin = log(lower__), ymax = log(upper__)), color = "transparent", alpha = 0.2) + 
+  scale_y_continuous() + 
+  facet_grid(pat~effect2__, scales = "free_y") + 
+  scale_color_viridis_d()
+
+
+tests <- conditional_effects(mod_l[[i]][[1]], ask = FALSE, effects = "pi_vac_week_v1:reg_6a")[[1]]
+
+tests %>%
+  ggplot(aes(x = effect1__, y = estimate__, color = effect2__)) + 
+  geom_line()
+
+conditional_effects(mod_l[[i]][[1]], ask = FALSE, effects = "pi_vac_week_v1:reg_6a")[[1]] +
+  scale_y_continuous(i, trans = "log") + 
+  facet_grid(reg_6a~., scales = "free", ncol = 6) + 
+
+
+
+mod_pl_l$rota[[1]] / mod_pl_l$varicella[[1]] / mod_pl_l$measles[[1]] / mod_pl_l$mumps[[1]] / mod_pl_l$rubella[[1]] / mod_pl_l$men[[1]] / mod_pl_l$pn[[1]] / mod_pl_l$hib[[1]] / mod_pl_l$hbv[[1]]
+
+
+mod_pl_l$rota[[1]] / mod_pl_l$men[[1]] / mod_pl_l$polio[[1]] / mod_pl_l$hbv[[1]]
+```
+
+
+
+# Rotavirus 
+```{r}
+waic_l_rota <- readRDS(glue("{dirs$outputs}/rota/tbl_waic_models.rds"))
+
+# The photoperiod has an effect on immunogenicity 
+waic_l_rota %>%
+  filter(str_detect(mod, "csi_reg|base")) %>%
+  mutate(delta_waic = waic - waic[1]) 
+
+# The climate has an effect on immunogenicity 
+waic_l_rota %>%
+  filter(str_detect(mod, "cs2i_kgc|base")) %>%
+  mutate(delta_waic = waic - waic[1]) 
+
+waic_l_rota %>%
+  filter(str_detect(mod, "cs2i_kgc|csi_reg|base")) %>%
+  filter(str_detect(mod, "reg_2b|reg_3|base")) %>%
+  mutate(delta_waic = waic - waic[1])
+
+waic_l_rota %>%
+  filter(str_detect(mod, "cs2i_kgc|csi_reg|base")) %>%
+  filter(str_detect(mod, "reg_3|base")) %>%
+  mutate(delta_waic = waic - waic[1])
+
+mod <- readRDS(glue("{dirs$outputs}/rota/bmvl_s08_cs2i_kgc_2_reg_3.rds"))
+mod <- readRDS(glue("{dirs$outputs}/rota/bmvl_s08_csi_reg_3.rds"))
+conditional_effects(mod)
+
+mod1 <- readRDS(glue("{dirs$outputs}/rota/bmvl_s08_cs2i_kgc_2_reg_3.rds"))
+mod2 <- readRDS(glue("{dirs$outputs}/rota/bmvl_s08_csi_reg_3.rds"))
+
+
+install.packages("BayesFactor")
+library(BayesFactor)
+bayes_factor(mod1, mod2)
+
+
+hypothesis(mod1, "sex = 0", scope = "coef", group = 'reg_3')
+
+compare(mod1, mod2)
+
+mcmc_plot(mod2, variable = "^b_", regex = TRUE)
+
+get_variables(mod1)
+
+mod1 %>%
+  spread_draws(b_sex[M])
+
+bayes_factor(mod1, mod2)
+```
+
+# Rotavirus 
+```{r}
+waic_l_varicella <- readRDS(glue("{dirs$outputs}/varicella/tbl_waic_models.rds"))
+
+# The photoperiod has an effect on immunogenicity 
+waic_l_varicella %>%
+  filter(str_detect(mod, "csi_reg|base")) %>%
+  mutate(delta_waic = waic - waic[1]) 
+
+# The climate has an effect on immunogenicity 
+waic_l_varicella %>%
+  filter(str_detect(mod, "cs2i_kgc|base")) %>%
+  mutate(delta_waic = waic - waic[1]) 
+
+waic_l_varicella %>%
+  filter(str_detect(mod, "cs2i_kgc|csi_reg|base")) %>%
+  #filter(str_detect(mod, "reg_2b|reg_3|base")) %>%
+  mutate(delta_waic = waic - waic[1])
+
+waic_l_varicella %>%
+  filter(str_detect(mod, "cs2i_kgc|csi_reg|base")) %>%
+  filter(str_detect(mod, "reg_3|base")) %>%
+  mutate(delta_waic = waic - waic[1])
+
+mod <- readRDS(glue("{dirs$outputs}/varicella/bmv1_s08_csi_reg_3.rds"))
+conditional_effects(mod)
+
+mod
+```
+
+
+
+```{r}
+pathogen = "rota"
+mod_files_l <- str_subset(str_subset(list.files(glue("{dirs$outputs}/{pathogen}")), "rds"), "bmv")
+
+mod <- readRDS(glue("{dirs$outputs}/{pathogen}/{mod_files_l[2]}"))
+
+library(brms)
+library(tidybayes) 
+
+get_variables(mod)
+
+# For no interaction model 
+mod %>%
+  spread_draws(b_cos0.1208MUvac_week_v1, b_sin0.1208MUvac_week_v1,
+               b_Intercept, b_sexM, b_age, b_vac_conc) %>%
+  rename(cos_p = b_cos0.1208MUvac_week_v1,
+         sin_p = b_sin0.1208MUvac_week_v1) %>%
+  mutate(amp = (sqrt((cos_p^2) + (sin_p^2))),
+         phs = atan(-(sin_p)/(cos_p)) + 52/pi*2) %>%
+  #mutate(case_when(phs > pi/2 ~ phs - pi/2)) %>%
+  pivot_longer(cols = c(amp, phs, b_Intercept, b_sexM, b_age, b_vac_conc, amp, phs)) %>%
+  group_by(name) %>%
+  summarise(mean(value), sd(value), quantile(value, 0.025), quantile(value, 0.975))
+
+# For interaction model 
+
+mod <- readRDS(glue("{dirs$outputs}/{pathogen}/bmvl_s08_csi_reg_3.rds"))
+get_variables(mod)
+
+mod %>%
+  spread_draws(`b_cos0.1208MUvac_week_v1`, `b_sin0.1208MUvac_week_v1`,
+               `b_reg_32_Tropical:cos0.1208MUvac_week_v1`, `b_reg_33_Temperatesouth:cos0.1208MUvac_week_v1`,                      
+               `b_reg_32_Tropical:sin0.1208MUvac_week_v1`, `b_reg_33_Temperatesouth:sin0.1208MUvac_week_v1`,
+               `b_Intercept`, `b_sexM`, `b_age`, `b_vac_conc`) %>%
+  pivot_longer(c(contains("cos"), contains("sin"))) %>%
+  mutate(cosine = case_when(str_detect(name, "cos") ~ "cos_p",
+                            str_detect(name, "sin") ~ "sin_p"),
+         name = str_remove_all(name, "cos0.1208|sin0.1208")) %>%
+  pivot_wider(names_from = cosine, values_from = value) %>%
+  group_by(.chain, .iteration, .draw) %>%
+  mutate(inter = cos_p + cos_p[1])
+  mutate(amp = (sqrt((cos_p^2) + (sin_p^2))),
+         phs = atan(-(sin_p)/(cos_p))) %>%
+  rename(reg = name) %>%
+  pivot_longer(cols = c(amp, phs, b_Intercept, b_sexM, b_age, b_vac_conc, amp, phs)) %>%
+  mutate(reg = case_when(name %in% c("amp", "phs") ~ reg)) %>%
+  group_by(name, reg) %>%
+  summarise(mean(value), sd(value), quantile(value, 0.025), quantile(value, 0.975))
+
+conditional_effects(mod)
+```
+
+
+```{r}
+mod %>%
+  spread_draws(`b_cos0.1208MUvac_week_v1`, `b_sin0.1208MUvac_week_v1`,
+               `b_reg_32_Tropical:cos0.1208MUvac_week_v1`, `b_reg_33_Temperatesouth:cos0.1208MUvac_week_v1`,                      
+               `b_reg_32_Tropical:sin0.1208MUvac_week_v1`, `b_reg_33_Temperatesouth:sin0.1208MUvac_week_v1`,
+               `b_Intercept`, `b_sexM`, `b_age`, `b_vac_conc`) %>%
+  pivot_longer(c(contains("cos"), contains("sin"))) %>%
+  mutate(cosine = case_when(str_detect(name, "cos") ~ "cos_p",
+                            str_detect(name, "sin") ~ "sin_p"),
+         name = str_remove_all(name, "cos0.1208|sin0.1208")) %>%
+  pivot_wider(names_from = cosine, values_from = value) %>%
+  mutate(amp = (sqrt((cos_p^2) + (sin_p^2))),
+         phs = atan(-(sin_p)/(cos_p))) %>%
+  rename(reg = name) %>%
+  pivot_longer(cols = c(amp, phs, b_Intercept, b_sexM, b_age, b_vac_conc, amp, phs)) %>%
+  mutate(reg = case_when(name %in% c("amp", "phs") ~ reg)) %>%
+  group_by(name, reg) %>%
+  summarise(mean(value), sd(value), quantile(value, 0.025), quantile(value, 0.975))
+```
+
+
+
+
+
+
+
+# BM1D
+```{r}
+x = "bm1ds07"
+  waic_l <- readRDS(glue("{dirs$outputs}/{x}/waic_models.rds"))
+  mod_files_l <- str_subset(str_subset(list.files(glue("{dirs$outputs}/{x}")), "rds"), 
+                            "waic_models", negate = T)
+  mod_miss_l <- setdiff(mod_files_l, waic_l$mod)
+  
+  waic_miss_l <- sapply(mod_files_l, function(miss) {
+    readRDS(glue("{dirs$outputs}/{x}/{miss}"))$criteria$waic$elpd_waic 
+  }, simplify = F)
+  
+  # waic_l <- bind_rows(waic_miss_l) %>%
+  #   pivot_longer(cols = everything(), names_to = "mod", values_to = "waic") %>%
+  waic_l <- bind_rows(waic_miss_l) %>%
+    pivot_longer(cols = everything(), names_to = "mod", values_to = "waic") %>%
+    distinct()
+
+  waic_l %>%
+  filter(str_detect(mod, "raw|bm1d_cc.rds|dayl|ni", negate = T)) %>%
+    mutate(delta_waic = waic - waic[1]) 
+
+saveRDS(waic_l, glue("{dirs$outputs}/{x}/waic_models.rds"))
+
+
+write.table(waic_l, glue("{dirs$outputs}/_tables/20231124_waic_models.csv"))
+```
+
+# BM1D S05
+```{r}
+waic_l <- fun_waic_df(x = "bm1ds07")
+
+waic_l %>%
+  filter(str_detect(mod, "raw|bm1d_cc.rds|dayl|ni", negate = T))
+
+#write.table(waic_l, glue("{dirs$outputs}/_tables/20231124_waic_models.csv"))
+```
+
+# BM1D S07
+```{r}
+waic_l <- fun_waic_df(x = "bm1ds07")
+
+waic_l %>%
+  filter(str_detect(mod, "raw|bm1d_cc.rds|dayl|ni", negate = T))
+
+write.table(waic_l, glue("{dirs$outputs}/_tables/20231124_waic_models.csv"))
+```
+
+# BM1D S09
+```{r}
+waic_l <- fun_waic_df(x = "bm1ds09")
+
+waic_l %>%
+  filter(str_detect(mod, "raw|bm1d_cc.rds|dayl|ni", negate = T))
+
+write.table(waic_l, glue("{dirs$outputs}/_tables/20231124_waic_models.csv"))
+```
+
+```{r}
+# # Function to get df of waic 
+# fun_waic_df <- function(w_mod = wtest1, w_name = "test", save = TRUE) {
+#   formulas_l <- as.data.frame(lapply(brm_l, function(x) as.character(formula(x))[[1]])) %>%
+#     pivot_longer(cols = everything(.), values_to = "formula", names_to = "mod")
+#   waic_df <- bind_rows(as.data.frame(w_mod$diffs) %>%
+#     select(elpd_diff, se_diff, waic)) %>%
+#     rownames_to_column("mod") %>%
+#     mutate(mod = str_remove(mod, "brm_l\\$")) %>%
+#     left_join(formulas_l)
+#   today <- format(Sys.Date(), "%Y%m%d")
+#   if(save == TRUE) {write.csv(waic_df, file = glue("{dirs$outputs}/_tables/{today}_waic_{w_name}.csv"))}
+#   return(waic_df)
+# }
+```
+
+```{r}
+# brm_l <- list()
+# for (fil in c("bm1ds0_base.rds", "bm1ds0_cc.rds", "bm1ds0_cs.rds", 
+#               str_subset(str_subset(list.files(glue("{dirs$outputs}/bm1d/sens_s0")), "rds"), "kgc_1"))) {
+#   brm_l[[fil]] <- readRDS(glue("{dirs$outputs}/bm1d/sens_s0/{fil}"))
+# }
+# 
+# # WAIC tests
+# # Comparing the base models: no seasonality, fs, cs, fs_cc, cs_re and different random effects 
+# wtest1 <- waic(brm_l$bm1ds0_base.rds, brm_l$bm1ds0_cc.rds, brm_l$bm1ds0_cs.rds,
+#                brm_l$bm1ds0_fs_cc_prec_raw4.rds, brm_l$bm1ds0_cs_re_prec_raw4.rds,
+#                brm_l$bm1ds0_ni_prec_raw4.rds, brm_l$bm1ds0_i_prec_raw4.rds,
+#                brm_l$bm1ds0_i_res_prec_raw4.rds, brm_l$bm1ds0_i_resccr_prec_raw4.rds,
+#                brm_l$bm1ds0_ni_sc_prec_raw4.rds, brm_l$bm1ds0_i_resc_prec_raw4.rds,
+#                brm_l$bm1ds0_ni_scc_prec_raw4.rds, brm_l$bm1ds0_i_scc_prec_raw4.rds)
+# fun_waic_df(wtest1, w_name = "bm1ds0_testire_prec_raw4")
+```
+
+# 26.09.23 Experiment: Comparing the clusters with sensitivity strict 
+```{r}
+# For all models 
+brm_l <- list()
+for (fil in c(str_subset(str_subset(list.files(glue("{dirs$outputs}/bm1d")), "rds"), "bm1ds09"))) {
+  brm_l[[fil]] <- readRDS(glue("{dirs$outputs}/bm1d/{fil}"))$criteria$waic$elpd_waic
+}
+
+brm_l <- bind_rows(brm_l) %>%
+  pivot_longer(cols = everything(), names_to = "mod", values_to = "waic") %>%
+  filter(!str_detect(mod, "fs_cc")) %>%
+  arrange(-waic) 
+
+brm_l %>%
+  filter(str_detect(mod, "raw|bm1d_cc.rds|dayln|ni", negate = T)) %>%
+  mutate(delta_waic = waic - waic[1])
+
+write.csv(brm_l, glue("{dirs$outputs}/_tables/230927_waic_allmodels.csv"))
+```
+
+# 26.09.23 Experiment: Comparing the clusters 
+```{r}
+# For all models 
+brm_l <- list()
+for (fil in c("bm1d_base.rds", "bm1d_cc.rds", "bm1d_cs.rds", 
+              str_subset(list.files(glue("{dirs$outputs}/bm1d")), "rds"))) {
+  brm_l[[fil]] <- readRDS(glue("{dirs$outputs}/bm1d/{fil}"))$criteria$waic$elpd_waic
+}
+
+brm_l <- bind_rows(brm_l) %>%
+  pivot_longer(cols = everything(), names_to = "mod", values_to = "waic") %>%
+  filter(!str_detect(mod, "fs_cc")) %>%
+  arrange(-waic) 
+
+brm_l %>%
+  filter(str_detect(mod, "raw|bm1d_cc.rds|dayl|ni|prec|tavg|09|07|05|ee", negate = T)) %>%
+  mutate(delta_waic = waic - waic[1])
+
+brm_l %>%
+  filter(str_detect(mod, "raw|bm1d_cc.rds|dayl|ni|prec|tavg|09|bm1d_|07|ee", negate = T)) %>%
+  mutate(delta_waic = waic - waic[1])
+
+brm_l %>%
+  filter(str_detect(mod, "ee")) %>%
+  filter(str_detect(mod, "raw|bm1d_cc.rds|dayl|ni|prec|tavg|09|07|05", negate = T)) %>%
+  mutate(delta_waic = waic - waic[1])
+
+brm_l %>%
+  filter(str_detect(mod, "ee")) %>%
+  filter(str_detect(mod, "raw|bm1d_cc.rds|dayl|ni|prec|tavg|bm1d_|05|07", negate = T)) %>%
+  mutate(delta_waic = waic - waic[1])
+
+
+write.csv(brm_l, glue("{dirs$outputs}/_tables/230927_waic_allmodels.csv"))
+```
+
+
+# 23.09.21 Experiment: Differe random effects and model formulations 
+```{r}
+modt = "i_resccr"
+brm_l <- list()
+for (fil in c("bm1ds0_base.rds", "bm1ds0_cc.rds", "bm1ds0_cs.rds", 
+              str_subset(str_subset(list.files(glue("{dirs$outputs}/bm1d/sens_s0")), "rds"), modt))) {
+  brm_l[[fil]] <- readRDS(glue("{dirs$outputs}/bm1d/sens_s0/{fil}"))
+}
+
+# WAIC tests
+# Comparing the base models: no seasonality, fs, cs, fs_cc, cs_re and different random effects 
+wtest1 <- waic(brm_l$bm1ds0_base.rds, brm_l$bm1ds0_cc.rds, brm_l$bm1ds0_cs.rds,
+               brm_l[[glue("bm1ds0_{modt}_kgc_1.rds")]], brm_l[[glue("bm1ds0_{modt}_prec_raw4.rds")]],
+               brm_l[[glue("bm1ds0_{modt}_tavg_raw4.rds")]], brm_l[[glue("bm1ds0_{modt}_dayl_stan4.rds")]],
+               brm_l[[glue("bm1ds0_{modt}_dayln_stan4.rds")]], brm_l[[glue("bm1ds0_{modt}_reg_8.rds")]])
+fun_waic_df(wtest1, w_name = glue("bm1ds0_testire_{modt}"))
+names(brm_l)
+
+# For different models 
+
+modt = "i_resccr"
+brm_l <- list()
+for (fil in c("bm1ds0_base.rds", "bm1ds0_cc.rds", "bm1ds0_cs.rds", 
+              str_subset(str_subset(list.files(glue("{dirs$outputs}/bm1d/sens_s0")), "rds"), modt))) {
+  brm_l[[fil]] <- readRDS(glue("{dirs$outputs}/bm1d/sens_s0/{fil}"))
+}
+
+# WAIC tests
+# Comparing the base models: no seasonality, fs, cs, fs_cc, cs_re and different random effects 
+wtest1 <- waic(brm_l$bm1ds0_base.rds, brm_l$bm1ds0_cc.rds, brm_l$bm1ds0_cs.rds,
+               brm_l[[glue("bm1ds0_{modt}_kgc_1.rds")]], brm_l[[glue("bm1ds0_{modt}_prec_raw4.rds")]],
+               brm_l[[glue("bm1ds0_{modt}_tavg_raw4.rds")]], brm_l[[glue("bm1ds0_{modt}_dayl_stan4.rds")]],
+               brm_l[[glue("bm1ds0_{modt}_dayln_stan4.rds")]], brm_l[[glue("bm1ds0_{modt}_reg_8.rds")]])
+fun_waic_df(wtest1, w_name = glue("bm1ds0_testire_{modt}"))
+names(brm_l)
+
+# For the interaction and no interaction 
+modt = "i_"
+brm_l <- list()
+for (fil in c("bm1ds0_base.rds", "bm1ds0_cc.rds", "bm1ds0_cs.rds", 
+              str_subset(str_subset(str_subset(list.files(glue("{dirs$outputs}/bm1d/sens_s0")), "rds"), "_res", negate = TRUE),modt))) {
+  brm_l[[fil]] <- readRDS(glue("{dirs$outputs}/bm1d/sens_s0/{fil}"))
+}
+
+modt = "i"
+# WAIC tests
+# Comparing the base models: no seasonality, fs, cs, fs_cc, cs_re and different random effects 
+wtest1 <- waic(brm_l$bm1ds0_base.rds, brm_l$bm1ds0_cc.rds, brm_l$bm1ds0_cs.rds,
+               brm_l[[glue("bm1ds0_{modt}_kgc_1.rds")]], brm_l[[glue("bm1ds0_{modt}_prec_raw4.rds")]],
+               brm_l[[glue("bm1ds0_{modt}_tavg_raw4.rds")]], brm_l[[glue("bm1ds0_{modt}_dayl_stan4.rds")]],
+               brm_l[[glue("bm1ds0_{modt}_dayln_stan4.rds")]], brm_l[[glue("bm1ds0_{modt}_reg_8.rds")]],
+               brm_l[[glue("bm1ds0_n{modt}_kgc_1.rds")]], brm_l[[glue("bm1ds0_n{modt}_prec_raw4.rds")]],
+               brm_l[[glue("bm1ds0_n{modt}_tavg_raw4.rds")]], brm_l[[glue("bm1ds0_n{modt}_dayl_stan4.rds")]],
+               brm_l[[glue("bm1ds0_n{modt}_dayln_stan4.rds")]], brm_l[[glue("bm1ds0_n{modt}_reg_8.rds")]])
+fun_waic_df(wtest1, w_name = glue("bm1ds0_testire_{modt}"))
+names(brm_l)
+brm_l$bm1ds0_base.rds
+```
+
+
+
+# 23.09.18 Experiment: One dose models, with no baseline antibodies, different re for cs 
+```{r}
+brm_l <- list()
+for (fil in str_subset(str_subset(list.files(glue("{dirs$outputs}/bm1d/sens_s0")), "rds"), "bm1d")) {
+  brm_l[[fil]] <- readRDS(glue("{dirs$outputs}/bm1d/sens_s0/{fil}"))
+}
+
+# WAIC tests
+# Comparing the base models: no seasonality, fs, cs, fs_cc, cs_re and different random effects 
+wtest1 <- waic(brm_l$bm1ds0_base.rds, brm_l$bm1ds0_cs.rds,
+               brm_l$bm1ds0_cs_re_kgc_3.rds, brm_l$bm1ds0_cs_re2_kgc_3.rds,
+               brm_l$bm1ds0_cs_re3_kgc_3.rds, brm_l$bm1ds0_cs_re4_kgc_3.rds, brm_l$bm1ds0_cs_re5_kgc_3.rds, 
+               brm_l$bm1ds0_cs_re6_kgc_3.rds, brm_l$bm1ds0_cs_re7_kgc_3.rds)
+fun_waic_df(wtest1, w_name = "bm1ds0_cs_randomeffects")
+
+# Comparing the sense models:
+wtest2 <- waic(brm_l$bm1ds0_base.rds,
+               # base model cc 
+               brm_l$bm1ds0_cc.rds,
+               # fs model cc
+               brm_l$bm1ds0_fs_cc_kgc_3.rds,
+               # base model cs random coefficients 
+               brm_l$bm1ds0_cs.rds,
+               # cs random coefficients
+               brm_l$bm1ds0_cs_re2_kgc_3.rds,
+               # cs interaction and random intercepts
+               brm_l$bm1ds0_cs_i_kgc_3.rds,
+               # cs interaction and random coefficients highest 
+               brm_l$bm1ds0_cs_ireh_kgc_3.rds,
+               # cs interaction and random coefficients lowest 
+               brm_l$bm1ds0_cs_irel_kgc_3.rds)
+fun_waic_df(wtest2, w_name = "bm1ds0_cs_int_re", save = FALSE)
+```
+
+# 23.09.18 Experiment: One dose models, with no baseline antibodies
+```{r}
+brm_l <- list()
+for (fil in str_subset(str_subset(list.files(glue("{dirs$outputs}/sens_s0/20230918")), "rds"), "bm1d")) {
+  brm_l[[fil]] <- readRDS(glue("{dirs$outputs}/sens_s0/20230918/{fil}"))
+}
+
+# WAIC tests
+# Comparing the base models: no seasonality, fs, cs, fs_cc, cs_re
+wtest1 <- waic(brm_l$bm1ds0_base.rds, brm_l$bm1ds0_cc.rds, brm_l$bm1ds0_cs.rds, brm_l$bm1ds0_cs_re.rds,
+                brm_l$bm1ds0_fs_cc_kgc_1.rds, brm_l$bm1ds0_fs_cc_kgc_2.rds, brm_l$bm1ds0_fs_cc_kgc_3.rds,
+                brm_l$bm1ds0_cs_re_kgc_1.rds, brm_l$bm1ds0_cs_re_kgc_2.rds, brm_l$bm1ds0_cs_re_kgc_3.rds)
+fun_waic_df(wtest1, w_name = "bm1ds0_")
+```
+
+# 23.09.14 Experiment: One dose models, with no baseline antibodies, different baseline covariates
+```{r}
+brm_l <- list()
+for (fil in str_subset(str_subset(list.files(glue("{dirs$outputs}/bm1d/sens_s0/20230914")), "rds"), "bm1d")) {
+  brm_l[[fil]] <- readRDS(glue("{dirs$outputs}/bm1d/sens_s0/20230914/{fil}"))
+}
+
+## Comparing including or not vaccine covariates
+wtest1 <- waic(brm_l$bm1ds0_base.rds, brm_l$bm1ds0_fs_cc.rds,
+               brm_l$bm1ds0_base_nvd.rds, brm_l$bm1ds0_fs_cc_nvd.rds)
+fun_waic_df(wtest1, w_name = "bm1ds0_covars")
+
+## Leaving the vaccine covariates, comparing different regions 
+wtest2 <- waic(brm_l$bm1ds0_fs_cc.rds, brm_l$bm1ds0_base.rds,
+               brm_l$bm1ds0_fs_cc_reg1.rds, brm_l$bm1ds0_fs_cc_reg2.rds,
+               brm_l$bm1ds0_fs_cc_reg2a.rds, brm_l$bm1ds0_fs_cc_reg3.rds,
+               brm_l$bm1ds0_fs_cc_reg3a.rds, brm_l$bm1ds0_fs_cc_reg4.rds,
+               brm_l$bm1ds0_fs_cc_reg4a.rds ,brm_l$bm1ds0_fs_cc_reg4b.rds,
+               brm_l$bm1ds0_fs_cc_reg5.rds, brm_l$bm1ds0_fs_cc_reg5a.rds)
+fun_waic_df(wtest2, w_name = "bm1ds0_reg")
+```
+
+# 13.09.14 Experiment: One dose models, with baseline antibodies
+```{r}
+brm_l <- list()
+for (fil in str_subset(str_subset(list.files(glue("{dirs$outputs}/bm1d")), "rds"), "bm1d")) {
+  brm_l[[fil]] <- readRDS(glue("{dirs$outputs}/bm1d/{fil}"))
+}
+
+## Comparing including or not other covariates
+wtest1 <- waic(brm_l$bm1d_base.rds, brm_l$bm1d_base_wc.rds,
+               brm_l$bm1d_fs_cc.rds, brm_l$bm1d_fs_cc_wc.rds)
+fun_waic_df(wtest1, w_name = "bm1d_covars")
+
+## Leaving the vaccine covariates, comparing different regions 
+wtest2 <- waic(brm_l$bm1d_base_wc.rds, brm_l$bm1d_fs_cc_wc.rds,
+               brm_l$bm1d_fs_cc_reg1_w2c.rds, brm_l$bm1d_fs_cc_reg2_w2c.rds,
+               brm_l$bm1d_fs_cc_reg2a_w2c.rds, brm_l$bm1d_fs_cc_reg3_w2c.rds,
+               brm_l$bm1d_fs_cc_reg3a_w2c.rds, brm_l$bm1d_fs_cc_reg4_w2c.rds,
+               brm_l$bm1d_fs_cc_reg4a_w2c.rds ,brm_l$bm1d_fs_cc_reg4b_w2c.rds,
+               brm_l$bm1d_fs_cc_reg5_w2c.rds, brm_l$bm1d_fs_cc_reg5a_w2c.rds)
+fun_waic_df(wtest2, w_name = "bm1d_reg")
+
+## Leaving the vaccine covariates, comparing cosinor model (with and without random effects)
+wtest3 <- waic(brm_l$bm1d_base_wc.rds, brm_l$bm1d_fs_cc_wc.rds, 
+               brm_l$bm1d_sincosnre_scc_wc.rds, brm_l$bm1d_sincosnre_sccr_wc.rds,
+               brm_l$bm1d_sincosre_scc_wc.rds, brm_l$bm1d_sincosre_sccr_wc.rds)
+fun_waic_df(wtest3, w_name = "bm1d_cosinor_1sttest")
+```
+
+# 13.09.14 Experiment: Last dose models, with baseline antibodies
+```{r}
+brm_l <- list()
+for (fil in str_subset(str_subset(list.files(glue("{dirs$outputs}/bmld")), "rds"), "bmld")) {
+  brm_l[[fil]] <- readRDS(glue("{dirs$outputs}/bmld/{fil}"))
+}
+
+## Comparing including or not other covariates
+wtest1 <- waic(brm_l$bmld_base.rds, brm_l$bmld_base_w2.rds, brm_l$bmld_base_wc.rds, brm_l$bmld_base_w2c.rds,
+               brm_l$bmld_fs_cc.rds, brm_l$bmld_fs_cc_w2.rds, brm_l$bmld_fs_cc_wc.rds, brm_l$bmld_fs_cc_w2c.rds)
+fun_waic_df(wtest1, w_name = "bmld_covars")
+
+## Leaving the vaccine covariates, comparing different regions 
+wtest2 <- waic(brm_l$bmld_base_w2c.rds, brm_l$bmld_fs_cc_w2c.rds,
+               brm_l$bmld_fs_cc_reg1_w2c.rds, brm_l$bmld_fs_cc_reg2_w2c.rds,
+               brm_l$bmld_fs_cc_reg2a_w2c.rds, brm_l$bmld_fs_cc_reg3_w2c.rds,
+               brm_l$bmld_fs_cc_reg3a_w2c.rds, brm_l$bmld_fs_cc_reg4_w2c.rds,
+               brm_l$bmld_fs_cc_reg4a_w2c.rds ,brm_l$bmld_fs_cc_reg4b_w2c.rds,
+               brm_l$bmld_fs_cc_reg5_w2c.rds, brm_l$bmld_fs_cc_reg5a_w2c.rds)
+fun_waic_df(wtest2, w_name = "bmld_reg")
+```
+
+
+```{r}
+allstu_tidynames_serology %>%
+  filter(str_detect(seroname_tidy, "anti_pn")) %>%
+  distinct(study, method_tidy, seroname_tidy, unit, cut_off)
+```
+
+
+
+
+

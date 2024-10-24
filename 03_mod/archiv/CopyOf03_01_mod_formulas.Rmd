@@ -1,0 +1,705 @@
+---
+title: "BRMS"
+author: "Laura Andrea Barrrero Guevara"
+date: "2023-02-23"
+output: html_document
+---
+
+################################################################################
+Purpose of script: To fit brms models to all the studies
+################################################################################
+
+```{r}
+rm(list = ls())
+source("../00_pck.R")
+source("fun_add_new_expression.R")
+dirs$outputs <- "../outputs/perpathogen"
+```
+
+# Function formulas --------------------------------------------------------------------------------
+```{r}
+fun_formulas <- function(pathogen = "rota", data = "all", 
+                         doses = "d1", model_nm = "csi", varname = "", varname2 = "",
+                         others = "", multi = NULL, cens = TRUE) {
+  
+  # Covariates always included
+  covars_mod <- c("1", "sex", "age", 
+                  "(1|study)", "(1|study:country:center:rct_group)", others)
+  
+  # Adding seasonal covariates 
+  if(model_nm == "base") {
+    covars_mod <- covars_mod
+    # Seasonal splines
+  } else if(model_nm == "cc") {
+    covars_mod <- c(covars_mod, "s(vac_week_v1, bs = 'cc')")
+  } else if(model_nm == "cci") {
+    covars_mod <- c(covars_mod, glue("s(vac_week_v1, {varname}, bs = 'fs', xt = list(bs = 'cc'))"))
+    # Cosine model 
+  } else if(model_nm == "cs") {
+    covars_mod <- c(covars_mod, "cos(pi_vac_week_v1)", "sin(pi_vac_week_v1)")
+  } else if(model_nm == "csni") {
+    covars_mod <- c(covars_mod, "cos(pi_vac_week_v1)", "sin(pi_vac_week_v1)", glue("{varname}"))
+  } else if(model_nm == "csi") {
+    covars_mod <- c(covars_mod, 
+                    glue("{varname} * cos(pi_vac_week_v1)"), 
+                    glue("{varname} * sin(pi_vac_week_v1)"))
+    # Double model 
+  } else if(model_nm == "cs2i") {
+    covars_mod <- c(covars_mod, 
+                    glue("{varname} * cos(pi_vac_week_v1)"), 
+                    glue("{varname} * sin(pi_vac_week_v1)"),
+                    glue("{varname2} * cos(pi_vac_week_v1)"), 
+                    glue("{varname2} * sin(pi_vac_week_v1)"))
+  } else if(model_nm == "cs2ni") {
+    covars_mod <- c(covars_mod, 
+                    "cos(pi_vac_week_v1)", "sin(pi_vac_week_v1)", 
+                    glue("{varname}"), glue("{varname2}"))
+  }
+  
+  # Adding time to vaccination covariates 
+  if(doses == "d1") {
+    covars_mod <- c(covars_mod, "time_vl_s1") 
+  } else if(doses == "d2") {
+    covars_mod <- c(covars_mod, "time_v1_v2", "time_vl_s1")
+  } else if(doses == "d3") {
+    covars_mod <- c(covars_mod, "time_v1_v2", "time_v2_v3", "time_vl_s1")
+  } else if(doses == "d4") {
+    covars_mod <- c(covars_mod, "time_v1_v2", "time_v2_v3", "time_v3_v4", "time_vl_s1")
+  } else if(doses == "d5") {
+    covars_mod <- c(covars_mod, "time_v1_v2", "time_v2_v3", "time_v3_v4", "time_v4_v5", "time_vl_s1")
+  }
+  
+  if(doses == "d1") {
+    doses_nm <- "v1" 
+  } else {
+    doses_nm <- "vl"
+  }
+  
+  # Formula
+  form_mod <- list(reformulate(termlabels = covars_mod, 
+                               response = "imm_val_s1 | cens(censored) ", intercept = T))
+  
+  if (length(multi != 0)) {
+    if(cens == TRUE) { 
+      form_mod <- list(reformulate(termlabels = covars_mod,
+                                response = glue("imm_val_s1_{multi} | cens(censored_{multi})"), intercept = T))
+    } else if (cens == FALSE) {
+    form_mod <- list(reformulate(termlabels = covars_mod, 
+                                 response = glue("imm_val_s1_{multi}"), intercept = T))
+    }
+  }
+  
+  if (model_nm %in% c("base", "cs", "cc")) {
+    names(form_mod) = glue("bm{doses_nm}_{data}_{pathogen}_{model_nm}") 
+  } else if (model_nm %in% c("cs2ni", "cs2i")) {
+    names(form_mod) = glue("bm{doses_nm}_{data}_{pathogen}_{model_nm}_{varname}_{varname2}") 
+  } else if (model_nm %in% c("cci", "csni", "csi")) {
+    names(form_mod) = glue("bm{doses_nm}_{data}_{pathogen}_{model_nm}_{varname}") 
+  }
+  return(form_mod)
+}
+```
+
+# ONLY PHOTOPERIOD =================================================================================
+
+# Read in cluster variable names
+```{r}
+cluster_varnames <- c("reg_6a", "reg_4", "reg_3", "reg_2b")
+```
+
+# For rotavirus (until last vaccine (3rd dose))
+```{r}
+fun_formulas_perpathogen <- function(pathogen = "rota", doses = "d3", others = "") {
+  # For all data 
+  l_formula <- list()
+  # l_formula <- add_new_expression(
+  #   l_formula, fun_formulas(pathogen = pathogen, data = "all", 
+  #                           doses = doses, model_nm = "base", others = others))
+  # l_formula <- add_new_expression(
+  #   l_formula, fun_formulas(pathogen = pathogen, data = "all", 
+  #                           doses = doses, model_nm = "cs", others = others))
+  # for (i in cluster_varnames) {
+  #   l_formula <- add_new_expression(
+  #     l_formula, fun_formulas(pathogen = pathogen, data = "all", 
+  #                             doses = doses, model_nm = "csni", others = others,
+  #                             varname = i))
+  # }
+  # for (i in cluster_varnames) {
+  #   l_formula <- add_new_expression(
+  #     l_formula, fun_formulas(pathogen = pathogen, data = "all", 
+  #                             doses = doses, model_nm = "csi", others = others,
+  #                             varname = i))
+  # }
+  
+  # For s08 data 
+  l_formula_s08 <- list()
+  l_formula_s08 <- add_new_expression(
+    l_formula_s08, fun_formulas(pathogen = pathogen, data = "s08", 
+                                doses = doses, model_nm = "base", others = others))
+  l_formula_s08 <- add_new_expression(
+    l_formula_s08, fun_formulas(pathogen = pathogen, data = "s08", 
+                                doses = doses, model_nm = "cs", others = others))
+  for (i in cluster_varnames) {
+    l_formula_s08 <- add_new_expression(
+      l_formula_s08, fun_formulas(pathogen = pathogen, data = "s08", 
+                                  doses = doses, model_nm = "csni", others = others, 
+                                  varname = i))
+  }
+  for (i in cluster_varnames) {
+    l_formula_s08 <- add_new_expression(
+      l_formula_s08, fun_formulas(pathogen = pathogen, data = "s08", 
+                                  doses = doses, model_nm = "csi", others = others, 
+                                  varname = i))
+  }
+  
+  l_formula <- add_new_expression(l_formula, l_formula_s08, omit_exp = T)
+  
+  saveRDS(l_formula, file = glue("{dirs$outputs}/{pathogen}/formula_brms_{pathogen}_l.rds"))
+  return(l_formula)
+}
+```
+
+# Per pathogen 
+```{r}
+# For rotavirus (until last vaccine (3rd dose))
+fun_formulas_perpathogen(pathogen = "rota", doses = "d3", others = "vac_conc")
+
+# For varicella (until first vaccine (1st dose))
+fun_formulas_perpathogen(pathogen = "vzv", doses = "d1", others = c("vac_conc", "vac_name_v1"))
+# For measles (until first vaccine (1st dose))
+fun_formulas_perpathogen(pathogen = "measles", doses = "d1", others = c("vac_conc", "vac_name_v1"))
+# For mumps (until first vaccine (1st dose))
+fun_formulas_perpathogen(pathogen = "mumps", doses = "d1", others = c("vac_conc", "vac_name_v1"))
+# For rubella (until first vaccine (1st dose))
+fun_formulas_perpathogen(pathogen = "rubella", doses = "d1", others = c("vac_conc", "vac_name_v1"))
+
+# For hav (until first vaccine (1st dose))
+fun_formulas_perpathogen(pathogen = "hav", doses = "d1")
+
+# For men (until last vaccine (3rd dose))
+fun_formulas_perpathogen(pathogen = "men", doses = "d3", others = c("vac_conc", "vac_name_v1"))
+# For pn (until last vaccine (3rd dose))
+fun_formulas_perpathogen(pathogen = "pn", doses = "d3", others = c("vac_conc", "vac_name_v1"))
+# For hib (until last vaccine (3rd dose))
+fun_formulas_perpathogen(pathogen = "hib", doses = "d3", others = c("vac_name_v1"))
+# For polio (until last vaccine (3rd dose))
+fun_formulas_perpathogen(pathogen = "polio", doses = "d3", others = c("vac_name_v1"))
+
+# For ipv (until last vaccine (3rd dose))
+fun_formulas_perpathogen(pathogen = "ipv", doses = "d3", others = c("vac_name_v1"))
+# For opv (until last vaccine (3rd dose))
+fun_formulas_perpathogen(pathogen = "opv", doses = "d3")
+
+# For dipht (until last vaccine (3rd dose))
+fun_formulas_perpathogen(pathogen = "dipht", doses = "d3", others = c("vac_name_v1"))
+# For tetan (until last vaccine (3rd dose))
+fun_formulas_perpathogen(pathogen = "tetan", doses = "d3", others = c("vac_name_v1"))
+# For pertu (until last vaccine (3rd dose))
+fun_formulas_perpathogen(pathogen = "pertu", doses = "d3", others = c("vac_name_v1"))
+# For hbv (until last vaccine (3rd dose))
+fun_formulas_perpathogen(pathogen = "hbv", doses = "d3", others = "vac_name_v1")
+```
+
+
+# COMPARISON MODELS ================================================================================
+ 
+# Read in cluster variable names
+```{r}
+cluster_varnames <- c("reg_6a", "reg_4", "reg_3", "reg_2b")
+cluster_varnames2 <- expand.grid(kgc = c("kgc_1", "kgc_2", "kgc_3"),
+                                 reg = str_subset(cluster_varnames, "reg"))
+```
+
+# For ONLY CHECKING CONVERGENCE 
+```{r}
+fun_formulas_perpathogen <- function(pathogen = "rota", doses = "d3", others = "") {
+
+  # For s08_kgc_3 data 
+  l_formula_s08_dfkgc3 <- list()
+  for (i in 1:length(cluster_varnames2[[1]])) {
+    l_formula_s08_dfkgc3 <- add_new_expression(
+      l_formula_s08_dfkgc3, fun_formulas(pathogen = pathogen, data = "s08", 
+                                  doses = doses, model_nm = "cs2i", others = others,
+                                  varname = cluster_varnames2[i,1], varname2 = cluster_varnames2[i,2]))
+  }
+  names(l_formula_s08_dfkgc3) = paste0(names(l_formula_s08_dfkgc3),"_dfkgc3")
+
+  # For s08_kgc_2 data 
+  l_formula_s08_dfkgc2 <- list()
+  for (i in 1:length(filter(cluster_varnames2, kgc %in% c("kgc_1", "kgc_2"))[[1]])) {
+    l_formula_s08_dfkgc2 <- add_new_expression(
+      l_formula_s08_dfkgc2, fun_formulas(pathogen = pathogen, data = "s08", 
+                                  doses = doses, model_nm = "cs2i", others = others,
+                                  varname = filter(cluster_varnames2, kgc %in% c("kgc_1", "kgc_2"))[i,1], 
+                                  varname2 = filter(cluster_varnames2, kgc %in% c("kgc_1", "kgc_2"))[i,2]))
+  }
+  names(l_formula_s08_dfkgc2) = paste0(names(l_formula_s08_dfkgc2),"_dfkgc2")
+  
+  # For s08_kgc_1 data 
+  l_formula_s08_dfkgc1 <- list()
+  for (i in 1:length(filter(cluster_varnames2, kgc %in% c("kgc_1"))[[1]])) {
+    l_formula_s08_dfkgc1 <- add_new_expression(
+      l_formula_s08_dfkgc1, fun_formulas(pathogen = pathogen, data = "s08", 
+                                  doses = doses, model_nm = "cs2i", others = others,
+                                  varname = filter(cluster_varnames2, kgc %in% c("kgc_1"))[i,1], 
+                                  varname2 = filter(cluster_varnames2, kgc %in% c("kgc_1"))[i,2]))
+  }
+  names(l_formula_s08_dfkgc1) = paste0(names(l_formula_s08_dfkgc1),"_dfkgc1")
+  
+  l_formula <- add_new_expression(l_formula_s08_dfkgc3, l_formula_s08_dfkgc2, omit_exp = T)
+  l_formula <- add_new_expression(l_formula, l_formula_s08_dfkgc1, omit_exp = T)
+  
+  saveRDS(l_formula, file = glue("{dirs$outputs}/{pathogen}/formula_brms_{pathogen}_l.rds"))
+  return(l_formula)
+}
+```
+
+# Per pathogen 
+```{r}
+# For rotavirus (until last vaccine (3rd dose))
+fun_formulas_perpathogen(pathogen = "rota", doses = "d3", others = "vac_conc")
+
+# For varicella (until first vaccine (1st dose))
+fun_formulas_perpathogen(pathogen = "varicella", doses = "d1", others = c("vac_conc", "vac_name_v1"))
+# For measles (until first vaccine (1st dose))
+fun_formulas_perpathogen(pathogen = "measles", doses = "d1", others = c("vac_conc", "vac_name_v1"))
+# For mumps (until first vaccine (1st dose))
+fun_formulas_perpathogen(pathogen = "mumps", doses = "d1", others = c("vac_conc", "vac_name_v1"))
+# For rubella (until first vaccine (1st dose))
+fun_formulas_perpathogen(pathogen = "rubella", doses = "d1", others = c("vac_conc", "vac_name_v1"))
+
+# For hav (until first vaccine (1st dose))
+fun_formulas_perpathogen(pathogen = "hav", doses = "d1")
+
+# For men (until last vaccine (3rd dose))
+fun_formulas_perpathogen(pathogen = "men", doses = "d3", others = c("vac_conc", "vac_name_v1"))
+# For pn (until last vaccine (3rd dose))
+fun_formulas_perpathogen(pathogen = "pn", doses = "d3", others = c("vac_conc", "vac_name_v1"))
+# For hib (until last vaccine (3rd dose))
+fun_formulas_perpathogen(pathogen = "hib", doses = "d3", others = c("vac_name_v1"))
+# For polio (until last vaccine (3rd dose))
+fun_formulas_perpathogen(pathogen = "polio", doses = "d3", others = c("vac_name_v1"))
+# For dipht (until last vaccine (3rd dose))
+fun_formulas_perpathogen(pathogen = "dipht", doses = "d3", others = c("vac_name_v1"))
+# For tetan (until last vaccine (3rd dose))
+fun_formulas_perpathogen(pathogen = "tetan", doses = "d3", others = c("vac_name_v1"))
+# For pertu (until last vaccine (3rd dose))
+fun_formulas_perpathogen(pathogen = "pertu", doses = "d3", others = c("vac_name_v1"))
+# For hbv (until last vaccine (3rd dose))
+fun_formulas_perpathogen(pathogen = "hbv", doses = "d3", others = "vac_name_v1")
+
+# For ipv (until last vaccine (3rd dose))
+fun_formulas_perpathogen(pathogen = "ipv", doses = "d3", others = c("vac_name_v1"))
+# For opv (until last vaccine (3rd dose))
+fun_formulas_perpathogen(pathogen = "opv", doses = "d3")
+```
+
+# ONCE CONVERGENCE IS CHECKED
+```{r}
+fun_formulas_perpathogen <- function(pathogen = "rota", doses = "d3", others = "",
+                                     dfkgc = "3") {
+
+  # For s08_kgc_3 data 
+  l_formula_s08_dfkgc <- list()
+  l_formula_s08_dfkgc <- add_new_expression(
+    l_formula_s08_dfkgc, fun_formulas(pathogen = pathogen, data = "s08", 
+                                doses = doses, model_nm = "base", others = others))
+  l_formula_s08_dfkgc <- add_new_expression(
+    l_formula_s08_dfkgc, fun_formulas(pathogen = pathogen, data = "s08", 
+                                doses = doses, model_nm = "cs", others = others))
+  for (i in cluster_varnames) {
+    l_formula_s08_dfkgc <- add_new_expression(
+      l_formula_s08_dfkgc, fun_formulas(pathogen = pathogen, data = "s08", 
+                                  doses = doses, model_nm = "csni", others = others, 
+                                  varname = i))
+  }
+  for (i in cluster_varnames) {
+    l_formula_s08_dfkgc <- add_new_expression(
+      l_formula_s08_dfkgc, fun_formulas(pathogen = pathogen, data = "s08", 
+                                  doses = doses, model_nm = "csi", others = others, 
+                                  varname = i))
+  }
+  
+  names(l_formula_s08_dfkgc) = paste0(names(l_formula_s08_dfkgc), "_dfkgc", dfkgc)
+
+  saveRDS(l_formula_s08_dfkgc, file = glue("{dirs$outputs}/{pathogen}/formula_brms_{pathogen}_l.rds"))
+  return(l_formula_s08_dfkgc)
+}
+```
+
+Converging cs2i: 
+polio, kgc_3_reg_3, and kgc_3_reg_4 -   kgc3.rds	
+rota, all -                             kgc3.rds
+
+hib, kgc_2_reg_2b and kgc_1_reg_2b -    kgc2.rds	
+pertu, kgc_2_reg_2b -	                  kgc2.rds
+
+hbv, kgc_1_reg_2b -                     kgc1.rds	
+men, kgc_1_reg_2b -	                    kgc1.rds
+pn, kgc_1_reg_2b -                      kgc1.rds
+
+
+```{r}
+# For rotavirus (until last vaccine (3rd dose))
+fun_formulas_perpathogen(pathogen = "rota", doses = "d3", others = "vac_conc", dfkgc = 3)
+# For polio (until last vaccine (3rd dose))
+fun_formulas_perpathogen(pathogen = "polio", doses = "d3", others = c("vac_name_v1"), dfkgc = 3)
+
+# For hib (until last vaccine (3rd dose))
+fun_formulas_perpathogen(pathogen = "hib", doses = "d3", others = c("vac_name_v1"), dfkgc = 2)
+# For pertu (until last vaccine (3rd dose))
+fun_formulas_perpathogen(pathogen = "pertu", doses = "d3", others = c("vac_name_v1"), dfkgc = 2)
+
+# For hbv (until last vaccine (3rd dose))
+fun_formulas_perpathogen(pathogen = "hbv", doses = "d3", others = "vac_name_v1", dfkgc = 1)
+# For men (until last vaccine (3rd dose))
+fun_formulas_perpathogen(pathogen = "men", doses = "d3", others = c("vac_conc", "vac_name_v1"), dfkgc = 1)
+# For pn (until last vaccine (3rd dose))
+fun_formulas_perpathogen(pathogen = "pn", doses = "d3", others = c("vac_conc", "vac_name_v1"), dfkgc = 1)
+```
+
+
+
+# MVN MODELS =======================================================================================
+
+```{r}
+fun_formulas_multipathogen <- function(pathogen = "multi_men", doses = "d3", model_nm = "base", 
+                                       data = "s08", varname = "", varname2 = "",
+                                       others = "", cens = F) {
+  
+  multi_pat <- list(multi_men = c("anti_menc", "anti_mena"),
+                    multi_pn = c("anti_pn_04", "anti_pn_06b", "anti_pn_09v", "anti_pn_18c", "anti_pn_23f"),
+                    multi_polio = c("anti_polio_1", "anti_polio_2", "anti_polio_3"),
+                    multi_ipv = c("anti_polio_1", "anti_polio_2", "anti_polio_3"),
+                    multi_opv = c("anti_polio_1", "anti_polio_2", "anti_polio_3"),
+                    multi_pertu = c("anti_pertu_pt", "anti_pertu_prn", "anti_pertu_fha"),
+                    multi_mmrv = c("anti_measles", "anti_mumps", "anti_rubella", "anti_varicella"),
+                    multi_mmr = c("anti_measles", "anti_mumps", "anti_rubella"),
+                    multi_dtp = c("anti_dipht", "anti_tetan", "anti_pertu_pt"),
+                    multi_hibmen = c("anti_hib", "anti_menc"))[[pathogen]]
+  
+  bf_formula <- list()
+  for (i in multi_pat) {
+    bf_formula <- add_new_expression(bf_formula,
+        fun_formulas(pathogen = glue("{pathogen}_{i}"), data = data, 
+                 doses = doses, model_nm = model_nm, varname = varname, varname2 = varname2,
+                 others = others, multi = i, cens = cens))
+  }
+  
+  if(cens == FALSE) {
+    name_cens = "gauss"
+    if(length(multi_pat) == 2) {
+    mbf_formula = list(bf(bf_formula[[1]]) + bf(bf_formula[[2]]) + gaussian(link = "log"))
+    } else if(length(multi_pat) == 3) {
+    mbf_formula = list(bf(bf_formula[[1]]) + bf(bf_formula[[2]]) + bf(bf_formula[[3]]) + 
+      gaussian(link = "log"))
+    } else if(length(multi_pat) == 4) {
+    mbf_formula = list(bf(bf_formula[[1]]) + bf(bf_formula[[2]]) + bf(bf_formula[[3]]) + 
+      bf(bf_formula[[4]]) + gaussian(link = "log"))
+    } else if(length(multi_pat) == 5) {
+    mbf_formula = list(bf(bf_formula[[1]]) + bf(bf_formula[[2]]) + bf(bf_formula[[3]]) + 
+      bf(bf_formula[[4]]) + bf(bf_formula[[5]]) + gaussian(link = "log"))
+    }
+  }
+  
+  if(cens == TRUE) {
+    name_cens = "gamma"
+    if(length(multi_pat) == 2) {
+    mbf_formula = list(bf(bf_formula[[1]]) + bf(bf_formula[[2]]))
+    } else if(length(multi_pat) == 3) {
+    mbf_formula = list(bf(bf_formula[[1]]) + bf(bf_formula[[2]]) + bf(bf_formula[[3]]))
+    } else if(length(multi_pat) == 4) {
+    mbf_formula = list(bf(bf_formula[[1]]) + bf(bf_formula[[2]]) + bf(bf_formula[[3]]) + 
+      bf(bf_formula[[4]]))
+    } else if(length(multi_pat) == 5) {
+    mbf_formula = list(bf(bf_formula[[1]]) + bf(bf_formula[[2]]) + bf(bf_formula[[3]]) + 
+      bf(bf_formula[[4]]) + bf(bf_formula[[5]]))
+    }
+  }
+  
+  name_formula <- str_replace(str_remove(names(bf_formula), multi_pat), "__", "_")[[1]]
+  
+  names(mbf_formula) <- glue("{name_formula}_{name_cens}")
+  return(mbf_formula)
+}
+```
+
+# To create list of formulas 
+```{r}
+fun_formulas_multipathogen_list <- function(pathogen = "multi_men", doses = "d3", others = "") {
+  
+  # For s08 data 
+  l_formula_s08 <- list()
+  l_formula_s08 <- add_new_expression(
+    l_formula_s08, fun_formulas_multipathogen(pathogen = pathogen, data = "s08", 
+                                doses = doses, model_nm = "base", others = others))
+  # l_formula_s08 <- add_new_expression(
+  #   l_formula_s08, fun_formulas_multipathogen(pathogen = pathogen, data = "s08", 
+  #                               doses = doses, model_nm = "base", others = others, cens = TRUE))
+  
+  l_formula_s08 <- add_new_expression(
+    l_formula_s08, fun_formulas_multipathogen(pathogen = pathogen, data = "s08", 
+                                doses = doses, model_nm = "cs", others = others))
+  # l_formula_s08 <- add_new_expression(
+  #   l_formula_s08, fun_formulas_multipathogen(pathogen = pathogen, data = "s08", 
+  #                               doses = doses, model_nm = "cs", others = others, cens = TRUE))
+  for (i in cluster_varnames) {
+    l_formula_s08 <- add_new_expression(
+      l_formula_s08, fun_formulas_multipathogen(pathogen = pathogen, data = "s08",
+                                  doses = doses, model_nm = "csni", others = others,
+                                  varname = i))
+  }
+  for (i in cluster_varnames) {
+    l_formula_s08 <- add_new_expression(
+      l_formula_s08, fun_formulas_multipathogen(pathogen = pathogen, data = "s08", 
+                                  doses = doses, model_nm = "csi", others = others, 
+                                  varname = i))
+  }
+  
+  # for (i in cluster_varnames) {
+  #   l_formula_s08 <- add_new_expression(
+  #     l_formula_s08, fun_formulas_multipathogen(pathogen = pathogen, data = "s08", 
+  #                                 doses = doses, model_nm = "csi", others = others, cens = TRUE, 
+  #                                 varname = i))
+  # }
+  
+  l_formula <- l_formula_s08
+  
+  saveRDS(l_formula, file = glue("{dirs$outputs}/{pathogen}/formula_brms_{pathogen}_l.rds"))
+  return(l_formula)
+}
+```
+
+# Create list of formulas 
+```{r}
+fun_formulas_multipathogen_list("multi_men", doses = "d3")
+fun_formulas_multipathogen_list("multi_pn", doses = "d3")
+fun_formulas_multipathogen_list("multi_polio", doses = "d3")
+
+fun_formulas_multipathogen_list("multi_ipv", doses = "d3")
+fun_formulas_multipathogen_list("multi_opv", doses = "d3")
+
+fun_formulas_multipathogen_list("multi_pertu", doses = "d3")
+fun_formulas_multipathogen_list("multi_mmrv", doses = "d1")
+fun_formulas_multipathogen_list("multi_mmr", doses = "d1")
+fun_formulas_multipathogen_list("multi_dtp", doses = "d3")
+fun_formulas_multipathogen_list("multi_hibmen", doses = "d3")
+```
+
+
+# MVN COMPARISON MODELS ============================================================================
+ 
+# Read in cluster variable names
+```{r}
+cluster_varnames <- c("reg_6a", "reg_4", "reg_3", "reg_2b")
+cluster_varnames2 <- expand.grid(kgc = c("kgc_1", "kgc_2", "kgc_3"),
+                                 reg = str_subset(cluster_varnames, "reg"))
+```
+
+# For ONLY CHECKING CONVERGENCE 
+```{r}
+fun_formulas_multipathogen_list <- function(pathogen = "multi_men", doses = "d3", others = "") {
+
+  # For s08_kgc_3 data 
+  l_formula_s08_dfkgc3 <- list()
+  for (i in 1:length(cluster_varnames2[[1]])) {
+    l_formula_s08_dfkgc3 <- add_new_expression(
+      l_formula_s08_dfkgc3, fun_formulas_multipathogen(pathogen = pathogen, data = "s08", 
+                                  doses = doses, model_nm = "cs2i", others = others, cens = F,
+                                  varname = cluster_varnames2[i,1], varname2 = cluster_varnames2[i,2]))
+  }
+  names(l_formula_s08_dfkgc3) = paste0(names(l_formula_s08_dfkgc3),"_dfkgc3")
+
+  # For s08_kgc_2 data 
+  l_formula_s08_dfkgc2 <- list()
+  for (i in 1:length(filter(cluster_varnames2, kgc %in% c("kgc_1", "kgc_2"))[[1]])) {
+    l_formula_s08_dfkgc2 <- add_new_expression(
+      l_formula_s08_dfkgc2, fun_formulas_multipathogen(pathogen = pathogen, data = "s08", 
+                                  doses = doses, model_nm = "cs2i", others = others, cens = F,
+                                  varname = filter(cluster_varnames2, kgc %in% c("kgc_1", "kgc_2"))[i,1], 
+                                  varname2 = filter(cluster_varnames2, kgc %in% c("kgc_1", "kgc_2"))[i,2]))
+  }
+  names(l_formula_s08_dfkgc2) = paste0(names(l_formula_s08_dfkgc2),"_dfkgc2")
+  
+  # For s08_kgc_1 data 
+  l_formula_s08_dfkgc1 <- list()
+  for (i in 1:length(filter(cluster_varnames2, kgc %in% c("kgc_1"))[[1]])) {
+    l_formula_s08_dfkgc1 <- add_new_expression(
+      l_formula_s08_dfkgc1, fun_formulas_multipathogen(pathogen = pathogen, data = "s08", 
+                                  doses = doses, model_nm = "cs2i", others = others, cens = F,
+                                  varname = filter(cluster_varnames2, kgc %in% c("kgc_1"))[i,1], 
+                                  varname2 = filter(cluster_varnames2, kgc %in% c("kgc_1"))[i,2]))
+  }
+  names(l_formula_s08_dfkgc1) = paste0(names(l_formula_s08_dfkgc1),"_dfkgc1")
+  
+  l_formula <- add_new_expression(l_formula_s08_dfkgc3, l_formula_s08_dfkgc2, omit_exp = T)
+  l_formula <- add_new_expression(l_formula, l_formula_s08_dfkgc1, omit_exp = T)
+  
+  saveRDS(l_formula, file = glue("{dirs$outputs}/{pathogen}/formula_brms_{pathogen}_l.rds"))
+  return(l_formula)
+}
+```
+
+# Create list of formulas 
+```{r}
+fun_formulas_multipathogen_list("multi_men", doses = "d3")
+fun_formulas_multipathogen_list("multi_pn", doses = "d3")
+fun_formulas_multipathogen_list("multi_polio", doses = "d3")
+
+fun_formulas_multipathogen_list("multi_ipv", doses = "d3")
+fun_formulas_multipathogen_list("multi_opv", doses = "d3")
+
+fun_formulas_multipathogen_list("multi_pertu", doses = "d3")
+fun_formulas_multipathogen_list("multi_mmrv", doses = "d1")
+fun_formulas_multipathogen_list("multi_mmr", doses = "d1")
+fun_formulas_multipathogen_list("multi_dtp", doses = "d3")
+fun_formulas_multipathogen_list("multi_hibmen", doses = "d3")
+```
+
+# ONCE CONVERGENCE IS CHECKED
+```{r}
+fun_formulas_multipathogen_list <- function(pathogen = "multi_men", doses = "d3", others = "",
+                                     dfkgc = "3") {
+  
+  # For s08 data 
+  l_formula_s08_dfkgc <- list()
+  l_formula_s08_dfkgc <- add_new_expression(
+    l_formula_s08_dfkgc, fun_formulas_multipathogen(pathogen = pathogen, data = "s08", 
+                                doses = doses, model_nm = "base", others = others))
+  
+  l_formula_s08_dfkgc <- add_new_expression(
+    l_formula_s08_dfkgc, fun_formulas_multipathogen(pathogen = pathogen, data = "s08", 
+                                doses = doses, model_nm = "cs", others = others))
+  
+  for (i in cluster_varnames) {
+    l_formula_s08_dfkgc <- add_new_expression(
+      l_formula_s08_dfkgc, fun_formulas_multipathogen(pathogen = pathogen, data = "s08",
+                                  doses = doses, model_nm = "csni", others = others,
+                                  varname = i))
+  }
+  for (i in cluster_varnames) {
+    l_formula_s08_dfkgc <- add_new_expression(
+      l_formula_s08_dfkgc, fun_formulas_multipathogen(pathogen = pathogen, data = "s08", 
+                                  doses = doses, model_nm = "csi", others = others, 
+                                  varname = i))
+  }
+  
+  names(l_formula_s08_dfkgc) = paste0(names(l_formula_s08_dfkgc), "_dfkgc", dfkgc)
+  l_formula <- l_formula_s08_dfkgc
+  
+  saveRDS(l_formula, file = glue("{dirs$outputs}/{pathogen}/formula_brms_{pathogen}_l.rds"))
+  return(l_formula)
+}
+```
+
+# Converging: 
+multi_dtp, kgc_1_reg_2b, kgc_1_reg_3, kgc_1_reg_4 -     kgc1.rds
+multi_men, kgc_1_reg_2b -                               kgc1.rds
+multi_pertu, kgc_1_reg_2b, kgc_2_reg_2b                 kgc2.rds	
+
+```{r}
+
+fun_formulas_multipathogen_list("multi_men", doses = "d3", dfkgc = 1)
+fun_formulas_multipathogen_list("multi_pertu", doses = "d3", dfkgc = 2)
+fun_formulas_multipathogen_list("multi_dtp", doses = "d3", dfkgc = 1)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# For rotavirus (until last vaccine (3rd dose))
+```{r}
+fun_formulas_perpathogen <- function(pathogen = "rota", doses = "d3", others = "") {
+  # # For all data 
+  # # For all data 
+  # l_formula <- list()
+  # l_formula <- add_new_expression(
+  #   l_formula, fun_formulas(pathogen = pathogen, data = "all", 
+  #                           doses = doses, model_nm = "base", others = others))
+  # l_formula <- add_new_expression(
+  #   l_formula, fun_formulas(pathogen = pathogen, data = "all", 
+  #                           doses = doses, model_nm = "cs", others = others))
+  # for (i in cluster_varnames) {
+  #   l_formula <- add_new_expression(
+  #     l_formula, fun_formulas(pathogen = pathogen, data = "all", 
+  #                             doses = doses, model_nm = "csni", others = others,
+  #                             varname = i))
+  # }
+  # for (i in cluster_varnames) {
+  #   l_formula <- add_new_expression(
+  #     l_formula, fun_formulas(pathogen = pathogen, data = "all", 
+  #                             doses = doses, model_nm = "csi", others = others,
+  #                             varname = i))
+  # }
+  # 
+  # for (i in 1:length(cluster_varnames2[[1]])) {
+  #   l_formula <- add_new_expression(
+  #     l_formula, fun_formulas(pathogen = pathogen, data = "all", 
+  #                             doses = doses, model_nm = "cs2i", others = others, 
+  #                             varname = cluster_varnames2[i,1], varname2 = cluster_varnames2[i,2]))
+  # }
+  # for (i in 1:length(cluster_varnames2[[1]])) {
+  #   l_formula <- add_new_expression(
+  #     l_formula, fun_formulas(pathogen = pathogen, data = "all", 
+  #                             doses = doses, model_nm = "cs2ni", others = others,
+  #                             varname = cluster_varnames2[i,1], varname2 = cluster_varnames2[i,2]))
+  # }
+  # 
+  # For s08 data 
+  l_formula_s08 <- list()
+  # l_formula_s08 <- add_new_expression(
+  #   l_formula_s08, fun_formulas(pathogen = pathogen, data = "s08", 
+  #                               doses = doses, model_nm = "base", others = others))
+  # l_formula_s08 <- add_new_expression(
+  #   l_formula_s08, fun_formulas(pathogen = pathogen, data = "s08", 
+  #                               doses = doses, model_nm = "cs", others = others))
+  # for (i in cluster_varnames) {
+  #   l_formula_s08 <- add_new_expression(
+  #     l_formula_s08, fun_formulas(pathogen = pathogen, data = "s08", 
+  #                                 doses = doses, model_nm = "csni", others = others, 
+  #                                 varname = i))
+  # }
+  # for (i in cluster_varnames) {
+  #   l_formula_s08 <- add_new_expression(
+  #     l_formula_s08, fun_formulas(pathogen = pathogen, data = "s08", 
+  #                                 doses = doses, model_nm = "csi", others = others, 
+  #                                 varname = i))
+  # }
+  for (i in 1:length(cluster_varnames2[[1]])) {
+    l_formula_s08 <- add_new_expression(
+      l_formula_s08, fun_formulas(pathogen = pathogen, data = "s08", 
+                                  doses = doses, model_nm = "cs2i", others = others,
+                                  varname = cluster_varnames2[i,1], varname2 = cluster_varnames2[i,2]))
+  }
+  for (i in 1:length(cluster_varnames2[[1]])) {
+    l_formula_s08 <- add_new_expression(
+      l_formula_s08, fun_formulas(pathogen = pathogen, data = "s08", 
+                                  doses = doses, model_nm = "cs2ni", others = others, 
+                                  varname = cluster_varnames2[i,1], varname2 = cluster_varnames2[i,2]))
+  }
+  
+  l_formula <- add_new_expression(l_formula, l_formula_s08, omit_exp = T)
+  
+  saveRDS(l_formula, file = glue("{dirs$outputs}/{pathogen}/formula_brms_{pathogen}_l.rds"))
+  return(l_formula)
+}
+```
+

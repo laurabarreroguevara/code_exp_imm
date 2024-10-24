@@ -1,0 +1,119 @@
+---
+title: "Assign Vaccine Concentrations"
+author: "Laura Andrea Barrero Guevara"
+date: '2022-08-31'
+---
+
+####################################################################################################
+Purpose: This script assigns vaccine concentrations per study, RCT group, and country for the 
+included studies across the pathogens.
+
+Functions Used:
+- `fun_dgsk_vacconc.R`: Add vaccine concentrations that have exceptions. 
+
+Output:
+- `stu_vaccconc.rds`:  Data frame containing GSK vaccine concentrations per pathogen, study, 
+RCT group, and country.
+####################################################################################################
+
+# Load packages, themes, directories, and functions
+```{r}
+rm(list = ls())
+source("00_pck.R")
+source("fun_data/fun_dgsk_vacconc.R")
+```
+
+# Load data 
+```{r}
+# Load the data frame of included studies per pathogen
+stu_included_perpat <- readRDS(glue("{dirs$processed}/stu_included_perpat.rds")) %>% 
+  filter(included == TRUE)
+```
+
+# Read in the RCT group names for each pathogen
+```{r}
+stu_rctg <- sapply(unique(stu_included_perpat$pat), function(i) {
+  sapply(filter(stu_included_perpat, included == TRUE, pat == i)$study, function(x) {
+    readRDS(glue("{dirs$processed}/01_stu_tidydfs/stu_df_pid_{x}.rds")) %>%
+      mutate(rct_group = tolower(rct_group)) %>%
+      distinct(study, rct_group, country)
+      }, simplify = FALSE) %>%
+    bind_rows()
+}, simplify = FALSE)
+```
+
+# Read in the vaccine concentrations data and tidy up 
+```{r}
+stu_vaccconc <- sapply(unique(stu_included_perpat$pat), function(x) {
+  # Define pathogen file
+  pat_file <- case_when(x %in% c("dipht", "tetan", "pertu") ~ "dtp",
+                        x %in% c("measl", "mumps", "rubel") ~ "mmr",
+                        TRUE ~ x)
+  # Define pathogen vaccine concentration column 
+  pat_vacconc <- case_when(x == "men" ~ "vac_conc_menc",
+                           x == "polio" ~ "vac_conc_polio1",
+                           x == "strep" ~ "vac_conc_strep6b", 
+                           TRUE ~ paste0("vac_conc_", x))
+  
+  # Read vaccine concentration files 
+  vac_conc_all <- read_csv(glue("{dirs$raw}/studies_perpat_{pat_file}.csv"), 
+                           show_col_types = FALSE) %>%
+    mutate(vac_conc = !!sym(pat_vacconc)) %>%
+    filter(study %in% filter(stu_included_perpat, included == TRUE, pat == x)$study) 
+  
+  # Define relevant columns for tidying
+  vars <- c("study", "vac_conc", "vac_conc_unit", "rct_group_des", "vac_type")
+  vac_conc_all <- vac_conc_all %>%
+    distinct(across(all_of(vars[vars %in% names(vac_conc_all)]))) %>%
+    mutate(across(-c("vac_conc"), tolower))
+  
+  # Vaccine concentrations for studies with unique vaccine concentration 
+  vac_conc_1 <- vac_conc_all %>%
+    distinct(study, vac_conc) %>%
+    group_by(study) %>%
+    filter(n() == 1) %>%
+    ungroup()
+  
+  # Add vaccine concentrations to each rct group and country
+  stu_vaccconc <- stu_rctg[[x]] %>%
+    # First add unique vaccine concentrations
+    left_join(vac_conc_1, by = join_by(study)) %>%
+    # Select manually the vaccine concentrations that were multiple per study
+    fun_dgsk_vacconc(pat = x) %>%
+    # Set 0 to NAs
+    mutate(vac_conc = na_if(vac_conc, 0)) %>%
+    # Add vaccine concentration units 
+    left_join(distinct(vac_conc_all, study, vac_conc, vac_conc_unit), 
+              by = join_by(study, vac_conc), relationship = "many-to-many") %>%
+    # Exponentiation if necessary 
+    mutate(vac_conc = case_when(str_detect(vac_conc_unit, "10e") ~ 10^vac_conc,
+                                .default = vac_conc)) %>%
+    mutate(vac_conc_unit = str_remove_all(vac_conc_unit, "_10e")) %>%
+    # Fix vaccine concentrations units for dipht and tetan
+    mutate(vac_conc_unit = case_when(!is.na(vac_conc) ~ "lf", .default = NA))
+  
+  return(stu_vaccconc)
+}, simplify = FALSE)
+
+bind_rows(stu_vaccconc)
+```
+
+# Save vaccine concentrations
+```{r}
+saveRDS(bind_rows(stu_vaccconc, .id = "pat"), glue("{dirs$processed}/stu_vacconc.rds"))
+```
+
+####################################################################################################
+# END
+####################################################################################################
+
+
+
+
+
+
+
+
+
+
+

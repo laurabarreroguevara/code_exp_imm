@@ -8,7 +8,12 @@
 
 # User-specific files
 .Ruserdata
-
+data
+outputs
+_extra
+_archiv
+*.rds
+*.Rds
 # Example code in package build process
 *-Ex.R
 

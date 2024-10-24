@@ -1,0 +1,413 @@
+---
+title: "BRMS plots"
+author: "Laura Andrea Barrrero Guevara"
+date: "2023-02-23"
+output: html_document
+---
+
+################################################################################
+Purpose of script: To check the model results and plot it 
+################################################################################
+
+```{r}
+rm(list = ls())
+source("00_pck.R")
+source("fun_mod_pl.R")
+library(colorspace)
+theme_set(theme_classic() + theme(strip.background = element_blank()))
+```
+
+# Functions 
+```{r}
+# Functions limits and breaks
+fun_breaks <- function(x) {
+  if (max(x) > 2) {
+    if (((ceiling(max(x)) - floor(min(x))) %% 2) == 0) { # Check if even or odd
+      seq(floor(min(x)), ceiling(max(x)), length.out = 3)
+    } else {
+      seq(floor(min(x)), ceiling(max(x)+1), length.out = 3)
+    }
+  } else {
+    if (((ceiling(max(x*10)) - floor(min(x*10))) %% 2) == 0) { # Check if even or odd
+      seq(floor(min(x*10)), ceiling(max(x*10)), length.out = 3)/10
+    } else {
+      seq(floor(min(x*10)), ceiling(max(x*10)+1), length.out = 3)/10
+    }
+  }
+}
+fun_limits <- function(x) {
+  if (max(x) > 2) {
+    if (((ceiling(max(x)) - floor(min(x))) %% 2) == 0) { # Check if even or odd
+      c(floor(min(x)), ceiling(max(x)))
+    } else {
+      c(floor(min(x)), ceiling(max(x)+1))
+    }
+  }  else {
+    if (((ceiling(max(x*10)) - floor(min(x*10))) %% 2) == 0) { # Check if even or odd
+      c(floor(min(x*10)), ceiling(max(x*10)))/10
+    } else {
+      c(floor(min(x*10)), ceiling(max(x*10)+1))/10
+    }
+  }
+}
+```
+
+# Raw data 
+```{r}
+selpat_l <- c("rota", "varicella", "multi_mmr", "multi_dtp", "pn", "hib", 
+              "multi_men", "hbv", "multi_ipv")
+
+# Select a cluster 
+clu_name <- "reg_3"
+clu_name_val <- "1_Temperate"
+
+# Read models for a single clustering method
+mod_l <- sapply(selpat_l, function(x) {
+  if(x %in% c("varicella", "measles", "mumps", "rubella", "multi_mmr")) {vac <- "v1"
+  } else {vac <- "vl"}
+  if(str_detect(x, "multi")) {gauss <- "_gauss"
+  } else {gauss <- ""}
+  list(reg = summary(readRDS(glue("{dirs$outputs}/perpathogen/{x}/bm{vac}_s08_{x}_csi_{clu_name}{gauss}.rds"))),
+       base = summary(readRDS(glue("{dirs$outputs}/perpathogen/{x}/bm{vac}_s08_{x}_base{gauss}.rds"))))
+  }, simplify = FALSE)
+
+mod_l$multi_men$reg <- summary(readRDS(glue("{dirs$outputs}/perpathogen/multi_men/bmvl_s08_multi_men_cs_gauss.rds")))
+mod_l$multi_ipv$reg <- summary(readRDS(glue("{dirs$outputs}/perpathogen/multi_ipv/bmvl_s08_multi_ipv_cs_gauss.rds")))
+
+modsum_l <- unlist(mod_l, recursive = FALSE)
+
+x <- modsum_l$rota.reg
+
+# Tidy data frame for all 
+df_fixed <- sapply(modsum_l, function(x) {
+  x$fixed %>%
+    rownames_to_column("param") %>%
+    filter(str_detect(param, "age|sex|vac_conc|time_v1_v2|time_v2_v3|time_vl_s1"))}, 
+  simplify = FALSE) %>%
+  bind_rows(.id = "pathogen") %>%
+  separate(pathogen, into = c("pathogen", "mod"), sep = "\\.") %>%
+  mutate(imm_name = str_extract(param, "(?<=immvals1anti).+?(?=_)"), 
+         param = case_when(
+           str_detect(pathogen, "multi") ~ str_extract(param, "(?<=_).+"),
+           .default = param),
+         param = str_remove(param, "_")) %>%
+  relocate(pathogen, imm_name, mod, param)
+
+
+pl_fixed <- df_fixed %>%
+  mutate(pathogen = factor(pathogen, levels = selpat_l),
+         imm_name = replace_na(imm_name, " "),
+         imm_name = str_remove_all(imm_name, "anti_")) %>%
+  ggplot(aes(x = Estimate, y = imm_name, color = mod)) + 
+    geom_vline(aes(xintercept = 0), color = "grey", linetype = "dotted") + 
+    geom_point() + 
+    geom_segment(aes(x = `l-95% CI`, xend = `u-95% CI`, yend = imm_name)) + 
+  facet_grid(pathogen+imm_name~param, scales = "free", switch = "y") + 
+  theme(axis.text.y = element_blank(),
+        axis.title.y = element_blank(),
+        axis.ticks.y = element_blank(), 
+        axis.line.y = element_blank(),
+        strip.text.y.left = element_text(angle = 0))
+
+ggsave(pl_fixed, file = "outputs/figures/all_asel_covars.pdf",
+       height = 4, width = 15)
+
+df_fixed %>%
+  filter(param == "age") %>%
+  filter(pathogen == "pn")
+```
+
+# Per covariate, tidy
+```{r}
+pat_tidy_names <- c("Rotavirus", "Varicella zoster virus", "Measles virus", "Mumps virus", 
+              "Rubella virus", "C. diphtheriae", "C. tetani", "B. pertussis", 
+              "S. pneumoniae", "H. influenzae Type B", 
+              "N. meningitidis \n (serotypes c and a)", "Hepatitis B virus",
+              "Polio virus \n (serotypes 1, 2 and 3)")
+names(pat_tidy_names) <- c("rota", "varicella", "measles", "mumps", "rubella", "dipht", "tetan", 
+                     "pertupt", "pn", "hib", "multi_men", "hbv","multi_ipv") 
+
+pl_age <- df_fixed %>%
+  filter(param == "age")  %>%
+  mutate(imm_name = replace_na(imm_name, ""), 
+         sam_imm = paste0(pathogen,imm_name), 
+         pat_tidy = case_when(pathogen %in% c("multi_mmr", "multi_dtp") ~ imm_name,
+                              .default = pathogen),
+         pat_tidy = factor(pat_tidy,  levels = names(pat_tidy_names), labels = pat_tidy_names),
+         imm_tidy = case_when(pathogen %in% c("multi_men", "multi_ipv") ~ imm_name,
+                              .default = NA)) %>%
+  filter(mod == "reg") %>%
+  #filter(imm_name != "menc") %>%
+  mutate(effect_cuali = case_when(`l-95% CI` < 0 & `u-95% CI` < 0 ~ "negative",
+                                  `l-95% CI` > 0 & `u-95% CI` > 0 ~ "positive",
+                                  .default = "nonsig")) %>%
+  ggplot(aes(x = Estimate, y = reorder(pat_tidy, Estimate), color = effect_cuali)) + 
+    geom_vline(aes(xintercept = 0), color = "grey", linetype = "dotted") + 
+    geom_segment(aes(x = `l-95% CI`, xend = `u-95% CI`, yend = pat_tidy), alpha = 0.8) + 
+    geom_point(size = 4, color = "white") + 
+    geom_point(size = 2, alpha = 0.8) + 
+    scale_color_manual(values = c("grey", "grey", "#0D0887FF")) + 
+    scale_x_continuous("Estimated effect of age at vaccination") + 
+  theme(#axis.text.y = element_blank(),
+        axis.title.y = element_blank(),
+        axis.ticks.y = element_blank(), 
+        axis.line.y = element_blank(),
+        strip.text.y.left = element_text(angle = 0),
+        legend.position = "none")
+
+ggsave(pl_age, file = glue("outputs/figures/covars_age.pdf"), height = 3, width = 6)
+```
+
+```{r}
+bind_rows(datlong_l, .id = "pathogen") %>%
+  filter(age < 52*4) %>%
+  mutate(imm_name = str_remove_all(imm_name, "anti_|_"),
+         imm_name = replace_na(imm_name, ""), 
+         sam_imm = paste0(pathogen,imm_name), 
+         pat_tidy = case_when(pathogen %in% c("multi_mmr", "multi_dtp") ~ imm_name,
+                              .default = pathogen),
+         pat_tidy = factor(pat_tidy,  levels = names(pat_tidy_names), labels = pat_tidy_names),
+         imm_tidy = case_when(pathogen %in% c("multi_men", "multi_ipv") ~ imm_name,
+                              .default = NA)) %>%
+  filter(!(pathogen %in% c("multi_mmr", "varicella"))) %>%
+    ggplot(aes(x = age/4, group = imm_name)) + 
+    geom_density(fill = "grey", color = "transparent") + 
+    scale_y_continuous(breaks = c(0,0.5,1)) + 
+    scale_x_continuous("Age (months)") + 
+    facet_grid(pat_tidy~., scales = "free") + 
+    theme(strip.text.y = element_text(angle = 0))
+```
+
+```{r}
+pl_tbd <- df_fixed %>%
+  filter(param == "timev1_v2")  %>%
+  mutate(imm_name = replace_na(imm_name, ""), 
+         sam_imm = paste0(pathogen,imm_name), 
+         pat_tidy = case_when(pathogen %in% c("multi_mmr", "multi_dtp") ~ imm_name,
+                              .default = pathogen),
+         pat_tidy = factor(pat_tidy,  levels = names(pat_tidy_names), labels = pat_tidy_names),
+         imm_tidy = case_when(pathogen %in% c("multi_men", "multi_ipv") ~ imm_name,
+                              .default = NA)) %>%
+  filter(mod == "base") %>%
+  #filter(imm_name != "menc") %>%
+  mutate(effect_cuali = case_when(`l-95% CI` < 0 & `u-95% CI` < 0 ~ "negative",
+                                  `l-95% CI` > 0 & `u-95% CI` > 0 ~ "positive",
+                                  .default = "nonsig")) %>%
+  ggplot(aes(x = Estimate, y = reorder(pat_tidy, Estimate), color = effect_cuali)) + 
+    geom_vline(aes(xintercept = 0), color = "grey", linetype = "dotted") + 
+    geom_segment(aes(x = `l-95% CI`, xend = `u-95% CI`, yend = pat_tidy), alpha = 0.8) + 
+    geom_point(size = 4, color = "white") + 
+    geom_point(size = 2, alpha = 0.8) + 
+    scale_color_manual(values = c("grey", "#0D0887FF", "orange")) + 
+    scale_x_continuous("Estimated effect of time between doses") + 
+  theme(#axis.text.y = element_blank(),
+        axis.title.y = element_blank(),
+        axis.ticks.y = element_blank(), 
+        axis.line.y = element_blank(),
+        strip.text.y.left = element_text(angle = 0),
+        legend.position = "none")
+
+ggsave(pl_tbd, file = glue("outputs/figures/covars_tbd.pdf"), height = 3, width = 6)
+```
+
+```{r}
+df_fixed %>%
+  filter(param == "timevl_s1")  %>%
+  mutate(imm_name = replace_na(imm_name, ""), 
+         sam_imm = paste0(pathogen,imm_name), 
+         pat_tidy = case_when(pathogen %in% c("multi_mmr", "multi_dtp") ~ imm_name,
+                              .default = pathogen),
+         pat_tidy = factor(pat_tidy,  levels = names(pat_tidy_names), labels = pat_tidy_names),
+         imm_tidy = case_when(pathogen %in% c("multi_men", "multi_ipv") ~ imm_name,
+                              .default = NA)) %>%
+  filter(mod == "base") %>%
+  #filter(imm_name != "menc") %>%
+  mutate(effect_cuali = case_when(`l-95% CI` < 0 & `u-95% CI` < 0 ~ "negative",
+                                  `l-95% CI` > 0 & `u-95% CI` > 0 ~ "positive",
+                                  .default = "nonsig")) %>%
+  ggplot(aes(x = Estimate, y = reorder(pat_tidy, -Estimate), color = effect_cuali)) + 
+    geom_vline(aes(xintercept = 0), color = "grey", linetype = "dotted") + 
+    geom_segment(aes(x = `l-95% CI`, xend = `u-95% CI`, yend = pat_tidy), alpha = 0.8) + 
+    geom_point(size = 4, color = "white") + 
+    geom_point(size = 2, alpha = 0.8) + 
+    scale_color_manual(values = c("orange", "grey", "#0D0887FF")) + 
+    scale_x_continuous("Estimated effect of time between vaccination and immunogenicity") + 
+  theme(#axis.text.y = element_blank(),
+        axis.title.y = element_blank(),
+        axis.ticks.y = element_blank(), 
+        axis.line.y = element_blank(),
+        strip.text.y.left = element_text(angle = 0),
+        legend.position = "none")
+```
+
+
+
+
+
+
+
+
+
+
+
+```{r}
+selpat_l <- c("rota", "varicella", "multi_mmr", "multi_dtp", "pn", "hib", 
+              "multi_men", "hbv", "multi_ipv")
+
+# Read in the data 
+dat_l <- sapply(selpat_l, function(x) {
+  if(x %in% c("varicella", "measles", "mumps", "rubella", "multi_mmr")) {vac <- "v1"
+  } else {vac <- "vl"}
+  dat <- readRDS(glue("{dirs$outputs}/perpathogen/{x}/data_brms_{x}_{vac}_s08.rds"))
+  if(x %in% c("multi_polio", "multi_ipv", "multi_opv")) {
+    dat <- dat %>%
+      relocate(imm_val_s1_anti_polio_1, imm_val_s1_anti_polio_2, imm_val_s1_anti_polio_3)
+  }
+  return(dat)
+  }, simplify = FALSE)
+
+datlong_l <- sapply(str_subset(selpat_l, "multi"), function(x) {
+  dat_l[[x]] %>%
+    ungroup() %>%
+    select(!c(starts_with("censored"), starts_with("imm_val_s0"))) %>%
+    pivot_longer(cols = starts_with("imm_val_s1"), names_to = "imm_name", values_to = "imm_val_s1",
+                 cols_vary = "slowest") %>%
+    mutate(imm_name = str_remove_all(imm_name, "imm_val_s1_"))}, 
+  simplify = FALSE)
+
+datlong_l <- c(datlong_l, dat_l[str_subset(selpat_l, "multi", negate = TRUE)])
+
+pl_age <- (bind_rows(datlong_l, .id = "pathogen") %>%
+  filter(age < 52*4) %>%
+    mutate(pathogen = factor(pathogen, levels = selpat_l),
+           imm_name = replace_na(imm_name, " "),
+           imm_name = str_remove_all(imm_name, "anti_")) %>%
+    ggplot(aes(x = age/4, y = log(imm_val_s1))) + 
+    geom_point(alpha = 0.1) + 
+    scale_y_continuous("Ab titers (log)") + 
+    scale_x_continuous("Age (months)",
+                       trans = "log") + 
+    facet_wrap(pathogen + imm_name~., scales = "free")) +
+  (bind_rows(datlong_l, .id = "pathogen") %>%
+  filter(age < 52*4) %>%
+    mutate(pathogen = factor(pathogen, levels = selpat_l),
+           imm_name = replace_na(imm_name, " "),
+           imm_name = str_remove_all(imm_name, "anti_")) %>%
+    ggplot(aes(x = age/4)) + 
+    geom_density() + 
+    scale_x_continuous("Age (months)") + 
+    facet_grid(pathogen + imm_name~., scales = "free")) +
+  plot_layout(widths = c(5,1), ncol = 2)
+
+ggsave(pl_age, file = "outputs/figures/all_asel_covars_age.pdf",
+       height = 15, width = 20)
+
+pl_sex <- bind_rows(datlong_l, .id = "pathogen") %>%
+    mutate(pathogen = factor(pathogen, levels = selpat_l),
+           imm_name = replace_na(imm_name, " "),
+           imm_name = str_remove_all(imm_name, "anti_")) %>%
+    ggplot(aes(x = log(imm_val_s1), color = sex, fill = sex)) + 
+    geom_density(alpha = 0.1) + 
+    scale_y_continuous("Ab titers (log)") + 
+    scale_size_continuous("Individuals", breaks = c(10, 50, 100, 150, 200)) + 
+    facet_wrap(pathogen + imm_name~., scales = "free") + 
+    theme(legend.position = "right") 
+
+ggsave(pl_sex, file = "outputs/figures/all_asel_covars_sex.pdf",
+       height = 7, width = 7)
+
+   # filter(str_detect(param, "age|sex|vac_conc|time_v1_v2|time_v2_v3|time_vl_s1"))}, 
+
+pl_vac_conc <- bind_rows(datlong_l, .id = "pathogen") %>%
+  mutate(vac_conc = case_when(pathogen == "multi_ipv" ~ NA,
+         .default = vac_conc)) %>%
+  filter(!is.na(vac_conc)) %>%
+    mutate(pathogen = factor(pathogen, levels = selpat_l),
+           imm_name = replace_na(imm_name, " "),
+           imm_name = str_remove_all(imm_name, "anti_")) %>%
+    ggplot(aes(x = vac_conc, y = log(imm_val_s1))) + 
+    geom_point(alpha = 0.1) + 
+    scale_y_continuous("Ab titers (log)") + 
+    facet_wrap(pathogen + imm_name~.)
+
+ggsave(pl_vac_conc, file = "outputs/figures/all_asel_covars_vacconc.pdf",
+       height = 7, width = 7)
+
+pl_time <- bind_rows(datlong_l, .id = "pathogen") %>%
+    mutate(pathogen = factor(pathogen, levels = selpat_l),
+           imm_name = replace_na(imm_name, " "),
+           imm_name = str_remove_all(imm_name, "anti_")) %>%
+  pivot_longer(cols = c(time_v1_v2, time_v2_v3, time_vl_s1)) %>%
+    ggplot(aes(x = value/30, y = log(imm_val_s1))) + 
+    geom_point(alpha = 0.1) + 
+    scale_y_continuous("Ab titers (log)") + 
+    scale_x_continuous("Months", trans = "log") + 
+    scale_size_continuous("Individuals", breaks = c(10, 50, 100, 150, 200)) + 
+    facet_grid(pathogen + imm_name~name, scales = "free") + 
+    theme(legend.position = "right") 
+
+ggsave(pl_time, file = "outputs/figures/all_asel_covars_time.pdf",
+       height = 20, width = 10)
+```
+
+
+
+
+# Raw data 
+```{r}
+# selpat_l <- c("rota", "varicella", "multi_mmr", "multi_dtp", "pn", "hib", 
+#               "multi_men", "hbv", "multi_ipv")
+# 
+# # Select a cluster 
+# clu_name <- "reg_3"
+# clu_name_val <- "3_Temperate south"
+# 
+# # Read models for a single clustering method
+# mod_l <- sapply(selpat_l, function(x) {
+#   if(x %in% c("varicella", "measles", "mumps", "rubella", "multi_mmr")) {vac <- "v1"
+#   } else {vac <- "vl"}
+#   if(str_detect(x, "multi")) {gauss <- "_gauss"
+#   } else {gauss <- ""}
+#   readRDS(glue("{dirs$outputs}/perpathogen/{x}/bm{vac}_s08_{x}_csi_{clu_name}{gauss}.rds"))}, simplify = FALSE)
+# 
+# mod_l$multi_men <- readRDS(glue("{dirs$outputs}/perpathogen/multi_men/bmvl_s08_multi_men_cs_gauss.rds"))
+# mod_l$multi_ipv <- readRDS(glue("{dirs$outputs}/perpathogen/multi_ipv/bmvl_s08_multi_ipv_cs_gauss.rds"))
+# 
+# modsum_l <- lapply(mod_l, summary)
+# 
+# x <- "rota"
+# 
+# modsum_l$rota$fixed
+# 
+# pl_fixed <- sapply(modsum_l, function(x) {
+#   x$fixed %>%
+#     rownames_to_column("param") %>%
+#     filter(str_detect(param, "age|sex|vac_conc|time_v1_v2|time_v2_v3|time_vl_s1"))}, 
+#   simplify = FALSE) %>%
+#   bind_rows(.id = "pathogen") %>%
+#   mutate(imm_name = str_extract(param, "(?<=immvals1anti).+?(?=_)"), 
+#          param = case_when(
+#            str_detect(pathogen, "multi") ~ str_extract(param, "(?<=_).+"),
+#            .default = param),
+#          param = str_remove(param, "_")) %>%
+#   relocate(pathogen, imm_name, param) %>%
+#   mutate(pathogen = factor(pathogen, levels = selpat_l),
+#          imm_name = replace_na(imm_name, " "),
+#          imm_name = str_remove_all(imm_name, "anti_")) %>%
+#   ggplot(aes(x = Estimate, y = imm_name)) + 
+#     geom_vline(aes(xintercept = 0), color = "grey", linetype = "dotted") + 
+#     geom_point() + 
+#     geom_segment(aes(x = `l-95% CI`, xend = `u-95% CI`, yend = imm_name)) + 
+#   facet_grid(pathogen+imm_name~param, scales = "free", switch = "y") + 
+#   theme(axis.text.y = element_blank(),
+#         axis.title.y = element_blank(),
+#         axis.ticks.y = element_blank(), 
+#         axis.line.y = element_blank(),
+#         strip.text.y.left = element_text(angle = 0))
+# 
+# ggsave(pl_fixed, file = "outputs/figures/all_asel_covars.pdf",
+#        height = 4, width = 15)
+
+```
+
+

@@ -1,0 +1,352 @@
+---
+title: "BRMS plots"
+author: "Laura Andrea Barrrero Guevara"
+date: "2023-02-23"
+output: html_document
+---
+
+################################################################################
+Purpose of script: To check the model results and plot it 
+################################################################################
+
+```{r}
+rm(list = ls())
+source("00_pck.R")
+source("fun_mod_pl.R")
+library(colorspace)
+theme_set(theme_classic() + theme(strip.background = element_blank()))
+```
+
+# Functions 
+```{r}
+# Functions limits and breaks
+fun_breaks <- function(x) {
+  if (max(x) > 2) {
+    if (((ceiling(max(x)) - floor(min(x))) %% 2) == 0) { # Check if even or odd
+      seq(floor(min(x)), ceiling(max(x)), length.out = 3)
+    } else {
+      seq(floor(min(x)), ceiling(max(x)+1), length.out = 3)
+    }
+  } else {
+    if (((ceiling(max(x*10)) - floor(min(x*10))) %% 2) == 0) { # Check if even or odd
+      seq(floor(min(x*10)), ceiling(max(x*10)), length.out = 3)/10
+    } else {
+      seq(floor(min(x*10)), ceiling(max(x*10)+1), length.out = 3)/10
+    }
+  }
+}
+fun_limits <- function(x) {
+  if (max(x) > 2) {
+    if (((ceiling(max(x)) - floor(min(x))) %% 2) == 0) { # Check if even or odd
+      c(floor(min(x)), ceiling(max(x)))
+    } else {
+      c(floor(min(x)), ceiling(max(x)+1))
+    }
+  }  else {
+    if (((ceiling(max(x*10)) - floor(min(x*10))) %% 2) == 0) { # Check if even or odd
+      c(floor(min(x*10)), ceiling(max(x*10)))/10
+    } else {
+      c(floor(min(x*10)), ceiling(max(x*10)+1))/10
+    }
+  }
+}
+```
+
+# Raw data 
+```{r}
+# selpat_l <- c("multi_mmr", "multi_dtp", "multi_pertu", "multi_men")
+# gppat <- "1"
+selpat_l <- c("multi_pn", "multi_polio", "multi_ipv", "multi_opv")
+gppat <- "2"
+
+# Read in the data 
+dat_l <- sapply(selpat_l, function(x) {
+  if(x %in% c("varicella", "measles", "mumps", "rubella", "multi_mmr")) {vac <- "v1"
+  } else {vac <- "vl"}
+  dat <- readRDS(glue("{dirs$outputs}/perpathogen/{x}/data_brms_{x}_{vac}_s08.rds"))
+  if(x %in% c("multi_polio", "multi_ipv", "multi_opv")) {
+    dat <- dat %>%
+      relocate(imm_val_s1_anti_polio_1, imm_val_s1_anti_polio_2, imm_val_s1_anti_polio_3)
+  }
+  return(dat)
+  }, simplify = FALSE)
+
+datlong_l <- sapply(selpat_l, function(x) {
+  dat_l[[x]] %>%
+    ungroup() %>%
+    select(!c(starts_with("censored"), starts_with("imm_val_s0"))) %>%
+    pivot_longer(cols = starts_with("imm_val_s1"), names_to = "imm_name", values_to = "imm_val_s1",
+                 cols_vary = "slowest") %>%
+    mutate(imm_name = str_remove_all(imm_name, "imm_val_s1_"))}, 
+  simplify = FALSE)
+
+# Types of clustering 
+clu_name <- "reg_3"
+clu_name_l <- c(2, 3, 4, 6) 
+names(clu_name_l) <- c("reg_2b", "reg_3", "reg_4", "reg_6a")
+
+# Plot all
+lapply(names(clu_name_l), function(clu_name) {
+  pl <- bind_rows(datlong_l, .id = "pathogen") %>%
+    mutate(pathogen = factor(pathogen, levels = selpat_l)) %>%
+    rename(clu = all_of(clu_name)) %>%
+    mutate(clu = as.character(clu)) %>%
+    group_by(pathogen, vac_week_v1, clu, imm_name) %>%
+    summarise(mean_imm = mean(imm_val_s1),
+              sd_imm = sd(imm_val_s1),
+              tot = n(),
+              tot_s = length(unique(study))) %>%
+    # ungroup() %>%
+    # group_by(pathogen, clu, imm_name) %>%
+    # mutate(mean_overall = mean(mean_imm)) %>%
+    ggplot(aes(x = vac_week_v1, y = log(mean_imm), size = tot)) + 
+    geom_point(alpha = 0.8) + 
+    geom_point(aes(x = vac_week_v1, y = -Inf), size = 4, shape = "|") +
+    scale_y_continuous("Ab titers (log)") + 
+    scale_x_continuous("Week", breaks = c(1,18,35,52), limits = c(1,52)) + 
+    scale_size_continuous("Individuals", breaks = c(10, 50, 100, 150, 200)) + 
+    facet_grid(pathogen + imm_name~clu, scales = "free") + 
+    theme(legend.position = "right") 
+  ggsave(pl, file = glue("outputs/figures/all_datamvn{gppat}_{clu_name}.pdf"),
+         height = 15, width = clu_name_l[clu_name]*1.5 + 2)
+  return(pl)
+  })
+#4.5*15
+```
+
+# Plot data for a single clustering method and clustering value 
+```{r}
+# Select a cluster 
+clu_name <- "reg_3"
+clu_name_val <- "1_Temperate"
+
+pl_dat <- bind_rows(datlong_l, .id = "pathogen") %>%
+  mutate(pathogen = factor(pathogen, levels = selpat_l)) %>%
+  rename(clu = all_of(clu_name)) %>%
+  mutate(clu = as.character(clu)) %>%
+  group_by(pathogen, vac_week_v1, clu) %>%
+  filter(clu == clu_name_val) %>%
+  ggplot(aes(x = vac_week_v1, y = log(imm_val_s1))) + 
+  geom_point(alpha = 0.1) + 
+  scale_y_continuous("Ab titers (log)") +
+  scale_x_continuous("Week", breaks = c(1,18,35,52), limits = c(1,52)) + 
+  facet_grid(pathogen+imm_name~"Ab titers (log)\n per individual", scales = "free") + 
+  theme(legend.position = "bottom",
+        strip.text.y.right = element_blank(),
+        axis.title.y = element_blank())
+
+pl_dat_sum <- bind_rows(datlong_l, .id = "pathogen") %>%
+  mutate(pathogen = factor(pathogen, levels = selpat_l)) %>%
+  rename(clu = all_of(clu_name)) %>%
+  mutate(clu = as.character(clu)) %>%
+  group_by(pathogen, vac_week_v1, clu, imm_name) %>%
+  summarise(mean_imm = mean(imm_val_s1),
+            sd_imm = sd(imm_val_s1),
+            tot = n(),
+            tot_s = length(unique(study))) %>%
+  filter(clu == clu_name_val) %>%
+  ggplot(aes(x = vac_week_v1, y = log(mean_imm), size = tot)) + 
+  geom_point(alpha = 0.2) + 
+  scale_y_continuous("Ab titers (log)") + 
+  scale_x_continuous("Week", breaks = c(1,18,35,52), limits = c(1,52)) + 
+  scale_size_continuous("Individuals", breaks = c(10, 50, 100, 150, 200), range = c(0.5,4)) + 
+  facet_grid(pathogen+imm_name~"Ab titers (log)\n summarized \n (per week)", scales = "free") + 
+  theme(legend.position = "bottom",
+        strip.text.y.right = element_blank(),
+        axis.title.y = element_blank())
+```
+
+# Read models for a single clustering method
+```{r}
+# Read models
+# mod_l <- sapply(selpat_l, function(x) {
+#   if(x %in% c("varicella", "measles", "mumps", "rubella", "multi_mmr")) {vac <- "v1"
+#   } else {vac <- "vl"}
+#   readRDS(glue("{dirs$outputs}/perpathogen/{x}/bm{vac}_s08_{x}_csi_{clu_name}_gauss.rds"))}, simplify = FALSE)
+
+# Obtain the conditional effects 
+ce_dat_l <- sapply(selpat_l, function(x) {
+  ce_dat <- pomp::bake(file = glue("outputs/dfs_figures/ce_dat_{x}.rds"), {
+  lapply(conditional_effects(mod_l[[x]], resolution = 52, effects = glue("pi_vac_week_v1:{clu_name}")),
+          as.data.frame) %>%
+    bind_rows(.id = "imm_name") %>%
+    mutate(imm_name = str_extract(imm_name, "(?<=\\.immvals1anti).+?(?=_pi)")) %>%
+    mutate(pi_vac_week_v1 = round(pi_vac_week_v1, digits = 11)) %>%
+    rename(clu = all_of(clu_name)) %>%
+    mutate(clu = as.character(clu)) %>%
+    select(imm_name, pi_vac_week_v1, clu, estimate__, lower__, upper__) %>%
+    left_join(dat_l[[x]] %>%
+                mutate(pi_vac_week_v1 = round(pi_vac_week_v1, digits = 11)) %>%
+                distinct(vac_week_v1, pi_vac_week_v1)) %>%
+    left_join(dat_l[[x]] %>%
+                rename(clu = all_of(clu_name)) %>%
+                mutate(clu = as.character(clu),
+                       pi_vac_week_v1 = round(pi_vac_week_v1, digits = 11)) %>%
+                group_by(pi_vac_week_v1, vac_week_v1, clu) %>%
+                summarise(tot = n())) %>%
+    mutate(estimate__ = case_when(is.na(tot) ~ NA, .default = estimate__),
+           lower__ = case_when(is.na(tot) ~ NA, .default = lower__),
+           upper__ = case_when(is.na(tot) ~ NA, .default = upper__))
+  })
+  return(ce_dat)
+    }, simplify = FALSE)
+
+# Plot conditional effects 
+pl_ce <- bind_rows(ce_dat_l, .id = "pathogen") %>%
+  mutate(pathogen = factor(pathogen, levels = selpat_l)) %>%
+  filter(clu == clu_name_val) %>%
+  ggplot(aes(x = vac_week_v1, y = log(estimate__))) + 
+  geom_ribbon(aes(ymin = log(lower__), ymax = log(upper__)), 
+              alpha = 0.2, color = "white", fill = "red") + 
+  geom_line(color = "red") + 
+  scale_y_continuous("Ab titers (log)") + 
+  scale_x_continuous("Week", breaks = c(1,18,35,52), limits = c(1,52)) + 
+  facet_grid(pathogen+imm_name~"Conditional \n effect on \n ab titers (log)", scales = "free") + 
+  theme(legend.position = "none",
+        axis.title.y = element_blank())
+```
+
+# Make predictions 
+```{r}
+# Predictions for the single values 
+pred_l <- sapply(selpat_l, function(x) {
+  pred_dat <- pomp::bake(file = glue("outputs/dfs_figures/pred_dat_{x}.rds"), {
+  pred <- predict(mod_l[[x]], ndraws = 100, robust = TRUE) %>%
+    apply(3, as.data.frame) %>%
+    bind_rows(.id = "imm_name") %>%
+    mutate(imm_name = str_extract(imm_name, "anti(.*)"))
+  epred <- fitted(mod_l[[x]], ndraws = 100, robust = TRUE) %>%
+    apply(3, as.data.frame) %>%
+    bind_rows(.id = "imm_name") %>%
+    mutate(imm_name = str_extract(imm_name, "anti(.*)"))
+  datlong_l[[x]] %>%
+    rename(clu = all_of(clu_name)) %>%
+    mutate(clu = as.character(clu)) %>%
+    select(imm_name, vac_week_v1, imm_val_s1, clu, study) %>%
+    mutate(pred_m = pred$Estimate,
+           pred_q2.5 = pred$Q2.5,
+           pred_q97.5 = pred$Q97.5,
+           imm_name_pred = pred$imm_name,
+           epred_m = epred$Estimate,
+           epred_q2.5 = epred$Q2.5,
+           epred_q97.5 = epred$Q97.5,
+           imm_name_epred = epred$imm_name)
+  })
+  return(pred_dat)
+}, simplify = FALSE)
+
+lapply(pred_l, function(x) distinct(x, imm_name, imm_name_pred, imm_name_epred))
+
+# Plot observations vs predictions 
+pl_pred <- bind_rows(pred_l, .id = "pathogen") %>%
+  mutate(pathogen = factor(pathogen, levels = selpat_l)) %>%
+  filter(clu == clu_name_val) %>%
+  ggplot(aes(y = log(pred_m), x = log(imm_val_s1))) +
+  geom_abline(linetype = 2, color = "grey", size = 0.5) +
+  geom_point(size = 1.5, alpha = 0.01, color = "red") +
+  geom_linerange(aes(ymin = log(pred_q2.5), ymax = log(pred_q97.5)),
+                 size = 1, alpha = 0.01, color = "red") +
+  scale_x_continuous("Observed \n Ab titers (log)", breaks = fun_breaks, limits = fun_limits, expand = c(0, 0)) + 
+  scale_y_continuous("Predicted Ab titers (log)", breaks = fun_breaks, limits = fun_limits, expand = c(0, 0)) + 
+  facet_grid(pathogen+imm_name~"Model fit: \n Predicted \n ab titers (log)", scales = "free") +
+  theme(legend.position = "none",
+        strip.text.y.right = element_blank(),
+        axis.title.y = element_blank())
+```
+
+```{r}
+# Predictions of the mean per week 
+# Predictions for the single values 
+pred_sum_l <- sapply(selpat_l, function(x) {
+  pred_sum_dat <- pomp::bake(file = glue("outputs/dfs_figures/pred_sum_dat_{x}.rds"), {
+    pred <- posterior_predict(mod_l[[x]], ndraws = 10) %>%
+      apply(3, as.data.frame) %>%
+      bind_rows(.id = "imm_name_pred") %>%
+      mutate(imm_name_pred = str_extract(imm_name_pred, "anti(.*)")) %>%
+      group_by(imm_name_pred) %>%
+      mutate(draw = row_number()) %>%
+      ungroup() %>%
+      pivot_longer(cols = starts_with("V")) %>%
+      pivot_wider(names_from = draw, values_from = value, names_prefix = "draw_") %>%
+      bind_cols(datlong_l[[x]] %>%
+        rename(clu = all_of(clu_name)) %>%
+        mutate(clu = as.character(clu)) %>%  
+        select(imm_name, vac_week_v1, imm_val_s1, clu)) %>%
+      rename(vid = name) %>%
+      pivot_longer(cols = c(starts_with("draw_"))) %>%
+      group_by(imm_name, imm_name_pred, name, vac_week_v1, clu) %>%
+      summarise(mean_pred = mean(value),
+               sd_pred = sd(value),
+               mean_imm = mean(imm_val_s1),
+               sd_imm = sd(imm_val_s1),
+               tot = n())
+    epred <- posterior_epred(mod_l[[x]], ndraws = 10) %>%
+      apply(3, as.data.frame) %>%
+      bind_rows(.id = "imm_name_epred") %>%
+      mutate(imm_name_epred = str_extract(imm_name_epred, "anti(.*)")) %>%
+      group_by(imm_name_epred) %>%
+      mutate(draw = row_number()) %>%
+      ungroup() %>%
+      pivot_longer(cols = starts_with("V")) %>%
+      pivot_wider(names_from = draw, values_from = value, names_prefix = "draw_") %>%
+      bind_cols(datlong_l[[x]] %>%
+        rename(clu = all_of(clu_name)) %>%
+        mutate(clu = as.character(clu)) %>%  
+        select(imm_name, vac_week_v1, imm_val_s1, clu)) %>%
+      rename(vid = name) %>%
+      pivot_longer(cols = c(starts_with("draw_"))) %>%
+      group_by(imm_name, imm_name_epred, name, vac_week_v1, clu) %>%
+      summarise(mean_epred = mean(value),
+                sd_epred = sd(value),
+                mean_imm = mean(imm_val_s1),
+                sd_imm = sd(imm_val_s1),
+                tot = n()) 
+    
+    all <- left_join(pred, epred) %>%
+      rename(draw = name) %>%
+      select(imm_name, draw, vac_week_v1, clu, mean_imm, sd_imm, tot, 
+             mean_pred, imm_name_pred, sd_pred, imm_name_pred,
+             mean_epred, sd_epred, imm_name_epred)
+    return(all)
+  })
+  return(pred_sum_dat)
+}, simplify = FALSE)
+
+pl_pred_sum <- bind_rows(pred_sum_l, .id = "pathogen") %>%
+  mutate(pathogen = factor(pathogen, levels = selpat_l)) %>%
+  ungroup() %>%
+  group_by(pathogen, imm_name, vac_week_v1, clu, mean_imm, sd_imm, tot) %>%
+  summarise(mean_pred_m = mean(mean_pred),
+            mean_pred_q2.5 = quantile(mean_pred, probs = 0.025), 
+            mean_pred_q97.5 = quantile(mean_pred, probs = 0.975),
+            mean_epred_m = mean(mean_epred),
+            mean_epred_q2.5 = quantile(mean_epred, probs = 0.025), 
+            mean_epred_q97.5 = quantile(mean_epred, probs = 0.975)) %>%
+  filter(clu == clu_name_val) %>%
+  ggplot(aes(x = vac_week_v1, y = log(mean_imm), size = tot)) +
+  geom_point(color = "grey", alpha = 0.2) +
+  geom_point(aes(y = log(mean_epred_m)), size = 1, color = "red", alpha = 0.3) +
+  geom_linerange(aes(ymin = log(mean_epred_q2.5), ymax = log(mean_epred_q97.5)), color = "red", alpha = 0.3,
+                 size = 1.5) +
+  scale_y_continuous("Ab titers (log)") + 
+  scale_x_continuous("Week", breaks = c(1,18,35,52), limits = c(1,52)) +
+  scale_size_continuous("Individuals", breaks = c(10, 50, 100, 150, 200)) +
+  facet_grid(pathogen+imm_name~"Predicted \n ab titers (log) \n summarized \n (per week)", scales = "free") +
+  theme(legend.position = "none",
+        strip.text.y.right = element_blank(),
+        axis.title.y = element_blank())
+```
+
+```{r}
+pl_mod <- pl_dat | pl_dat_sum | pl_pred | pl_pred_sum | pl_ce
+
+ggsave(pl_mod, file = glue("outputs/figures/all_modmvn{gppat}_{clu_name}_{clu_name_val}.pdf"),
+       height = 15, width = 8)
+```
+
+
+
+
+
+
+

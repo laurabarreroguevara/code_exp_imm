@@ -1,0 +1,121 @@
+---
+title: "Simulate the SE2I2R model with covariate in Central America"
+author: "Laura Andrea Barrrero Guevara"
+date: "1/27/2022"
+output: html_document
+---
+################################################################################
+Purpose of script: Run simulations for SE2I2R model (Central America)
+Output:
+- {clim_name}_simulations_{i}_R0{R0_val}.Rds (simulations for every mun)
+-  all_traj_hum_spe_R010 (all simulations)
+################################################################################
+
+# Setup
+```{r}
+rm(list = ls())
+source("04_00_pck.R")
+source("fun_createSE2I2Rmod_climcovars.R")
+source("fun_reformatsimulations.R")
+source("fun_eeunforcedmodel.R")
+source("fun_set_cores.R")
+source("fun_traj_mod_simulations.R")
+dirs$out_sav <- glue("{dirs$outputs}/camerica_climcovars")
+```
+
+# Read in country and municipality names and df_covars 
+```{r}
+dat_mun <- unique(readRDS(
+  glue("{dirs$processed}/data_clim_sel_week_narr_cam.rds"))$mun_city_name)
+dat_mun_country <- readRDS(
+  glue("{dirs$processed}/data_clim_sel_week_narr_cam.rds")) %>%
+  ungroup() %>%
+  select(country, mun_city_name) %>%
+  distinct() %>%
+  mutate(country = case_when(country == "Panamá" ~ "Panama",
+                             TRUE ~ country))
+df_covars <- readRDS(glue("{dirs$out_sav}/df_covars.rds")) %>%
+  mutate(country = case_when(country == "Panamá" ~ "Panama",
+                             TRUE ~ country)) %>%
+  select(-mun_name) %>%
+  rename(mun_name = mun_city_name)
+```
+
+# Run simulations (R0 = 10) for specific humidity 
+```{r}
+parallel::clusterExport(cl = my.cluster, varlist = c("dirs", "dat_mun", "df_covars"))
+all_traj_hum_spe_R010 <- list(
+  foreach(i = dat_mun, 
+          .packages = c("glue", "pomp", "stringr", "tidyverse")) %dopar% {
+    clim_name <- "w_hum_spe"
+    R0_val <- 10
+    bake(file = glue("{dirs$out_sav}/{clim_name}_simulations_{i}_R0{R0_val}.Rds"),{
+      mod <- fun_traj_mod_simulations(
+              clim_name = clim_name,
+              amp_vec = c(-0.08, -0.06, -0.04, -0.03, 0, 0.04, 0.06),
+              R0_val = R0_val,
+              n_years = 200,
+              delta_t = 0.1,
+              amp_term = 0.25,
+              mun = i,
+              country_name = dat_mun_country[dat_mun_country$mun_city_name == i,"country"][[1]])
+    })
+  }
+)
+all_traj_hum_spe_R010 <- bind_rows(unlist(all_traj_hum_spe_R010, recursive = F))
+```
+
+# Plot last 10 years 
+```{r}
+pl_sim_10y <- list()
+for (i in unique(df_covars$country)) {
+pl_sim_10y[i] <- list(all_traj_hum_spe_R010 %>%
+  filter(state_var == "I") %>%
+  left_join(distinct(df_covars[,c("mun_name","country","mun_latitude")])) %>%
+  filter(country == i) %>%
+  ggplot(aes(x = time / 52, y = val, color = factor(amp_clim))) + 
+    geom_line() + 
+    labs(x = "Time (years)", y = "Proportion") + 
+    facet_wrap(mun_name~., ncol = 5) + 
+    scale_colour_viridis_d(expression(A[2]), end = 0.8, 
+                           guide = guide_legend(nrow = 1)) + 
+    theme_classic() + 
+    theme(legend.position = "top",
+          legend.justification = "right",
+          strip.background = element_rect(color = "transparent")))
+}
+pl_sim_10y
+```
+
+# Plot last year
+```{r, fig.width=4, fig.height=4}
+pl_sim_1y <- list()
+for (i in unique(df_covars$country)) {
+  pl_sim_1y[i] <- list(all_traj_hum_spe_R010 %>%
+    filter(year == max(year), state_var == "CC") %>% 
+    group_by(mun_name) %>% 
+    mutate(val_scaled_mean = val / mean(val)) %>% 
+    left_join(distinct(df_covars[,c("mun_name","country","mun_latitude")])) %>%
+    filter(country == i) %>%
+    ggplot(aes(x = week, y = val_scaled_mean, color = factor(amp_clim))) + 
+      geom_line() + 
+      scale_y_continuous("Rescaled incidence") + 
+      scale_x_continuous("Week no", breaks = c(20,40)) + 
+      facet_wrap(reorder(mun_name, -mun_latitude)~., ncol = 5) + 
+      scale_colour_viridis_d(expression(A[2]), end = 0.8, 
+                           guide = guide_legend(nrow = 1)) + 
+      theme_classic() + 
+      theme(legend.position = "top",
+          legend.justification = "right",
+          strip.background = element_rect(color = "transparent")))
+}
+pl_sim_1y
+```
+
+```{r}
+saveRDS(all_traj_hum_spe_R010, 
+        glue("{dirs$out_sav}/w_hum_spe_simulations_all_R010.Rds"))
+```
+
+
+

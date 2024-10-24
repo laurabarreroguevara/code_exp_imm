@@ -1,0 +1,54 @@
+---
+title: "BRMS"
+author: "Laura Andrea Barrrero Guevara"
+date: "2023-02-23"
+output: html_document
+---
+
+################################################################################
+Purpose of script: To fit brms models to all the studies
+################################################################################
+
+# Set up
+```{r}
+rm(list = ls())
+source("../00_pck.R")
+source("fun_write_bayes_factor_slurm_sh.R")
+
+# pat_l <- c("rota", "varicella", "measles", "mumps", "rubella", "hav", "men", "pn", "polio", "hib",
+#            "dipht", "tetan", "pertu", "hbv", "ipv", "opv", "multi_men", "multi_pn", "multi_polio", 
+#            "multi_pertu", "multi_ipv", "multi_opv", "multi_mmrv", "multi_mmr", "multi_dtp", 
+#            "multi_hibmen")
+
+pat_l <- c("dipht", "dtpa", "rota", "polio", "hib", "ipv", "pertu", "hbv", "strep", "men")
+```
+
+# Loop it s08 sub kgc 
+```{r}
+fun_write_bayes_factor_slurm_sh(pathogen = "dipht", dfkgc = "dfkgc3", time = "24:00:00")
+fun_write_bayes_factor_slurm_sh(pathogen = "dtpa", dfkgc = "dfkgc3", time = "24:00:00")
+fun_write_bayes_factor_slurm_sh(pathogen = "rota", dfkgc = "dfkgc3", time = "24:00:00")
+fun_write_bayes_factor_slurm_sh(pathogen = "polio", dfkgc = "dfkgc3", time = "24:00:00")
+fun_write_bayes_factor_slurm_sh(pathogen = "hib", dfkgc = "dfkgc2", time = "24:00:00")
+fun_write_bayes_factor_slurm_sh(pathogen = "ipv", dfkgc = "dfkgc2", time = "24:00:00")
+fun_write_bayes_factor_slurm_sh(pathogen = "pertu", dfkgc = "dfkgc2", time = "24:00:00")
+fun_write_bayes_factor_slurm_sh(pathogen = "hbv", dfkgc = "dfkgc1", time = "24:00:00")
+fun_write_bayes_factor_slurm_sh(pathogen = "strep", dfkgc = "dfkgc1", time = "24:00:00")
+fun_write_bayes_factor_slurm_sh(pathogen = "men", dfkgc = "dfkgc1", time = "24:00:00")
+```
+
+# Get lines to run in the cluster
+```{r}
+for (i in list.files(glue("../{dirs$outputs}/slurm_sh"))) {
+ print(glue("sbatch ~/projects/_seas_imm/{i}"))
+}
+```
+
+
+
+
+
+
+
+
+

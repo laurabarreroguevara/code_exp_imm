@@ -1,0 +1,99 @@
+---
+title: "Simulate the SE2I2R model with covariate"
+author: "Laura Andrea Barrrero Guevara"
+date: "1/27/2022"
+output: html_document
+---
+################################################################################
+Purpose of script: Run simulations for SE2I2R model (Colombia)
+Output:
+- {clim_name}_simulations_{i}_R0{R0_val}.Rds (simulations for every mun)
+-  all_traj_hum_spe_R010 (all simulations)
+################################################################################
+
+# Setup
+```{r}
+rm(list = ls())
+source("04_00_pck.R")
+source("fun_createSE2I2Rmod_climcovars.R")
+source("fun_reformatsimulations.R")
+source("fun_eeunforcedmodel.R")
+source("fun_set_cores.R")
+source("fun_traj_mod_simulations.R")
+dirs$out_sav <- glue("{dirs$outputs}/colombia_climcovars")
+```
+
+# Read in municipality names and df_covars
+```{r}
+dat_mun <- unique((readRDS(glue("{dirs$processed}/data_clim_sel_week_nc_col.rds")) %>%
+                           filter(!is.na(w_hum_spe)))$mun_name)
+df_covars <- readRDS(glue("{dirs$out_sav}/df_covars.rds"))
+```
+
+# Run simulations (R0 = 10) for each municipality 
+```{r}
+parallel::clusterExport(cl = my.cluster, varlist = c("dirs", "dat_mun", "df_covars"))
+all_traj_hum_spe_R010 <- list(
+  foreach(i = dat_mun, 
+          .packages = c("glue", "pomp", "stringr", "tidyverse")) %dopar% {
+    clim_name <- "w_hum_spe"
+    R0_val <- 10
+    bake(file = glue("{dirs$out_sav}/{clim_name}_simulations_{i}_R0{R0_val}.Rds"),{
+      mod <- fun_traj_mod_simulations(
+              clim_name = clim_name,
+              amp_vec = c(-0.08, -0.06, -0.04, -0.03, 0, 0.04, 0.06),
+              R0_val = R0_val,
+              n_years = 200,
+              delta_t = 0.1,
+              amp_term = 0.25,
+              mun = i,
+              country_name = "Colombia")
+    })
+  }
+)
+all_traj_hum_spe_R010 <- bind_rows(unlist(all_traj_hum_spe_R010, recursive = F))
+```
+
+# Plot last 10 years 
+```{r, fig.width=8}
+all_traj_hum_spe_R010 %>%
+  filter(state_var == "I") %>%
+  ggplot(aes(x = time / 52, y = val, color = factor(amp_clim))) + 
+    geom_line() + 
+    labs(x = "Time (years)", y = "Proportion") + 
+    facet_wrap(mun_name~., ncol = 5) + 
+    scale_colour_viridis_d(expression(A[2]), end = 0.8, 
+                           guide = guide_legend(nrow = 1)) + 
+    theme_classic() + 
+    theme(legend.position = "top",
+          legend.justification = "right",
+          strip.background = element_rect(color = "transparent"))
+```
+
+# Plot last year
+```{r, fig.width=4, fig.height=4}
+all_traj_hum_spe_R010 %>%
+  filter(year == max(year), state_var == "CC") %>% 
+  group_by(mun_name) %>% 
+  mutate(val_scaled_mean = val / mean(val)) %>% 
+  left_join(distinct(df_covars[,c("mun_name","mun_latitude")])) %>%
+  ggplot(aes(x = week, y = val_scaled_mean, color = factor(amp_clim))) + 
+    geom_line() + 
+    scale_y_continuous("Rescaled incidence") + 
+    scale_x_continuous("Week no", breaks = c(20,40)) + 
+    facet_wrap(reorder(mun_name, -mun_latitude)~., ncol = 5) + 
+    scale_colour_viridis_d(expression(A[2]), end = 0.8, 
+                           guide = guide_legend(nrow = 1)) + 
+    theme_classic() + 
+    theme(legend.position = "top",
+          legend.justification = "right",
+          strip.background = element_rect(color = "transparent"))
+```
+
+```{r}
+saveRDS(all_traj_hum_spe_R010, 
+        file = glue("{dirs$out_sav}/w_hum_spe_simulations_all_R010.Rds"))
+```
+
+
+

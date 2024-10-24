@@ -1,0 +1,333 @@
+---
+title: "Check the inclusion and exclusion of studies using different metadata sources"
+author: "Laura Andrea Barrero Guevara"
+date: '2022-08-12'
+---
+
+####################################################################################################
+Purpose: To create a data frame with the included studies and verify if the reasons for excluding 
+studies can be substantiated by other metadata sources.
+
+Output:
+- `stu_included.rds`: Data frame containing GSK studies that are included. 
+####################################################################################################
+
+# Set wd to project directory
+```{r setup}
+rm(list = ls())
+knitr::opts_knit$set(root.dir = '~/Nextcloud/Projects/_seas_imm/code_exp_imm_seas')
+```
+
+# Load packages, themes, directories, and functions
+```{r}
+source("00_pck.R")
+# Load functions to read gsk dfs and tidy names
+source("fun_data/fun_dgsk_readdfs.R")
+source("fun_data/fun_dgsk_tidynames.R")
+```
+
+# Load data 
+```{r}
+# Load data frame of requested and received studies
+stu_req <- readRDS(glue("{dirs$processed}/stu_req.rds"))
+# Load metadata sourced from GSK
+stu_meta_gsk <- readRDS(glue("{dirs$processed}/stu_meta_gsk.rds"))
+# Load metadata sourced from clinicaltrialsgov
+stu_meta_ctgov <- readRDS(glue("{dirs$processed}/stu_meta_ctgov.rds"))
+# Load metadata sourced from protocols
+stu_meta_pro <- readRDS(glue("{dirs$processed}/stu_meta_pro.rds")) %>%
+  rename(excluded = exclusion)
+# Load data on missing data frames
+stu_missingdfs <- readRDS(glue("{dirs$processed}/stu_missingdfs.rds")) 
+```
+
+# Check excluded studies (according to protocol metadata)
+```{r}
+exclusions <- list()
+# Filter out studies that do not fulfill population criteria
+# Exclusions: Pre-term infants, high-risk groups, HIV positive, Novartis trials
+# Result: 14 studies
+exclusions$pop <- stu_meta_pro %>%
+  filter(excluded == "Excluded for all" & 
+           str_detect(reason, "Pre-term|High-risk|HIV|Novartis|Teenagers"))
+
+# Filter out studies due to missing data, excluding Novartis trials
+# Exclusions: Missing data (no data, no serological data, no dates, no exposure data, no age data,
+# no antibody measurements with missing dates)
+# Result: 26 studies
+exclusions$dat <- stu_meta_pro %>%
+  filter(excluded == "Excluded for all", str_detect(reason, "Novartis", negate = TRUE),
+           str_detect(reason, "No data|No sero|No dates|No expo|No age|No ab men and no dates"))
+
+# Filter out studies due to missing data in the primary study
+# Exclusions: No primary study data available
+# Result: 23 studies
+exclusions$pri <- stu_meta_pro %>%
+  filter(excluded == "Excluded for all" & str_detect(reason, "No primary \\(no av|No primary \\(av")) 
+
+# Filter out studies permissive of previous routine vaccination 
+# Exclusions: Studies with previous routine vaccination (the enrolling criteria requested previous
+# vaccinations or allowed previous vaccinations, so the study is not primary)
+# Result: 15 studies
+exclusions$rou <- stu_meta_pro %>%
+  filter(excluded == "Excluded for all" & str_detect(reason, "No primary \\(routine")) 
+
+# Filter out repeated studies
+# Exclusions: Follow-up studies, studies added to other trials, 
+# contained within other studies, or booster studies
+# Result: 66 studies
+exclusions$rep <- stu_meta_pro %>%
+  filter(excluded == "Excluded for all" & str_detect(reason, "Follow up|Added to|Contained|Booster"))
+```
+
+# Prepare inclusion criteria data frame from the metadata sourced from clinicaltrialsgov 
+```{r}
+# Get names of studies and containing folders into named vector
+stu_l <- stu_req$stu_pat_tidy
+names(stu_l) <- stu_req$study
+
+# Prepare additional notes data frame from the metadata sourced from gsk 
+stu_linked <- stu_meta_gsk %>%
+  select(study, add) %>%
+  rename(stu_linked = add) %>%
+  ## Use points to separate notes and pivot long 
+  mutate(stu_linked = str_replace_all(tolower(stu_linked), "clinicaltrials.gov", "clinicaltrials")) %>%
+  separate_longer_delim(stu_linked, delim = ". ") %>%
+  # Select only notes with numbers (from the study ids of the linked studies)
+  mutate(stu_linked = case_when(str_detect(stu_linked, "[0-9]") ~ stu_linked)) %>%
+  filter(!is.na(stu_linked)) %>%
+  distinct(study, stu_linked) %>%
+  # Create add_def to define type of link
+  mutate(
+    stu_linked = str_remove(stu_linked,"\\."),
+    stu_linked_def = case_when(
+      # Main study linked to secondary studies
+      str_detect(stu_linked, "follow-on") ~ "follow-on",
+      str_detect(stu_linked, "conducted") & str_detect(stu_linked, "follow-up") ~ "follow-on",
+      str_detect(stu_linked, "conducted") & str_detect(stu_linked, "booster") ~ "booster-on",
+      str_detect(stu_linked, "conducted") & str_detect(stu_linked, "extension") ~ "extension-on",
+      # Secondary studies linked to main study
+      str_detect(stu_linked, "this is a") & str_detect(stu_linked, "follow-up") ~ "follow-up",
+      str_detect(stu_linked, "conducted") & str_detect(stu_linked, "persistence") ~ "persistence-on",
+      str_detect(stu_linked, "this is a|this study is") & str_detect(stu_linked, "booster") ~ "booster-up",
+      str_detect(stu_linked, "this is a") & str_detect(stu_linked, "extension") ~ "extension-up",
+      str_detect(stu_linked, "this is a") & str_detect(stu_linked, "persistence") ~ "persistence-up",
+      str_detect(stu_linked, "summarise") ~ "summarised"),
+    # Rename linked studies names and take out years
+    stu_linked = str_replace_all(stu_linked, "ipv-018 \\(112679\\)", "112679"),
+    stu_linked = str_replace_all(stu_linked, "v12p13e1", "205453"),
+    stu_linked = str_replace_all(stu_linked, "v72p13", "205450"),
+    stu_linked = str_replace_all(stu_linked, "year 10|year 2|year 3|year 4|year 1", ""),
+    stu_linked = str_replace_all(stu_linked, "\\(.*?\\)", ""),
+    stu_linked = str_replace_all(stu_linked, "follow-up|follow-on", ""),
+    # Obtain linked studies ids
+    stu_linked = str_replace_all(stu_linked, "/", "-000000-"),
+    stu_linked = str_replace_all(stu_linked, "[^0-9]+", "_"),
+    stu_linked = str_replace_all(stu_linked, "^_|_$", ""),
+    stu_linked = str_replace_all(stu_linked, "_000000_", "-")) 
+
+# Prepare inclusion criteria data frame from the metadata sourced from clinicaltrialsgov 
+stu_criteria <- stu_meta_ctgov %>%
+  select(study, 
+         protocolSection.eligibilityModule.eligibilityCriteria) %>%
+  rename(inclusion = protocolSection.eligibilityModule.eligibilityCriteria) %>%
+  mutate(
+    inclusion = str_remove_all(tolower(inclusion), "\n|\\*"),
+    exclusion = str_remove_all(inclusion,".*exclusion|criteria: "),
+    inclusion = str_remove_all(inclusion,"exclusion.*|inclusion criteria: "))
+```
+
+# 1. Check studies that do not fulfill population criteria
+```{r}
+# Create list of checks
+checks <- list()
+checks$pop <- exclusions$pop %>%
+  select(study, classification, excluded, reason) %>%
+  left_join(stu_criteria, by = join_by(study)) %>%
+  left_join(select(stu_meta_ctgov, study, 
+                   protocolSection.identificationModule.organization.fullName), by = join_by(study)) %>%
+  rename(organization = protocolSection.identificationModule.organization.fullName) %>%
+  mutate(pre_term = str_detect(inclusion, "pre-term"),
+         hiv = str_detect(inclusion, "hiv"),
+         risk = str_detect(inclusion, "risk"),
+         novartis = organization == "Novartis")
+
+# Exceptions
+ checks$pop %>%
+  group_by(study) %>%
+  filter(!any(c(pre_term, hiv, risk, novartis)))
+ 
+# Studies 205240 and 205249 were previously Novartis studies, therefore they are excluded as well. 
+# See https://www.gsk-studyregister.com/en/trial-details/?id=205240 (protocol)
+# See https://www.gsk-studyregister.com/en/trial-details/?id=205249 (clinical study report)
+# Study 103860-280 (and followed up) included only children over 10 yrs old 
+# See https://www.gsk-studyregister.com/en/trial-details/?id=101695%20Ext.%20Mth30
+```
+
+# 2. Check studies with missing data
+```{r}
+checks$dat <- exclusions$dat %>%
+  select(study, classification, excluded, reason) %>%
+  left_join(stu_missingdfs, by = join_by(study)) %>%
+  mutate(
+    missing_data = reason == "No data" & is.na(pathogen),
+    missing_sero = str_detect(reason, "No sero file") & sero_cod == 0,
+    missing_dates = str_detect(reason, "No dates file") & dates == 0)
+
+# Exceptions (no exceptions)
+checks$dat %>%
+  group_by(study) %>%
+  filter(!any(c(missing_data, missing_sero, missing_dates)))
+```
+
+# 3. Check studies with missing data in the primary study
+```{r}
+checks$pri <- exclusions$pri %>%
+  select(study, classification, excluded, reason, study_main) %>%
+  separate_longer_delim(study_main, delim = "_") %>%
+  left_join(stu_missingdfs, by = join_by(study_main == study)) %>%
+  mutate(
+    missing_data = str_detect(reason, "No primary \\(no av") & is.na(pathogen),
+    missing_sero = str_detect(reason, "no sero") & sero_cod == 0,
+    missing_dates = str_detect(reason, "no dates")  & dates == 0)
+
+# Exceptions
+checks$pri %>%
+  group_by(study) %>%
+  filter(!any(c(missing_data, missing_sero, missing_dates)))
+
+# Study 115375, the pid does not coincide with that of 105539, also not in the protocols.
+left_join(fun_dgsk_readdfs(study = stu_l["115375"], cdi = FALSE)$pid %>%
+            select(pid, cty_nam, group_nb),
+          fun_dgsk_readdfs(study = stu_l["105539"], cdi = FALSE)$pid %>%
+            select(pid, cty_nam, group_nb), by = join_by(pid))
+```
+
+# 4. Check studies permissive of previous routine vaccination 
+```{r}
+# First obtain the vaccines administered in this studies (according to the data)
+checks$rou <- list()
+# For each study, read data frames, get vaccine names and tidy up vaccine names
+for(stu_id in exclusions$rou$study) {
+  # Define if CDI format 
+  if(stu_id %in% c("115648", "115158", "115649", "115461", "201532")) cdi <- TRUE else cdi <- FALSE
+  # Identify vaccine names
+  if(cdi == FALSE) { 
+    checks$rou[[stu_id]] <- distinct(fun_dgsk_readdfs(study = stu_l[stu_id], cdi = cdi)$expo, vaccine) 
+    } else { 
+    checks$rou[[stu_id]] <- distinct(rename(fun_dgsk_readdfs(study = stu_l[stu_id], cdi = cdi)$expo, 
+                                            vaccine = aextrt), vaccine) }
+  checks$rou[[stu_id]] <- fun_dgsk_tidynames(checks$rou[[stu_id]], study = stu_id, tidynames = "vaccine") 
+}
+
+# Assess if for all the vaccines administered, the inclusion criteria was permissive of previous
+# vaccination (so that the hole study is excluded).
+# The intention is to check that the routine vaccines are actually the study vaccines, if that is 
+# the case, exclude. 
+checks$rou <- bind_rows(checks$rou) %>%
+  mutate(vaccine = vaccine_tidy) %>%
+  mutate(vaccine = case_when(
+    vaccine %in% c("priorix vaccine") ~ "mmr",
+    vaccine %in% c("varilrix vaccine") ~ "vzv",
+    vaccine %in% c("memuru-oka vaccine") ~ "mmr_vzv",
+    vaccine %in% c("dtpw-hbv-ipv/hib") ~ "dtp_hbv_ipv_hib",
+    vaccine %in% c("dtpw_hbv/hiberix") ~ "dtp_hbv_hib",
+    vaccine %in% c("boostrix","dtpa") ~ "dtp",
+    vaccine %in% c("dtpa_ipv vaccine") ~ "dtp_ipv",
+    study == "213503-050" ~ "dtp_ipv_hib",
+    study == "263855-035" & vaccine == "treatment a" ~ "dtp",
+    .default = vaccine)) %>%
+  separate_longer_delim(vaccine, delim = "_") %>%
+  mutate(vaccine = str_replace_all(vaccine, "dtpa", "dtp"),
+         vaccine = str_replace_all(vaccine, "ipv", "polio")) %>%
+  # Two NA expected from study 711866-001 and 213503-046 that reported no vaccination as NA
+  filter(!is.na(vaccine)) %>%
+  distinct(study, vaccine) %>%
+  right_join(select(exclusions$rou, study, inclusion_criteria), by = join_by(study)) %>%
+  mutate(inclusion_criteria = str_remove_all(inclusion_criteria, "F |\\(|\\)")) %>%
+  separate_longer_delim(inclusion_criteria, delim = "_") %>%
+  group_by(study) %>%
+  mutate(noprimary = vaccine %in% inclusion_criteria)
+  
+# Exceptions
+checks$rou %>%
+  filter(noprimary != TRUE)
+
+# Study 263855-035, had routine vaccination for dtp and no ab measurements for hav 
+fun_dgsk_readdfs(study = stu_l["263855-035"], cdi = FALSE)$sero %>%
+  distinct(seroname)
+```
+Note: The inclusion criteria recorded in the protocols metadata was manually extracted from both the 
+protocols and the clinicaltrials.gov. 
+
+# 5. Check studies repeated
+The studies can have data within studies because they are follow ups, booster, extensions, 
+persistence studies or added for analyses. The gsk preliminary data has some information of the 
+linked studies. We compare the information to that extracted from the protocols. 
+```{r}
+checks$rep <- exclusions$rep %>%
+  select(study, study_type, study_main, excluded, reason) %>%
+  separate_longer_delim(study_main, delim = "_") %>%
+  left_join(stu_linked, by = join_by(study), relationship = "many-to-many") %>%
+  separate_longer_delim(stu_linked, delim = "_") %>%
+  group_by(study, .groups = "drop") %>%
+  mutate(main_linked = study_main %in% stu_linked) 
+
+# Exceptions (29 studies were not linked in the gsk metadata, but where linked later when comparing 
+# their protocols and the data)
+checks$rep %>%
+  filter(!any(main_linked)) %>%
+  group_by(across(c(-study_main))) %>%
+  summarise(study_main = str_c(study_main, collapse = "_")) %>%
+  ungroup()
+```
+
+# Extra: Check if there are studies linked to other studies (repeated) according to the metadata 
+# sourced from GSK that were missed from the metadata sourced from the protocols.
+```{r}
+# Compare with protocol data 
+stu_linked %>%
+  # Compare with protocol data 
+  right_join(stu_meta_pro, by = join_by(study)) %>%
+  select(study, study_type, study_main, excluded, reason, stu_linked, stu_linked_def) %>%
+  # Select studies that have linked studies in the gsk preliminary data, that do not coincided with 
+  # the information in the protocol, are not the same study, and the linked studies were actually
+  # requested 
+  filter(!is.na(stu_linked) & 
+           !((str_detect(reason, "Follow up|Added to|Contained|Booster") & str_detect(stu_linked, study_main)) |
+             (str_detect(reason, "Follow up|Added to|Contained|Booster") & str_detect(study_main, stu_linked)))) %>%
+  separate_longer_delim(stu_linked, delim = "_") %>%
+  filter(stu_linked != study) %>%
+  filter(stu_linked %in% stu_meta_gsk$study) %>%
+  # Add information on exclusion for the linked studies 
+  left_join(select(stu_meta_pro, study, excluded, reason) %>%
+              rename(stu_linked = study, stu_linked_excluded = excluded, stu_linked_reason = reason),
+            by = join_by(stu_linked)) %>%
+  # Filter out linked studies excluded for follow-up/added/contained
+  filter(!str_detect(stu_linked_reason, "Follow up|Added to|Contained|Booster")) %>%
+  # Filter out linked studies excluded because primary was not available
+  filter(!str_detect(stu_linked_reason, "no av")) %>%
+  # Filter out linked studies exclude because of lack of data
+  filter(!str_detect(stu_linked_reason, "No sero|no sero|No dates|no dates")) %>%
+  # Only studies that have not been excluded already for another reason
+  filter(excluded != "Excluded for all")
+
+# Study 105553 has a follow-up (112640), but this is seems to be a mistake in the database.
+left_join(fun_dgsk_readdfs(study = stu_l["105553"], cdi = FALSE)$pid %>%
+            select(pid, cty_nam, group_nb),
+          fun_dgsk_readdfs(study = stu_l["112640"], cdi = FALSE)$pid %>%
+            select(pid, cty_nam, group_nb), by = join_by(pid))
+
+# Study 347414-029 is a follow up of 347414-017, but in the follow up they vaccinated for the first
+# time against mmr. We do not exclude the complete follow up, but we excluded the no primary vaccines. 
+```
+
+# Create studies included df and save it  
+```{r}
+stu_included <- mutate(stu_req, included = !(study %in% bind_rows(exclusions)$study))
+saveRDS(stu_included, file = glue("{dirs$processed}/stu_included.rds"))
+```
+
+####################################################################################################
+# END
+####################################################################################################

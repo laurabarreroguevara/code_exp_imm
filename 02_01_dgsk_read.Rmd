@@ -1,0 +1,285 @@
+---
+title: "Read GSK studies and select data frames and variables"
+author: "Laura Andrea Barrrero Guevara"
+date: '2022-08-31'
+---
+
+####################################################################################################
+Purpose: To read data from GSK studies, specifically selecting relevant data frames (pid, 
+demo, dates, expo, and sero_cod) and variables within those data frames. This script includes checks 
+to ensure that the data has been tidied correctly.
+
+Functions Used:
+- `fun_dgsk_readdfs.R`: Reads the selected data frames, handling different formats (CDI or non-CDI).
+- `fun_dgsk_exceptions.R`: Manages specific modifications required for individual study data.
+- `fun_dgsk_tidynames.R`: Creates dictionaries for country, vaccine, and serology names.
+- `fun_dgsk_tidydfs.R`: Selects variables within each data frame and sets appropriate data classes.
+- `fun_dgsk_tidydates.R`: Converts GSK date formats into R-compatible formats.
+
+Output (for each study):
+- `stu_df_pid_{stu_id}.rds`: Processed participant data frame for the study.
+- `stu_df_expoall_{stu_id}.rds`: Processed vaccine data frame for the study.
+- `stu_df_seroall_{stu_id}.rds`: Processed serology data frame for the study.
+####################################################################################################
+
+# Load packages, themes, directories, and functions
+```{r}
+rm(list = ls())
+source("00_pck.R")
+source("fun_data/fun_dgsk_readdfs.R")
+source("fun_data/fun_dgsk_exceptions.R")
+source("fun_data/fun_dgsk_tidynames.R")
+source("fun_data/fun_dgsk_tidydfs.R")
+source("fun_data/fun_dgsk_tidydates.R")
+
+# Function to check the percentage of missing values (NAs) per column, and to verify the number of 
+# participants and duplicated rows
+fun_checknas <- function(x) {
+  # Arguments: 
+  # - x: A data frame to be checked 
+  x %>%
+    # Add a column for the total number of rows
+    mutate(length = n()) %>%
+    group_by(study, length) %>%
+    # Summarize the number of NAs per column
+    summarise(across(everything(), ~ sum(is.na(.x))), .groups = "drop") %>%
+    # Add columns for the number of distinct rows and the number of distinct PIDs (participants)
+    mutate(length_distinct = length(distinct(x)[[1]]),
+           length_pid = length(distinct(x, pid)[[1]])) 
+  }
+```
+
+# Load the list of included studies and their contained directory
+```{r}
+# Load the data frame of studies 
+stu_included <- readRDS(glue("{dirs$processed}/stu_included.rds"))
+# Extract the study IDs and folders into a named vector
+stu_l <- stu_included$stu_pat_tidy
+names(stu_l) <- stu_included$study
+
+# Filter to include only studies that have been marked as included
+stu_l <- stu_l[!(names(stu_l) %in% filter(stu_included, included == FALSE)$study)]
+```
+
+# Read in and process data frames
+```{r}
+# Save the processed data frames?
+saving <- TRUE
+# Initialize a list to store various checks for each study
+stu_che <- list("lengths" = list(), "contained" = list(), "naspid" = list(), "nasexpo" = list(), 
+                "nassero" = list(), "numres" = list())
+
+# Loop over each study to read, process, save, and check data frames
+for(stu_id in names(stu_l)) {
+  
+  # Read in data frames ---------------------------------------------------------------------------- 
+  # Determine if the study uses CDI format
+  if(stu_id %in% c("115648", "115158", "115649", "115461", "201532")) cdi <- TRUE else cdi <- FALSE
+  # Read the data frames for the current study 
+  stu_dfs <- fun_dgsk_readdfs(study = stu_l[stu_id], cdi = cdi)
+  
+  # Pre-processing checks --------------------------------------------------------------------------
+  # Record the length of each data frame (number of rows)
+  stu_che$lengths[[stu_id]] <- lapply(stu_dfs, function(x) {length(x[[1]])})
+  # Capture the names of studies contained within each data frame, if the "study" column exists
+  stu_che$contained[[stu_id]] <- bind_rows(lapply(stu_dfs, function(dfs_i) {
+    if(any(str_detect(names(dfs_i), "study"))) {
+      distinct(dfs_i[str_subset(names(dfs_i), "stud")]) %>%
+        rename_with(~ paste0("contained_", .x))
+    }
+  }), .id = "dfs")
+
+  # Apply study-specific exceptions ----------------------------------------------------------------
+  stu_dfs <- fun_dgsk_exceptions(stu_dfs, study_id = stu_id)
+  
+  # Create dictionaries for countries, vaccines, and serology names --------------------------------
+  dics <- list()
+  if(!cdi) { 
+    # Non-CDI format
+    dics$countries <- distinct(stu_dfs$pid, cty_nam) 
+    dics$vaccines <- distinct(stu_dfs$expo, vaccine) 
+    dics$seronames <- distinct(stu_dfs$sero, seroname, unit, method, cut_off)
+  } else { 
+    # CDI format
+    dics$countries <- distinct(rename(stu_dfs$pid, cty_nam = country), cty_nam) 
+    dics$vaccines <- distinct(rename(stu_dfs$expo, vaccine = aextrt), vaccine)
+    dics$seronames <- distinct(filter(stu_dfs$sero, str_detect(param, "LOG10", negate = T)) %>%
+                         mutate(unit = NA) %>%
+                         rename(seroname = param, method = parcat1, cut_off = cutoff01), 
+                       seroname, unit, method, cut_off)
+  }
+  # Standardize and tidy up names for countries, vaccines, and serology terms
+  dics$countries <- fun_dgsk_tidynames(dics$countries, study = stu_id, tidynames = "country") 
+  dics$vaccines <- fun_dgsk_tidynames(dics$vaccines, study = stu_id, tidynames = "vaccine") 
+  dics$seronames <- fun_dgsk_tidynames(dics$seronames, study = stu_id, tidynames = "seroname") 
+  
+  # Append to or create the larger dictionary for each category and save 
+  for(i in 1:length(dics)) {
+    if(!file.exists(glue("{dirs$processed}/stu_tidynames_{names(dics)[i]}.rds"))) {
+      # If the dictionary file doesn't exist, create it
+      saveRDS(dics[[i]], glue("{dirs$processed}/stu_tidynames_{names(dics)[i]}.rds")) 
+    } else { 
+      # If it exists, append the new data and save
+      dics[[i]] %>%
+      bind_rows(filter(readRDS(glue("{dirs$processed}/stu_tidynames_{names(dics)[i]}.rds")), 
+                         study != stu_id)) %>%
+      saveRDS(glue("{dirs$processed}/stu_tidynames_{names(dics)[i]}.rds")) 
+    }}
+  
+  # Tidy up pid, expo, and sero data frames --------------------------------------------------------
+  # Pid data frame: study, pid, center, country, rct_group, eligibility, age, age_unit, sex, 
+  # birth_date, birth_week, age_date
+  df_pid <- fun_dgsk_tidydfs(stu_dfs, study_id = stu_id, cdi = cdi, dfs = "pid")
+  # Expo data frame: study, pid, vaccine, group_nb, v_adm, vac_date
+  df_expo <- fun_dgsk_tidydfs(stu_dfs, study_id = stu_id, cdi = cdi, dfs = "expo")
+  # Sero data frame: study, pid, method, seroname, num_res, date_sero, activity
+  df_sero <- fun_dgsk_tidydfs(stu_dfs, study_id = stu_id, cdi = cdi, dfs = "sero_all")
+
+  # Post-processing checks -------------------------------------------------------------------------
+  # Ensure that all age units are valid and among the expected values
+  stopifnot(all(df_pid$age_unit %in% c("YEARS", "Y", "MONTHS", "M", "WEEKS", "W", "DAYS", "D", NA)))
+  
+  # Check for NAs and record the length, distinct length, and pid length for each data frame
+  stu_che$naspid[[stu_id]] <- fun_checknas(df_pid)
+  stu_che$nasexpo[[stu_id]] <- fun_checknas(df_expo)
+  stu_che$nassero[[stu_id]] <- fun_checknas(df_sero)
+  
+  # Ensure that all introduced NAs in serology measurements are actual NAs and not limit values
+  stu_che$numres[[stu_id]] <- unique(stu_dfs$sero$num_res[is.na(as.numeric(stu_dfs$sero$num_res))])
+  
+  # Save processed data frames ---------------------------------------------------------------------
+  if(saving == TRUE) {
+    saveRDS(df_pid, glue("{dirs$processed}/01_stu_tidydfs/stu_df_pid_{stu_id}.rds"))
+    saveRDS(df_expo, glue("{dirs$processed}/01_stu_tidydfs/stu_df_expo_{stu_id}.rds"))
+    saveRDS(df_sero, glue("{dirs$processed}/01_stu_tidydfs/stu_df_sero_{stu_id}.rds"))
+    }  
+}
+
+# Combine all check results into a single data frame and save it 
+stu_che <- lapply(stu_che, function(checks) bind_rows(lapply(checks, as.data.frame), .id = "study"))
+stu_che_old <- readRDS(glue("{dirs$processed}/01_stu_tidydfs/stu_checks.rds"))
+#saveRDS(stu_che, glue("{dirs$processed}/01_stu_tidydfs/stu_checks.rds"))
+
+#stu_che$naspid$age_ref == stu_che_old$naspid$age
+```
+
+# Exploring the data, checks =======================================================================
+
+# 1. Check the dictionaries for consistency and completeness
+```{r}
+# Country tidy names: Review and arrange the distinct tidy country names
+readRDS(glue("{dirs$processed}/stu_tidynames_countries.rds")) %>%
+  distinct(country_tidy) %>%
+  arrange(country_tidy)
+# Vaccine tidy names: Review and arrange the distinct tidy vaccine names
+readRDS(glue("{dirs$processed}/stu_tidynames_vaccines.rds")) %>%
+  distinct(vaccine_tidy) %>%
+  arrange(vaccine_tidy)
+# Serology tidy names: Review and arrange the distinct tidy serology names, including method and cutoff
+readRDS(glue("{dirs$processed}/stu_tidynames_seronames.rds")) %>%
+  #distinct(method_tidy) %>%
+  #distinct(seroname_tidy) %>%
+  distinct(method_tidy, seroname_tidy, cut_off) %>%
+  arrange(cut_off)
+```
+
+# 2. Check for repeated studies based on identical data frame lengths
+This step helps to identify possible follow-up or booster studies where data is grouped and shared 
+across studies.
+Note: Different lengths do not guarantee that studies are not contained within others.
+```{r}
+# Identify studies with identical data frame lengths (indicating potential duplicates)
+stu_che$lengths %>%
+  arrange(pid) 
+
+# Check if there are potential duplicates 
+length(distinct(stu_che$lengths, pid, demo, dates, expo, sero)[,1]) == length(stu_che$lengths[,1])
+```
+
+# 3. Check for studies that contain other studies 
+Some studies may include data from other studies, indicated by a column named "study."
+```{r}
+# Identify studies that might contain other studies (26 studies found)
+# Note: Studies that contain other studies were excluded from the analysis.
+stu_che$contained %>%
+  pivot_longer(starts_with("contained"), values_to = "contained") %>%
+  filter(!is.na(contained)) %>%
+  distinct(study, contained) %>%
+  mutate(across(-c("study"), ~str_replace(.x, "_", "-"))) %>%
+  group_by(study) %>%
+  # Check if each study contains itself (all studies do except for study 217744-097, which was wrongly named)
+  mutate(base_check = any(contained == study)) %>%
+  filter(study != contained) %>%
+  # Determine if the contained studies are included in the list of studies to analyze (none)
+  mutate(included = contained %in% names(stu_l)) %>%
+  filter(included == TRUE)
+```
+
+# 4. Check for repetitions within the data frames in each study  
+This check ensures that there are no unintended repetitions within the data frames, such as when
+the dictionary might have named a vaccine or seroname the same across different entries, even though
+it was considered different within the study (this should not happen).
+```{r}
+# Check for repetitions within the `pid`, `expo`, and `sero` data frames for each study
+lapply(list(stu_che$naspid, stu_che$nasexpo, stu_che$nassero), function(x) {
+  x %>%
+  select(study, length, length_distinct, length_pid) %>%
+  filter(length != length_distinct) 
+})
+```
+
+# 5. Check the missing values (NAs)
+This step evaluates the presence of NAs across the `pid`, `expo`, and `sero` data frames for each study.
+```{r}
+lapply(list(stu_che$naspid, stu_che$nasexpo, stu_che$nassero), function(x) {
+  x %>%
+  rowwise() %>%
+  filter(sum(c_across(-c(study, starts_with("length"))), na.rm = TRUE) != 0) %>%
+  mutate(across(-c(study, starts_with("length")), ~round(.x/length*100)))
+})
+```
+
+# Extra: Checking a single study in detail ========================================================
+# This section provides a way to drill down into the details of a specific study.
+```{r}
+# Select a specific study by its ID
+study_pat <- "111870"
+
+# Load the raw data for the selected study
+stu_dfs <- fun_dgsk_readdfs(stu_l[study_pat], cdi = F, info_files = F)
+
+# Load the tidied data frames for the selected study
+df_pid <- readRDS(glue("{dirs$processed}/01_stu_tidydfs/stu_df_pid_{study_pat}.rds"))
+df_expo <- readRDS(glue("{dirs$processed}/01_stu_tidydfs/stu_df_expo_{study_pat}.rds"))
+df_sero <- readRDS(glue("{dirs$processed}/01_stu_tidydfs/stu_df_sero_{study_pat}.rds"))
+
+# Load the dictionaries for the selected study
+readRDS(glue("{dirs$processed}/stu_tidynames_countries.rds")) %>%
+  filter(study %in% c(study_pat))
+readRDS(glue("{dirs$processed}/stu_tidynames_vaccines.rds")) %>%
+  filter(study %in% c(study_pat))
+readRDS(glue("{dirs$processed}/stu_tidynames_seronames.rds")) %>%
+  filter(study %in% c(study_pat))
+
+# Load the vacc_con data for the selected study (if available)
+if (any(str_detect(list.files(dirs$server_vacc_con, full.names = TRUE), study_pat))) {
+readRDS(str_subset(list.files(dirs$server_vacc_con, full.names = TRUE), study_pat)) %>%
+  mutate(across(everything(), as.character)) %>%
+  rename_with(tolower) %>%
+  arrange(pid)
+}
+# Plot the presence of NAs across the data frames
+(gg_miss_var(df_pid, facet = study) | gg_miss_var(df_expo) | gg_miss_var(df_sero)) / 
+  (gg_miss_var(df_pid, show_pct = TRUE) | gg_miss_var(df_expo, show_pct = TRUE) | gg_miss_var(df_sero, show_pct = TRUE))
+```
+
+####################################################################################################
+# END
+####################################################################################################
+
+
+
+
+
+
+

@@ -1,0 +1,214 @@
+---
+title: "Inclusion and exclusion of studies per pathogen"
+author: "Laura Andrea Barrero Guevara"
+date: '2022-08-31'
+---
+
+####################################################################################################
+Purpose: This script defines the inclusion or exclusion of studies into the data frame for each
+pathogen based on the data and checks with the protocol metadata.
+
+Output:
+- `stu_vaccconc.rds`: Data frame containing GSK vaccine concentrations per study, RCT group, and 
+country.
+- `stu_included_perpat.rds`: Data frame containing GSK studies included per pathogen.
+####################################################################################################
+
+# Load packages, themes, directories, and functions
+```{r}
+rm(list = ls())
+source("00_pck.R")
+```
+
+# Load data
+```{r}
+# Load the data frame of included studies
+stu_included <- readRDS(glue("{dirs$processed}/stu_included.rds")) %>% 
+  filter(included == TRUE)
+# Load data frames containing vaccine and serology names from included studies
+stu_vaccines <- readRDS(glue("{dirs$processed}/stu_tidynames_vaccines.rds"))
+stu_seronames <- readRDS(glue("{dirs$processed}/stu_tidynames_seronames.rds"))
+# Load metadata sourced from protocols
+stu_meta_pro <-readRDS(glue("{dirs$processed}/stu_meta_pro.rds")) %>%
+  filter(study %in% stu_included$study)
+```
+
+# Define if the studies are included per pathogen according to vaccination
+```{r}
+stu_perpat_included <- stu_vaccines %>%
+  select(study, vaccine_tidy) %>%
+  # Filter out cases with no vaccination
+  filter(!is.na(vaccine_tidy) & vaccine_tidy != "placebo") %>%
+  # Standardize pathogen names
+  separate_longer_delim(vaccine_tidy, delim = "_") %>%
+  mutate(pat = case_when(
+    vaccine_tidy %in% c("dtpa", "dtpw") ~ "dipht_tetan_pertu",
+    vaccine_tidy %in% c("mmr") ~ "measl_mumps_rubel",
+    .default = vaccine_tidy
+  )) %>%
+  separate_longer_delim(pat, delim = "_") %>%
+  mutate(pat = case_when(
+    str_detect(pat, "strep") ~ "strep", 
+    str_detect(pat, "ipv|opv") ~ "polio", 
+    str_detect(pat, "measl") ~ "measl", 
+    .default = pat,
+  )) %>%
+  distinct(study, pat)
+```
+
+# Exclusions per pathogen: Serology measurements and previous vaccinations =========================
+
+# 1. Identify studies missing serology measurements per pathogen (the study planned vaccination but 
+# not ab measurements)
+# Result: 84 study-pathogen pairs excluded
+```{r}
+exclusions_perpat <- list()
+# Identify studies with immunogenicity measurements
+exclusions_perpat$sero <- stu_seronames %>%
+  select(study, seroname_tidy) %>%
+  # Filter out seronames not related to vaccination
+  filter(!(seroname_tidy %in% c(
+    "anti_protd", "anti_protply", "scr_saureus", "scr_spyogenes", "scr_paeruginosa", "scr_hiv", 
+    "scr_spneumoniae", "scr_mcatarrhalis", "scr_cd4cellsperc", "scr_cd4cellsconc", "anti_hiv",
+    "anti_rota_iga_rix", "anti_rota_igg", "anti_rota_igtot", "anti_hbv_core")) & 
+      !is.na(seroname_tidy)) %>%
+  # Tidy up pathogen names
+  mutate(pat = case_when(
+    str_detect(seroname_tidy, "strep") ~ "strep", 
+    str_detect(seroname_tidy, "polio") ~ "polio", 
+    str_detect(seroname_tidy, "pertu") ~ "pertu",
+    str_detect(seroname_tidy, "rota") ~ "rota", 
+    str_detect(seroname_tidy, "men") ~ "men", 
+    str_detect(seroname_tidy, "hbv") ~ "hbv", 
+    .default = seroname_tidy,),
+    pat = str_remove(pat, "anti_")) %>%
+  # Define that serology was measured
+  distinct(study, pat) %>%
+  mutate(seroname = TRUE)
+
+# Exclude studies that did not measure serology
+stu_perpat_included <- stu_perpat_included %>%
+  left_join(exclusions_perpat$sero, by = join_by(study, pat)) %>%
+  mutate(seroname = replace_na(seroname, FALSE))
+
+filter(stu_perpat_included, seroname == FALSE)
+```
+
+# 2. Identify studies permissive of previous routine vaccination per pathogen (the study planned 
+# vaccination and ab measurements but allowed previous vaccinations)
+# Result: 47 study-pathogen pairs excluded
+```{r}
+exclusions_perpat$pri <- stu_meta_pro %>%
+  select(study, inclusion_criteria) %>%
+  filter(str_detect(inclusion_criteria, "F")) %>%
+  mutate(inclusion_criteria = str_remove_all(inclusion_criteria, "F |\\(|\\)")) %>%
+  separate_longer_delim(inclusion_criteria, delim = "_") %>%
+  distinct() %>%
+  # Studies where HBV vaccination is obligatory at birth need redefinition
+  rename(pat = inclusion_criteria) %>%
+  mutate(inclusion_criteria = case_when(pat == "hbv birth" ~ "birth", .default = "excluded"),
+         pat = case_when(pat == "hbv birth" ~ "hbv", .default = pat)) 
+
+# Exclude studies based on inclusion criteria
+stu_perpat_included <- stu_perpat_included %>%
+  left_join(exclusions_perpat$pri, by = join_by(study, pat)) %>%
+  mutate(inclusion_criteria = replace_na(inclusion_criteria, "included"))
+
+filter(stu_perpat_included, inclusion_criteria == "excluded")
+```
+
+# Define excluded studies and save data frame per pathogen 
+# Result: 546 study-pathogen combinations included 
+```{r}
+stu_perpat_included <- stu_perpat_included %>%
+  mutate(included = case_when(
+    seroname == TRUE & inclusion_criteria != "excluded" ~ TRUE,
+    .default = FALSE)) %>%
+  arrange(study)
+
+filter(stu_perpat_included, included == TRUE)
+
+saveRDS(stu_perpat_included, file = glue("{dirs$processed}/stu_included_perpat.rds"))
+```
+
+# Checks for inclusion/exclusion consistency -------------------------------------------------------
+```{r}
+# Check if there are studies excluded from all pathogen groups (None found)
+stu_perpat_included %>%
+  group_by(study) %>%
+  filter(all(included == FALSE))
+
+# Check if there are studies with serology but no vaccination (1 found)
+exclusions_perpat$sero %>%
+  left_join(stu_perpat_included, by = join_by(study, pat, seroname)) %>%
+  filter(is.na(inclusion_criteria != "included"))
+# Note: Study 347414-029 measured antibodies for DTP_HBV but is only included for MMR because the 
+# primary study does not match PID
+```
+
+# Check per pathogen exclusions based on protocol metadata compared to exclusions based on data 
+```{r}
+stu_meta_perpat <- stu_meta_pro %>%
+  select(study, exclusion, reason) %>%
+  filter(str_detect(exclusion, "Excluded for pp")) %>%
+  separate_longer_delim(reason, delim = ", ") %>%
+  mutate(pat = str_extract(reason, "\\(.*?\\)"),
+         pat = str_remove_all(pat, "\\(|\\)")) %>%
+  separate_longer_delim(pat, delim = "_") %>%
+  # Separate exclusions per pathogen (pp) from for rctg
+  mutate(
+    exclusion = str_remove_all(exclusion, "\\(.*?\\)"),
+    exclusion = case_when(
+      exclusion == "Excluded for pp , Excluded for rctg" & str_detect(reason, "Rctg") ~ 
+        "Excluded for rctg",
+      exclusion == "Excluded for pp , Excluded for rctg" & !str_detect(reason, "Rctg") ~ 
+        "Excluded for pp",
+      .default = exclusion),
+    exclusion = trimws(exclusion)) %>%
+  filter(exclusion == "Excluded for pp")
+
+# Compare with protocol exclusions
+# Studies excluded in the protocol but not in the data (172 pairs found due to method, baseline, and 
+# vac_conc)
+left_join(stu_perpat_included, stu_meta_perpat, by = join_by(study, pat)) %>%
+  filter(included == TRUE, !is.na(reason)) %>%
+  group_by(reason) %>%
+  summarise(tot = n())
+
+# Studies excluded in the data but not in the protocol (None found)
+left_join(stu_perpat_included, stu_meta_perpat, by = join_by(study, pat)) %>%
+  filter(included == FALSE, is.na(reason))
+```
+
+# Cross-check data-driven vaccination status with protocol records 
+```{r}
+stu_meta_pro_checks$vaccine <- stu_meta_pro %>%
+  select(study, starts_with("pat")) %>%
+  pivot_longer(starts_with("pat"), names_to = "pat", values_to = "vaccine_pro") %>%
+  mutate(pat = str_remove(pat, "pat_")) %>%
+  mutate(vaccine_pro = as.logical(vaccine_pro)) %>%
+  left_join(select(stu_perpat_included, study, pat, included) %>%
+              mutate(vaccine_dat = TRUE), by = join_by(study, pat)) %>%
+  mutate(vaccine_dat = replace_na(vaccine_dat, FALSE))
+
+# Check if there are vaccines indicated in the protocol but not reflected in the data
+filter(stu_meta_pro_checks$vaccine, vaccine_pro == TRUE & vaccine_dat == FALSE)
+# Note: Study 347414-017 and 347414-029 involve main-follow-up relationships, but PIDs do not match. 
+# Primary vaccination for DTP, MEN, Hib, Strep is in 347414-017, and MMR is in -029.
+
+# Check if there are vaccines recorded in the data but not mentioned in the protocol (None found)
+filter(stu_meta_pro_checks$vaccine, vaccine_pro == FALSE & vaccine_dat == TRUE)
+```
+
+####################################################################################################
+# END
+####################################################################################################
+
+
+
+
+
+
+
+
+

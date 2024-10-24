@@ -1,0 +1,90 @@
+---
+title: "Data for SE2I2R model with covariate in Central America"
+author: "Laura Andrea Barrrero Guevara"
+date: "1/27/2022"
+output: html_document
+---
+################################################################################
+Purpose of script: Check climate and school data and create covars df for the 
+SE2I2R model (Central America)
+Output:
+- df_covars (covariate for the SE2I2R model)
+################################################################################
+
+# Setup
+```{r setup, include=FALSE}
+rm(list = ls())
+source("04_00_pck.R")
+dirs$out_sav <- glue("{dirs$outputs}/camerica_climcovars")
+```
+
+# Read in and plot school and climate data 
+```{r}
+# School terms
+dat_school <- readRDS(glue("{dirs$processed}/data_school_calendar.rds")) %>%
+  filter(country != "colombia") %>%
+  filter(country != "mexico")
+dat_school[dat_school == 0] <- -1
+# Climatic variables 
+dat_clim <- readRDS(glue("{dirs$processed}/data_clim_sel_week_narr_cam.rds")) %>% 
+  pivot_longer(cols = starts_with("w_"), names_to = "clim_var") %>% 
+  filter(clim_var == "w_hum_spe") %>%
+  mutate(week = str_remove(week, pattern = "week_"),
+         week = as.integer(week))
+
+# Plot data school calendar
+ggplot(dat_school, 
+       aes(x = as.numeric(week), y = school, color = country)) + 
+  geom_line() + 
+  geom_point() + 
+  facet_wrap(~country) + 
+  theme(legend.position = "none")
+# Plot data climate
+pl_clim_l <- list()
+for (i in unique(dat_clim$country)) {
+pl_clim_l[i] <- list(
+  ggplot(dat_clim %>%
+          filter(country == i), 
+         aes(x = week, y = value, color = reorder(mun_name, mun_latitude), 
+             group = mun_name)) + 
+  geom_line() + 
+  facet_wrap(.~reorder(mun_name, -mun_latitude), scales = "free_y") + 
+  scale_color_viridis_d() + 
+  ggtitle(i) + 
+  theme(legend.position = "none"))
+}
+pl_clim_l
+```
+
+# Data as covars 
+```{r}
+df_covars <- dat_clim %>%
+  group_by(clim_var, country, mun_name, mun_city_name, 
+           mun_latitude, mun_longitude, week) %>%
+  summarise(value = mean(value, na.rm = T)) %>%
+  ungroup() %>%
+  group_by(clim_var, country, mun_name) %>%
+  mutate(value_stand = scale(value)) %>%
+  ungroup()
+
+pl_covars_l <- list()
+for (i in unique(dat_clim$country)) {
+pl_covars_l[i] <- list(
+  ggplot(df_covars %>%
+           filter(country == i), 
+         aes(x = week, y = value_stand, color = reorder(mun_name, mun_latitude), 
+             group = mun_name)) + 
+  geom_line() + 
+  facet_wrap(~ reorder(mun_name, -mun_latitude), scales = "free_y") + 
+  scale_color_viridis_d() + 
+  ggtitle(i) + 
+  theme(legend.position = "none"))
+}
+pl_covars_l
+```
+
+```{r}
+saveRDS(df_covars, file = glue("{dirs$out_sav}/df_covars.rds"))
+```
+
+

@@ -1,0 +1,253 @@
+---
+title: "Descriptive plots"
+author: "Laura Andrea Barrrero Guevara"
+date: "2023-02-23"
+output: html_document
+---
+
+################################################################################
+Purpose of script: To plot descriptive statistics of per pathogen data 
+################################################################################
+
+```{r}
+rm(list = ls())
+source("00_pck.R")
+library(DataExplorer)
+library(naniar)
+library(maps)
+
+source("00_fun_descriptive/fun_des_design_pl.R")
+source("00_fun_descriptive/fun_des_participants_pl.R")
+source("00_fun_descriptive/fun_des_vaccine_pl.R")
+source("00_fun_descriptive/fun_des_vaccinesch_pl.R")
+source("00_fun_descriptive/fun_des_immunogenicity_pl.R")
+source("00_fun_descriptive/fun_des_map_pl.R")
+
+dirs$figures <- glue("outputs/figures") 
+
+theme_set(theme_classic())
+
+# Make a list of pathogens with vaccines
+pat_l <- c("rota", "varicella", "measles", "mumps", "rubella", "hav", "men", "pn", "polio", "hib",
+           "dipht", "tetan", "pertu", "hbv")
+```
+
+# Figures for all 
+```{r}
+for (i in pat_l) {
+
+  pathogen <- i
+  cut_off <- list(
+    rota = 20,   
+    varicella = 4,
+    measles = 150,
+    mumps = 231,
+    rubella = 4,
+    hav = 15,
+    men = 0.3,
+    pn = 0.05,
+    hib = 0.15,
+    polio = 8,
+    dipht = 8,
+    tetan = 0.1,
+    pertu = 5,
+    hbv = 10)[[pathogen]]
+  
+  dirs$outputs <- glue("outputs/perpathogen/{pathogen}") 
+  
+  # Read in data
+  dat_l <- list()
+  dat_l$vl <- readRDS(glue("{dirs$outputs}/data_brms_{pathogen}_vl_all.rds"))
+  dat_l$vl_s08 <- readRDS(glue("{dirs$outputs}/data_brms_{pathogen}_vl_s08.rds"))
+  
+  if(!(pathogen %in% c("polio", "dipht", "tetan", "pertu", "hbv"))) {
+    dat_l$v1 <- readRDS(glue("{dirs$outputs}/data_brms_{pathogen}_v1_all.rds"))
+    dat_l$v1_s08 <- readRDS(glue("{dirs$outputs}/data_brms_{pathogen}_v1_s08.rds"))
+  }
+  
+  # Descriptive plots 
+  l_des_design <- sapply(names(dat_l), function(x) {
+    fun_des_design_pl(dat = dat_l[[x]], pathogen = pathogen, data_name = x)}, simplify = F)
+  
+  l_des_participants <- sapply(names(dat_l), function(x) {
+    fun_des_participants_pl(dat = dat_l[[x]], pathogen = pathogen, data_name = x)}, simplify = F)
+  
+  l_des_vaccine <- sapply(names(dat_l), function(x) {
+    fun_des_vaccine_pl(dat = dat_l[[x]], pathogen = pathogen, data_name = x)}, simplify = F)
+  
+  l_des_vaccinesch <- sapply(names(dat_l), function(x) {
+    fun_des_vaccinesch_pl(dat = dat_l[[x]], pathogen = pathogen, data_name = x)}, simplify = F)
+  
+  l_des_immunogenicity <- sapply(names(dat_l), function(x) {
+    fun_des_immunogenicity_pl(dat = dat_l[[x]], cutoff = cut_off, 
+                              pathogen = pathogen, data_name = x)}, simplify = F)
+  
+  l_des_map <- sapply(names(dat_l), function(x) {
+    fun_des_map_pl(dat = dat_l[[x]], pathogen = pathogen, data_name = x)}, simplify = F)
+  
+}
+```
+
+# Figures for multi 
+```{r}
+multipat_l <- c("multi_men", "multi_polio", "multi_pn", "multi_pertu", "multi_mmrv", "multi_mmr",
+                "multi_dtp", "multi_hibmen")
+
+for (i in multipat_l) {
+  
+  pathogen <- i
+  dirs$outputs <- glue("outputs/perpathogen/{pathogen}") 
+  
+  # Read in data
+  dat_l <- list()
+  dat_l$vl_s08 <- readRDS(glue("{dirs$outputs}/data_brms_{pathogen}_vl_s08.rds"))
+  if(pathogen %in% c("multi_mmrv", "multi_mmr")) {
+    dat_l$v1_s08 <- readRDS(glue("{dirs$outputs}/data_brms_{pathogen}_v1_s08.rds"))
+  }
+  
+  # Descriptive plots 
+  l_des_design <- sapply(names(dat_l), function(x) {
+    fun_des_design_pl(dat = dat_l[[x]], pathogen = pathogen, data_name = x)}, simplify = F)
+  
+  l_des_participants <- sapply(names(dat_l), function(x) {
+    fun_des_participants_pl(dat = dat_l[[x]], pathogen = pathogen, data_name = x)}, simplify = F)
+  
+  l_des_vaccinesch <- sapply(names(dat_l), function(x) {
+    fun_des_vaccinesch_pl(dat = dat_l[[x]], pathogen = pathogen, data_name = x)}, simplify = F)
+  
+  l_des_map <- sapply(names(dat_l), function(x) {
+    fun_des_map_pl(dat = dat_l[[x]], pathogen = pathogen, data_name = x)}, simplify = F)
+  
+}
+
+  fun_des_design_pl(dat, pathogen = "multi_mmrv", data_name = "v1")
+  fun_des_participants_pl(dat, pathogen = "multi_mmrv", data_name = "v1")
+  fun_des_map_pl(dat, country_grouping = "reg_6a", pathogen = "multi_mmrv", data_name = "v1")
+  fun_des_vaccinesch_pl(dat, pathogen = "multi_mmrv", data_name = "v1")
+  
+fun_des_vaccine_pl(dat, pathogen = "multi_mmrv", data_name = "v1")
+fun_des_immunogenicity_pl(dat, pathogen = "multi_mmrv", data_name = "v1")
+```
+
+
+
+
+# Available time figure ----------------------------------------------------------------------------
+```{r}
+source("00_fun_descriptive/fun_weekclu_heapl.R")
+
+l_weekclug <- sapply(names(dat_l), function(x) {
+  fun_weekclu_heapl(dat = dat_l[[x]], pathogen = pathogen, data_name = x)}, simplify = F)
+```
+
+
+# Clusters figure ----------------------------------------------------------------------------------
+
+# Read in functions 
+```{r}
+source("../00_fun_descriptive/fun_cluster_country_pl.R")
+
+l_des_cluster_country <- list()
+l_des_cluster_country$dl_ii <- sapply(c("kgc", "reg"), function(x) {
+  fun_cluster_country_pl(cluster_type_name = x,
+                         pathogen = pathogen,
+                         dat = dat_l$vl,
+                         dat_sens = NULL,
+                         file_name = "dl_ee")}, simplify = F)
+
+l_des_cluster_country$dl_s08_ii <- sapply(c("kgc", "reg"), function(x) {
+  fun_cluster_country_pl(cluster_type_name = x,
+                         pathogen = pathogen,
+                         dat = dat_l$dl_ii,
+                         dat_sens = dat_l$dl_s08_ii,
+                         file_name = "dl_s08_ii")}, simplify = F)
+```
+
+```{r}
+fun_clusters_pl <- function(dat = dat, pathogen = pathogen, file_name = "ee") {
+pl_l1 <- lapply(c("clilat_k1_r8", "clilat_k1_r6a", "clilat_k1_r4", "clilat_k1_r3", "clilat_k1_r2b",
+                  "clilat_k2_r8", "clilat_k2_r6a", "clilat_k2_r4", "clilat_k2_r3", "clilat_k2_r2b",
+                  "clilat_k2_r8", "clilat_k2_r6a", "clilat_k2_r4", "clilat_k2_r3", "clilat_k2_r2b"), 
+               function(varclim) {
+                  dat %>%
+                    select(c(study, country, lat_med, lon_med, all_of(varclim))) %>%
+                    group_by(study, country) %>%
+                    mutate(tot = n()) %>%
+                    distinct() %>%
+                    pivot_longer(all_of(varclim)) %>%
+                    mutate(stu_cou = glue("{country}_{study}")) %>%
+                    ggplot(aes(y = reorder(stu_cou, lat_med), x = name, fill = value)) + 
+                    geom_label(aes(label = value), size = 3) +
+                    scale_fill_brewer(palette = "Spectral") + 
+                    theme(legend.position = "none",
+                          axis.title = element_blank(),
+                          axis.text.y = element_blank())})
+pl_l1_all <- (pl_l1[[1]] + theme(axis.text.y = element_text()) | wrap_plots(pl_l1[2:length(pl_l1)], nrow = 1)) + plot_layout(widths = c(1,14))
+
+ggsave(filename = glue("{dirs$outputs}/_figures/{pathogen}_clusters_{file_name}_pl1.pdf"), plot = pl_l1_all,  
+       width = 25, height = 10)
+
+pl_l2 <- lapply(c("reg_2b", "reg_3", "reg_4", "reg_6a", "reg_8", "kgc_1", "kgc_2", "kgc_3"), 
+               function(varclim) {
+                 dat %>%
+                    select(c(study, country, lat_med, lon_med, all_of(varclim))) %>%
+                    group_by(study, country) %>%
+                    mutate(tot = n()) %>%
+                    distinct() %>%
+                    pivot_longer(all_of(varclim)) %>%
+                    mutate(stu_cou = glue("{country}_{study}")) %>%
+                    ggplot(aes(y = reorder(stu_cou, lat_med), x = name, fill = value)) + 
+                    geom_label(aes(label = value), size = 3) +
+                    scale_fill_brewer(palette = "Spectral") + 
+                    theme(legend.position = "none",
+                          axis.title = element_blank(),
+                          axis.text.y = element_blank())})
+pl_l2_all <- (pl_l2[[1]] + theme(axis.text.y = element_text()) | wrap_plots(pl_l2[2:length(pl_l2)], nrow = 1)) + plot_layout(widths = c(1,7))
+ggsave(filename = glue("{dirs$outputs}/_figures/{pathogen}_clusters_{file_name}_pl2.pdf"), plot = pl_l2_all,  
+       width = 13, height = 10)
+
+return(list(pl_l1_all, pl_l2_all))
+}
+
+l_clusters <- sapply(names(dat_l), function(x) {
+  fun_clusters_pl(dat = dat_l[[x]], pathogen = "rotavirus", file_name = x)}, simplify = F)
+```
+
+
+```{r}
+names(dat_l$d1_ii)
+fun_clusters_pl <- function(dat = dat, pathogen = "rotavirus", file_name = "ee") {
+pl_l3 <- lapply(c("prec_stan2", "prec_stan3", "tavg_stan2", "tavg_stan3", "dayl_stan2", "dayl_stan3"), 
+               function(varclim) {
+                  dat %>%
+                    select(c(study, country, lat_med, lon_med, all_of(varclim))) %>%
+                    group_by(study, country) %>%
+                    mutate(tot = n()) %>%
+                    distinct() %>%
+                    pivot_longer(all_of(varclim)) %>%
+                    mutate(stu_cou = glue("{country}_{study}")) %>%
+                    ggplot(aes(y = reorder(stu_cou, lat_med), x = name, fill = value)) + 
+                    geom_label(aes(label = value), size = 3) +
+                    scale_fill_brewer(palette = "Spectral") + 
+                    theme(legend.position = "none",
+                          axis.title = element_blank(),
+                          axis.text.y = element_blank())})
+pl_l3_all <- (pl_l3[[1]] + theme(axis.text.y = element_text()) | wrap_plots(pl_l3[2:length(pl_l3)], nrow = 1)) + plot_layout(widths = c(1,length(pl_l3)-1))
+
+ggsave(filename = glue("{dirs$outputs}/_figures/{pathogen}_clusters_{file_name}_pl3.pdf"), plot = pl_l3_all,  
+       width = 7, height = 10)
+
+return(pl_l3_all)
+}
+
+l_clusters <- sapply(names(dat_l), function(x) {
+  fun_clusters_pl(dat = dat_l[[x]], pathogen = "rotavirus", file_name = x)}, simplify = F)
+```
+
+
+
+
+
+
+
+

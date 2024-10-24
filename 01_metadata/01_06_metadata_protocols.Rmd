@@ -1,0 +1,51 @@
+---
+title: "Metadata of GSK studies (sourced from protocols)"
+author: "Laura Andrea Barrero Guevara"
+date: '2022-08-12'
+---
+
+####################################################################################################
+Purpose:
+- To tidy up the metadata of GSK studies sourced directly from the available protocols. 
+
+Output:
+- `stu_meta_gsk.rds`: Data frame containing metadata of GSK studies with information on pathogens,
+vaccines, study phase, study date, linked studies, and links to databases.
+- `stu_meta_gsk_{x}.txt`: Data frame containing metadata of GSK studies per pathogen classification.
+####################################################################################################
+
+# Set wd to project directory
+```{r setup}
+rm(list = ls())
+knitr::opts_knit$set(root.dir = '~/Nextcloud/Projects/_seas_imm/code_exp_imm_seas')
+```
+
+# Load packages, themes, directories, and functions
+```{r}
+source("00_pck.R")
+```
+
+# Load data and tidy up
+```{r}
+# Tidy up names
+stu_meta_pro <- read_excel(glue("{dirs$raw}/studies_classification.xlsx")) %>%
+  rename_with(.cols = rota:hbv, ~ paste0("pat_", .x)) %>%
+  # Depending on the computer, the study ids have .0 added to the end, eliminate:
+  mutate(across(c(study, study_code, study_main), ~ str_replace_all(.x, "\\.0", ""))) %>%
+  mutate(exclusion = replace_na(exclusion, "Included"),
+         reason = replace_na(reason, "Included"))
+
+# Summarize the number of studies in each column
+sapply(stu_meta_pro %>%
+         filter(exclusion != "Excluded for all") %>%
+         select(starts_with("pat")), function(x) sum(as.numeric(x)))
+```
+
+# Save the tidy metadata 
+```{r}
+saveRDS(stu_meta_pro, glue("{dirs$processed}/stu_meta_pro.rds"))
+```
+
+####################################################################################################
+# END
+####################################################################################################

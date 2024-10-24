@@ -1,0 +1,60 @@
+---
+title: "BRMS WAIC results"
+author: "Laura Andrea Barrrero Guevara"
+date: "2023-02-23"
+output: html_document
+---
+
+################################################################################
+Purpose of script: To check the convergence of the models 
+################################################################################
+
+```{r}
+rm(list = ls())
+source("../00_pck.R")
+library(colorspace)
+theme_set(theme_classic() + theme(strip.background = element_blank()))
+dirs$outputs <- "../outputs/perpathogen"
+dirs$rhats <- "../outputs/modres_rhats"
+
+pat_l <- c("rota", "varicella", "measles", "mumps", "rubella", "men", "pn", "polio", "hib",
+           "dipht", "tetan", "pertu", "hbv", "ipv", "opv", "multi_men", "multi_hibmen", "multi_polio", 
+           "multi_dtp", "multi_mmrv", "multi_mmr", "multi_pertu", "multi_pn", "multi_ipv", "multi_opv")
+```
+
+# Check convergence of the photoperiod models 
+```{r}
+rhats <- readRDS(glue("{dirs$rhats}/df_rhats_cs.rds"))
+rhats %>%
+  filter(Rhat == TRUE)
+
+# pat_l <- c("hav", "ipv", "polio", "tetan", "multi_polio", "multi_ipv", "multi_dtp", "multi_dtpa", "multi_dtpw")
+# Multi dtp 4
+# Multi dtpw 3 and 4
+# Muti hib-men 2, 3, 4, 6
+# Muti men 2, 3, 4, 6
+# Multi opv all
+```
+
+# Check convergence of the photoperiod-climate models 
+```{r}
+rhats <- readRDS(glue("{dirs$rhats}/df_rhats_cs2i.rds"))
+rhats %>%
+  filter(Rhat == FALSE) %>%
+  arrange(pathogen, df) %>%
+  filter(str_detect(pathogen, "multi"))
+
+# converging:
+# kgc_3 dipht, dtpa, polio, rota, 
+# kgc_1 hbv, strep, men
+# kgc_2 hib, ipv, pertu
+
+# kgc_1 multi_dtp multi_dtpa multi_men 
+# kgc_2 multi_pertu
+# kgc_3 multi_polio 
+```
+
+
+
+
+

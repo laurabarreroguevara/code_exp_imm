@@ -1,0 +1,256 @@
+---
+title: "Spatial GKS studies data"
+author: "Laura Andrea Barrero Guevara"
+date: '2022-08-31'
+---
+
+####################################################################################################
+Purpose: This script integrates spatial data, including location and coordinates, into GSK studies. 
+The spatial information is extracted from various sources, including the GSK database (for both 
+primary and follow-up studies), study-specific protocol data frames, and the first-level 
+administrative divisions of countries.
+
+Functions Used: 
+- `fun_dgsk_coord1lv.R`: Retrieves the first-level administrative divisions of a country from the 
+Statoids website http://www.statoids.com/.
+
+Output (for each study): 
+- `stu_spat_{stu_id}.rds`: Processed spatial (location and coordinates) data frame for the study.
+####################################################################################################
+
+# Load packages, themes, directories, and functions
+```{r}
+rm(list = ls())
+source("00_pck.R")
+source("fun_data/fun_data_coord1lv.R")
+library(tidyverse)
+library(glue)
+
+# Define api google
+api <- "AIzaSyA-1SIsXtVR-SoIPazBFnxiON6zwRS6Bhc"
+```
+
+# Load the data frame containing studies and country names
+```{r}
+stu_loc <- readRDS(glue("{dirs$processed}/stu_tidynames_countries.rds")) %>%
+  select(study, country_tidy) %>%
+  rename(country = country_tidy) %>%
+  filter(!is.na(country))
+```
+
+# Load locations (from different sources) ==========================================================
+
+# 1. Locations data extracted from the GSK database
+```{r}
+# Read in the spatial data available from GSK, filtering out studies with "NA" or 
+# "Terminated/Withdrawn" status
+stu_loc_gsk <- read_excel(glue("{dirs$raw}/data_country_center.xlsx")) %>%
+  filter(!(status %in% c("NA", "Terminated/Withdrawn"))) %>%
+  rename(location = city_longname, country = coun_name) %>%
+  # Fix country names from Puerto Rico 
+  mutate(country = case_when(
+    study %in% c("115650", "111870") & country == "Puerto Rico" ~ "United States", 
+    .default = country))
+
+# Merge the GSK location data into the study-country data
+stu_loc <- stu_loc %>%
+  left_join(stu_loc_gsk)
+
+# Identify studies that still have missing location data
+filter(stu_loc, is.na(location))
+```
+
+# 2. Locations data extracted from GSK follow-up studies
+If the locations data is not available for the main study, it can still be available for its follow-
+ups
+```{r}
+# Identify follow-up studies that correspond to the main studies missing location data
+stu_loc_gskf <- readRDS(glue("{dirs$processed}/stu_meta_pro.rds")) %>%
+  # Filter to include only studies that are missing location data
+  select(study, study_type, study_main) %>%
+  separate_longer_delim(study_main, delim = "_") %>%
+  filter(study_main %in% filter(stu_loc, is.na(location))$study) %>%
+  # Join with follow-up studies that have available location data
+  left_join(stu_loc_gsk, by = join_by(study)) %>%
+  # If location data from follow-up studies is available, replace the missing data in the main study
+  filter(!is.na(location)) %>%
+  mutate(study = study_main) %>%
+  select(study, location, country, status)
+
+# Merge the follow-up GSK location data into the study-country data
+stu_loc <- stu_loc %>%
+  left_join(stu_loc_gskf, by = join_by(study, country)) %>%
+  mutate(location = coalesce(location.x, location.y),
+         status = coalesce(status.x, status.y),
+         .keep = "unused")
+
+# Identify studies that still have missing location data
+filter(stu_loc, is.na(location))
+
+# Main-follow-up studies identified: 
+# - 104065 (101222) - Verified that protocols match.
+# - 106602 (101223) - Verified that protocols match, but missing a country.
+# - 106745 (217744-078) - Verified that protocols match.
+```
+
+# 3. Locations data extracted from the protocol of study 115461
+For this study, the protocol provided a data frame containing information on the locations of the 
+centers and the number of participants at each center. By mapping this information to the 
+participant data, we can accurately identify the location corresponding to each center based on the 
+number of participants.
+```{r}
+# Load the data frame containing locations and centers, grouped by the number of included individuals
+stu_loc_115461 <- read_excel(glue("{dirs$raw}/data_country_center_115461.xlsx")) %>%
+  # Tidy column names
+  rename(country = Country, location = City, liq_a = Liq_A, liq_b = Liq_B, liq_c = Liq_C, lyo = Lyo) %>%
+  # Standardize country names
+  mutate(country = str_replace(country, "Korea, Republic of", "South Korea")) %>%
+  # Remove duplicate entries
+  filter(!(location == "Tampere" & Investigator == "Miia Virta" & Total == 6),
+         !(location == "Suwon" & Total == 10),
+         !(location == "Hsinchu" & Investigator == "MingTa Lee" & Total == 20),
+         !(location == "Taichung" & Investigator == "KaoPin Hwang" & Total == 20),
+         !(location == "Taipei" & Investigator == "LiMin Huang" & Total == 35)) %>%
+  # Select only the necessary columns
+  select(country, location, liq_a, liq_b, liq_c, lyo)
+
+# Join the 115461 study locations with the data of study 115461
+stu_loc_115461 <- readRDS(glue("{dirs$processed}/01_stu_tidydfs/stu_df_pid_115461.rds")) %>%
+  # Select only the necessary columns
+  distinct(study, country, center, pid, rct_group) %>%
+  # Filter out participants who were not enrolled in the study
+  filter(!(rct_group %in% c("Not Treated", "Screen Failure"))) %>%
+  # Map treatment groups to their corresponding codes
+  mutate(rct_group = case_when(rct_group == "pcv-free hrv liquid vaccine lot a" ~ "liq_a",
+                               rct_group == "pcv-free hrv liquid vaccine lot b" ~ "liq_b",
+                               rct_group == "pcv-free hrv liquid vaccine lot c" ~ "liq_c",
+                               rct_group == "hrv lyophilized" ~ "lyo",
+                               .default = rct_group)) %>%
+  # Calculate the number of participants per group and country
+  group_by(study, country, center, rct_group) %>%
+  summarise(total = n()) %>%
+  ungroup() %>%
+  pivot_wider(names_from = rct_group, values_from = total, values_fill = 0) %>%
+  mutate(cou_s = str_remove_all(country, "_.*")) %>%
+  # Join with locations data frame 
+  left_join(stu_loc_115461, by = join_by(cou_s == country, liq_a, liq_b, liq_c, lyo)) %>%
+  # Add study completion status and format location
+  mutate(status = "Study Complete",
+         location = paste0(location, ", " ,cou_s)) %>%
+  select(study, country, location, status)
+
+# Merge the location data from study 115461 into the study-country data
+stu_loc <- stu_loc %>%
+  left_join(stu_loc_115461, by = join_by(study, country)) %>%
+  mutate(location = coalesce(location.x, location.y),
+         status = coalesce(status.x, status.y),
+         .keep = "unused")
+
+# Identify studies that still have missing location data
+filter(stu_loc, is.na(location))
+```
+
+# 4. Locations data extracted from first-level administrative divisions per study-country
+For studies where only country-level information was available, we used the first-level 
+administrative divisions as representative locations.
+```{r}
+# Label locations to distinguish between GSK-provided and other sources
+stu_loc <- stu_loc %>%
+  mutate(gsk_loc = !is.na(location))
+
+# Identify studies and countries still missing location data
+stu_loc_stat <- stu_loc %>%
+  filter(gsk_loc == FALSE)
+
+# Create a list of Statoids links for the missing countries
+stat_l <- list(
+  "Argentina" = "http://www.statoids.com/uar.html",
+  "Australia" = "http://www.statoids.com/uau.html",
+  "Belgium" = "http://www.statoids.com/ube.html",
+  "Brazil" = "http://www.statoids.com/ubr.html",
+  "Canada" = "http://www.statoids.com/uca.html",
+  "Chile" = "http://www.statoids.com/ucl.html",
+  "Colombia" = "http://www.statoids.com/uco.html",
+  "Costa Rica" = "http://www.statoids.com/ucr.html",
+  "Dominican Republic" = "http://www.statoids.com/udo.html",
+  "Estonia" = "http://www.statoids.com/uee.html",
+  "Finland" = "http://www.statoids.com/ufi.html",
+  "Germany" = "http://www.statoids.com/ude.html",
+  "Greece" = "http://www.statoids.com/ugr.html",
+  "Italy" = "http://www.statoids.com/uit.html",
+  "Lithuania" = "http://www.statoids.com/ult.html",
+  "Malaysia" = "http://www.statoids.com/umy.html",
+  "Mexico" = "http://www.statoids.com/umx.html",
+  "Norway" = "http://www.statoids.com/uno.html",
+  "Panama" = "http://www.statoids.com/upa.html",
+  "Philippines" = "http://www.statoids.com/uph.html",
+  "Poland" = "http://www.statoids.com/upl.html",
+  "Singapore" = "http://www.statoids.com/usg.html",
+  "South Korea" = "http://www.statoids.com/ukr.html",
+  "Spain" = "http://www.statoids.com/ues.html",
+  "Taiwan" = "http://www.statoids.com/utw.html",
+  "United States" = "http://www.statoids.com/uus.html")
+
+# For each missing country, obtain first-level administrative division information
+stu_loc_stat <- lapply(1:length(stat_l), function(x) {
+  pomp::bake(file = glue("{dirs$raw}/coord1lv/coord1lv_{names(stat_l[x])}.rds"), {
+      fun_data_coord1lv(country_url = stat_l[[x]], country_name = names(stat_l[x]), latlon = FALSE,
+                        api = api) %>%
+      filter(!(city %in% c("10 counties", "14 regions", "8 regions", "17 divisions"))) %>%
+      mutate(location = paste(city, level1, country)) %>%
+      select(country, location) 
+  })
+}) %>%
+  bind_rows() %>%
+  # Merge with missing studies and countries
+  left_join(stu_loc_stat, by = join_by(country), relationship = "many-to-many") %>%
+  mutate(location = coalesce(location.x, location.y),
+         .keep = "unused",
+         status = "Study Complete")
+
+# Merge the 1st-level administrative division location data into the study-country data
+stu_loc <- stu_loc %>%
+  filter(gsk_loc == TRUE) %>%
+  bind_rows(stu_loc_stat)
+
+# Identify studies that still have missing location data (none)
+filter(stu_loc, is.na(location))
+```
+
+# Obtain coordinates on locations ==================================================================
+
+# Fetch latitude and longitude for all locations in each study
+```{r}
+# Register Google Maps API key for geocoding
+ggmap::register_google(api)
+
+# Initialize a list to store coordinates data for each study
+stu_spatial <- list()
+# Loop through each study to obtain geocodes for the locations and save as RDS. 
+for (i in unique(stu_loc$study)) {
+  stu_spatial[[i]] <- pomp::bake(
+    file = glue("{dirs$processed}/02_stu_spatial/stu_spat_{i}.rds"), {
+    stu_loc %>%
+        # Filter data for the current study
+        filter(study == i) %>% 
+        # Obtain latitude and longitude for each location
+        ggmap::mutate_geocode(location) %>%
+        # Generate unique location IDs
+        group_by(study, country) %>%
+        mutate(llid = sprintf("%03d", row_number()),
+               llid = as.character(glue("{study}_{country}_ll{llid}"))) %>%
+        ungroup() %>%
+        # Select relevant columns
+        select(study, location, country, status, lon, lat, gsk_loc, llid)
+  })
+}
+
+# Combine all spatial data and identify any locations with missing latitude or longitude
+bind_rows(stu_spatial) %>%
+  filter(is.na(lat))
+```
+
+####################################################################################################
+# END
+####################################################################################################
+
