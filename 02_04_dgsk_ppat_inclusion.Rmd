@@ -182,6 +182,7 @@ left_join(stu_perpat_included, stu_meta_perpat, by = join_by(study, pat)) %>%
 
 # Cross-check data-driven vaccination status with protocol records 
 ```{r}
+stu_meta_pro_checks <- list()
 stu_meta_pro_checks$vaccine <- stu_meta_pro %>%
   select(study, starts_with("pat")) %>%
   pivot_longer(starts_with("pat"), names_to = "pat", values_to = "vaccine_pro") %>%

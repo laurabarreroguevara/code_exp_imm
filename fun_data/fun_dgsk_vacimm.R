@@ -72,7 +72,9 @@ fun_dgsk_vacimm <- function(dat) {
     mutate(time_s0_v1 = as.numeric(vac_date_v1 - imm_date_s0),
            time_s0_v1 = replace_na(time_s0_v1, 0)) %>%
     # Calculate the age at first vaccination
-    mutate(age = as.numeric((age_ref + (vac_date_v1 - age_ref_date))/7)) %>%
+    mutate(age = as.numeric((age_ref + (vac_date_v1 - age_ref_date))/7),
+           # Some negative ages due to birth vaccinations
+           age = case_when(age < 0 ~ 0, .default = age)) %>%
     # Add censoring variable (immunogenicity value under the cutoff)
     mutate(censored = case_when(imm_val_s1 < imm_cutoff_s1 ~ 1,
                                 imm_val_s1 >= imm_cutoff_s1 ~ 0))
@@ -134,7 +136,21 @@ fun_dgsk_vacimm <- function(dat) {
                                     doses == 5 ~ as.numeric(imm_date_s1 - vac_date_v5)),
              time_vl_s1 = replace_na(time_vl_s1, 0))
   }
-  
+  if(n_doses >= 6) {
+    vacimm <- vacimm %>%
+      # Calculate days between v5 and v6 
+      mutate(time_v5_v6 = as.numeric(vac_date_v6 - vac_date_v5),
+             time_v5_v6 = replace_na(time_v5_v6, 0),
+             time_v5_v6 = case_when(doses %in% c(1:5) ~ 0, .default = time_v5_v6),
+             # Calculate days between s1 and each vaccine dose
+             time_vl_s1 = case_when(doses == 1 ~ as.numeric(imm_date_s1 - vac_date_v1),
+                                    doses == 2 ~ as.numeric(imm_date_s1 - vac_date_v2), 
+                                    doses == 3 ~ as.numeric(imm_date_s1 - vac_date_v3),
+                                    doses == 4 ~ as.numeric(imm_date_s1 - vac_date_v4),
+                                    doses == 5 ~ as.numeric(imm_date_s1 - vac_date_v5),
+                                    doses == 6 ~ as.numeric(imm_date_s1 - vac_date_v6)),
+             time_vl_s1 = replace_na(time_vl_s1, 0))
+  }
   return(vacimm)
 }
 

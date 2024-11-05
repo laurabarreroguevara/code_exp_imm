@@ -17,7 +17,7 @@ vaccines, study phase, study date, linked studies, and links to databases.
 # Set wd to project directory
 ```{r setup}
 rm(list = ls())
-knitr::opts_knit$set(root.dir = '~/Nextcloud/Projects/_seas_imm/code_exp_imm_seas')
+knitr::opts_knit$set(root.dir = '~/Nextcloud/Projects/_seas_imm/code_exp_imm')
 ```
 
 # Load packages, themes, directories, and functions

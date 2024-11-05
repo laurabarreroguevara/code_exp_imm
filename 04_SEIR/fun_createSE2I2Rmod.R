@@ -1,28 +1,23 @@
-
-
+####################################################################################################
+# Function to create SE2I2R POMP model with seasonal vaccine protection
+####################################################################################################
 
 fun_createSE2I2Rmod <- function(n_years = 100, 
                                 country_name = "Colombia",
                                 dt = 0.1,
                                 covars,
-                                amp_term = 0.25,
-                                e_AH = -0.04,
-                                e_Te = 0,
-                                prot0 = 0.2,
-                                p_V = 0.8,
-                                amp_prot = 0,
-                                phi_prot = 47.5,
                                 debug_bool = F) {
   # Args: 
   # n_years: no of years of simulations (integer)
   # country_name: country name (string, "Colombia")
-  # debug_bool: boolean (T or F), should messages be displayed to help debug? 
   # dt: time step separating consecutive observations (in weeks)
+  # covars: df with time, rh and temperature
+  # debug_bool: boolean (T or F), should messages be displayed to help debug? 
   # Returns:
   # pomp object 
   
   # Add covars 
-  covars <- as.data.frame(covars[, c("time", "AH", "Te")])
+  covars <- as.data.frame(covars[, c("time", "RH_pred", "Te")])
   
   # Create list of Csnippets 
   components_l <- list()
@@ -83,7 +78,8 @@ fun_createSE2I2Rmod <- function(n_years = 100,
   }
     
   // Climate forcing
-  double s_clim_t = (e_AH * AH) + (e_Te * Te);
+  double s_clim_t = e_Te * ((Te / Te_mean) - 1) + e_RH * ((RH_pred / RH_mean) - 1);
+  //double s_clim_t = e_Te * ((Te)) + e_RH * ((RH_pred));
   s_clim_t = exp(s_clim_t);
   
   // Term-time forcing
@@ -116,47 +112,34 @@ fun_createSE2I2Rmod <- function(n_years = 100,
   
   po <- pomp(
     data = data.frame(time = seq(from = dt, to = n_years * 52, by = dt), X = NA),
+    #data = data.frame(time = 1:(max(covars$time) - 1), CC_obs = NA), 
     times = "time",
     covar = covariate_table(covars, times = "time"),
     t0 = 0,
     obsnames = "X",
     statenames = c("V", "S", "E1", "E2", "I1", "I2", "R", "CC"),
-    accumvars = c("CC"), # Incidence of cases, reset to 0 at the end of every time step
-    paramnames = c(
-      "mu", # Birth/death rate
-      "R0", # Basic reproduction no
-      "sigma", # 1 / average latent period
-      "gamma", # 1 / average infectious period
-      "amp_term", # amplitude of term-time forcing
-      "e_AH", # effect of absolute humidity
-      "e_Te", # effect of temperature 
-      "V0","S0", "E0", "I0", # Initial conditions 
-      "prot0", # average protection
-      "p_V", # coverage (probability to get vaccinated)
-      "amp_prot", # amplitude of protection forcing
-      "phi_prot", # phase of protection forcing
-      "a1", "b1"), # Coefficients of first Fourier component (1-yr period)
-    params = c(
-      mu = 1 / 75 / 52, # Average life expectancy: 75 yr
-      R0 = 10, 
-      sigma = 7 / 14, # Average latent period: 14
-      gamma = 7 / 7, # Average infectious period: 7 
-      amp_term = amp_term, 
-      e_AH = e_AH, 
-      e_Te = e_Te,
-      V0 = 0,
-      S0 = 1 / 10, 
-      E0 = 1e-4, 
-      I0 = 1e-4,
-      prot0 = prot0,
-      p_V = 0.8,
-      amp_prot = amp_prot,
-      phi_prot = phi_prot,
-      a1 = 0.26, 
-      b1 = -0.16),
-    globals = components_l[["globs"]],
     skeleton = vectorfield(components_l[["skel"]]),
     rinit = components_l[["rinit"]],
+    globals = components_l[["globs"]],
+    accumvars = c("CC"), # Incidence of cases, reset to 0 at the end of every time step
+    params = c(
+      mu = 1 / 80 / 52, # Birth/death rate, average life expectancy: 80 yr
+      R0 = 10, # Basic reproduction no
+      sigma = 7 / 14, # 1 / average latent period, average latent period: 14
+      gamma = 7 / 7, # 1 / average infectious period, average infectious period: 7 
+      amp_term = 0, # amplitude of term-time forcing
+      e_Te = 0, # effect of temperature 
+      Te_mean = mean(covars$Te, na.rm = T), # Temporal mean of Te 
+      e_RH = 0, # effect of relative humidity
+      RH_mean = mean(covars$RH_pred, na.rm = T), # Temporal mean of RH
+      p_V = 0, # coverage (probability to get vaccinated)
+      prot0 = 0, # average vaccine protection
+      amp_prot = 0, # amplitude of seasonal vaccine protection
+      phi_prot = 0, # phase of seasonal vaccine protection
+      V0 = 0, S0 = 1 / 10, E0 = 1e-4, I0 = 1e-4 # Initial conditions 
+      ),
+    paramnames = c("mu", "R0", "sigma", "gamma", "amp_term", "e_Te", "Te_mean", "e_RH", "RH_mean",
+      "p_V", "prot0", "amp_prot", "phi_prot", "V0","S0", "E0", "I0"),
     verbose = F
   )
   return(po)

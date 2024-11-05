@@ -2,7 +2,7 @@
 # Function to create data frame for mono/multi-pathogen and mono/multivariate models.
 ####################################################################################################
 
-fun_dgsk_pat <- function(dat = stu_ppat[[pat]], method = "elisa", seroname = "anti_mumps",
+fun_dgsk_modpat <- function(dat = stu_ppat[[pat]], method = "elisa", seroname = "anti_mumps",
                          dose = "1", multi_pat = FALSE, clim = NA, clim_thr = 0.8) {
   # Arguments:
   # - dat: (data frame) Data with vaccination and immunogenicity measurements per participant.
@@ -26,7 +26,7 @@ fun_dgsk_pat <- function(dat = stu_ppat[[pat]], method = "elisa", seroname = "an
     filter(imm_sero_s1 %in% seroname)
   
   # Filter doses
-  if(dose %in% c("1","2","3","4","5")) {
+  if(dose %in% c("1","2","3","4","5", "6")) {
     dat <- filter(dat, doses == dose) 
   } else if(dose == "l") {
     dat <- group_by(dat, study, pid) %>%

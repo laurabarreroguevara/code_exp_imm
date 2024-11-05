@@ -23,7 +23,7 @@ criteria into inclusion and exclusion criteria per study.
 # Set wd to project directory
 ```{r setup}
 rm(list = ls())
-knitr::opts_knit$set(root.dir = '~/Nextcloud/Projects/_seas_imm/code_exp_imm_seas')
+knitr::opts_knit$set(root.dir = '~/Nextcloud/Projects/_seas_imm/code_exp_imm')
 ```
 
 # Load packages, themes, directories, and functions

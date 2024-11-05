@@ -15,35 +15,22 @@ source("../00_pck.R")
 source("fun_mod_pl.R")
 library(colorspace)
 theme_set(theme_classic() + theme(strip.background = element_blank()))
-
-dirs$outputs <- "../outputs"
+dirs <- lapply(dirs, function(x) paste0("../", x))
 ```
 
 # Raw data 
 ```{r}
-# Define pathogen
-selpat_l <- c("rota", "vzv", "measl", "mumps", "rubel", "hav", "men", "strep", "polio", "hib",
-              "ipv", "opv", "dipht", "dtpa", "dtpw", "tetan", "pertu", "hbv",
-              "multi_ipv", "multi_pertu", "multi_men", "multi_polio", "multi_opv",
-              "multi_dtp", "multi_dtpa", "multi_dtpw", "multi_hib-men", "multi_mmr", "multi_mmr-vzv")
-
-# Define vaccination
-vac_l <-  case_when(
-  selpat_l %in% c("vzv", "measl", "mumps", "rubel", "multi_mmr", "hav", "multi_mmr-vzv") ~ "v1",
-  .default = "vl")
-names(vac_l) <- selpat_l
-
 # Read in the data 
-dat_l <- sapply(selpat_l, function(x) {
-  readRDS(glue("{dirs$outputs}/perpathogen/{x}/data_brms_{x}_{vac_l[[x]]}_s08.rds"))}, simplify = FALSE)
+dat_l <- lapply(str_subset(list.files(glue("{dirs$modfit}"), full.names = TRUE), "s08.rds"), readRDS)
+names(dat_l) <- sub(".*brms_(.*?)_(vl|v1)_s08.*", "\\1", 
+                    str_subset(list.files(glue("{dirs$modfit}")), "s08.rds"))
+
 # Read in the convergence
-df_rhats_cs <- readRDS(glue("{dirs$outputs}/modres_rhats/df_rhats_cs.rds"))
+rhats <- readRDS(glue("{dirs$rhats}/all_rhats.rds"))
 # Read in the waic 
-df_waic <- sapply(selpat_l, function(x) {
-  readRDS(glue("{dirs$outputs}/modres_waic/{x}_tbl_waic_models.rds"))}, simplify = FALSE)
+waic_df <- readRDS(glue("{dirs$waic}/all_waic.rds"))
 # Select min waic
-df_minwaic <- bind_rows(df_waic, .id = "pathogen") %>%
-  group_by(pathogen) %>%
+minwaic_df <- group_by(waic_df, pat) %>%
   filter(waic == min(waic))
 ```
 
@@ -59,6 +46,12 @@ fun_checkgaps <- function(x) {
   # Check if any gap is larger than 25, including the circular gap
   any(gaps > 25) || circular_gap > 25
 }
+
+# Read in the conditional effects
+ceffects_l <- lapply(str_subset(list.files(glue("{dirs$ceffects}"), full.names = TRUE),
+                                "archiv", negate = TRUE), readRDS)
+names(ceffects_l) <- sub(".*brms_(.*?)_(vl|v1)_s08.*", "\\1", 
+                         str_subset(list.files(glue("{dirs$ceffects}")), "archiv", negate = TRUE))
 ```
 
 # Function to read conditional effects 
@@ -74,19 +67,6 @@ fun_condeffects <- function(mod = mod, clu_name = NA, multi = FALSE, pat = "rota
   pref_clu_name <- if(!is.na(clu_name)) paste0(":", clu_name) else ""
   # Create group vector 
   var_vector <- c()
-  
-  # Extract conditional effects 
-  if(multi) {
-    ce_effects <- lapply(
-      conditional_effects(mod, resolution = 52, effects = glue("pi_vac_week_v1{pref_clu_name}")),
-      as.data.frame) %>%
-      bind_rows(.id = "imm_name") %>%
-      mutate(imm_name = str_extract(imm_name, "(?<=\\.immvals1anti).+?(?=_pi)"))
-    # Attach imm_name to group vector 
-    var_vector <- c(var_vector, "imm_name")
-  } else {
-    ce_effects <- conditional_effects(mod, resolution = 52, effects = glue("pi_vac_week_v1{pref_clu_name}"))[[1]]
-  }
   
   # Prepare clusters if necessary
   if(!is.na(clu_name)) {
@@ -131,15 +111,11 @@ fun_condeffects <- function(mod = mod, clu_name = NA, multi = FALSE, pat = "rota
 
 # Read models and extract conditional effects ======================================================
 ```{r}
-# Select only models cs or csi that converged 
-# df_converged <- filter(df_rhats_cs, Rhat == FALSE, str_detect(mod, "_cs\\.|_csi_")) %>%
-#   mutate(reg = case_when(str_detect(mod, "reg") ~ sub(".*(reg.*)\\.rds.*", "\\1", mod))) %>%
-#   filter(pathogen != "multi_pertu")
-
 # Select only models base, cs or csi that converged 
 df_converged <- filter(df_rhats_cs, Rhat == FALSE, str_detect(mod, "_cs\\.|_csi_|base")) %>%
   mutate(reg = case_when(str_detect(mod, "reg") ~ sub(".*(reg.*)\\.rds.*", "\\1", mod),
                          str_detect(mod, "base") ~ sub(".*(base.*)\\.rds.*", "\\1", mod))) %>%
+  # Reaching memory limit
   filter(pathogen != "multi_pertu")
 
 # Which are cosines
@@ -200,6 +176,10 @@ coef_l <- sapply(1:length(df_converged[[1]]), function(x) {
   })
 }, simplify = FALSE)
 names(coef_l) <- df_converged$mod
+
+sum_coef <- summary(bmvl_s08_dtpa_csi_reg_3)
+
+sum_coef$random$study
 ```
 
 # Extract coefficients for the cosinor =============================================================  
@@ -338,10 +318,81 @@ pat_tidy_names <- c("Rotavirus", "Varicella zoster virus", "Measles virus", "Mum
 
 names(pat_tidy_names) <- c("rota", "vzv", "measl", "mumps", "rubel", "dipht", "tetan", 
                      "pertupt", "hib", "men", "hbv", "hav", "ipv")
+
+pat_l <- list.files("../outputs/perpathogen")
+pat_tidy_names <- c(
+  "rota" = "Rotavirus", 
+  
+  "hav" = "Hepatitis A virus",
+  "hbv" = "Hepatitis B virus", 
+  
+  "dipht" = "Diphteria", 
+  "dtpa" = "Diphteria (Acellular)", 
+  "dtpw" = "Diphteria (Whole-cell)", 
+  "tetan" = "Tetanus", 
+  "pertu" = "Pertussis", 
+  "multi_pertu" = "Pertussis multi", 
+  "multi_dtp" = "DTP multi", 
+  "multi_dtpa" = "DTP (Acellular) multi", 
+  "multi_dtpw" = "DTP (Whole-cell) multi", 
+  
+  "polio" = "Polio", 
+  "multi_polio" = "Polio multi", 
+  "ipv" = "Polio (inactivated)", 
+  "multi_ipv" = "Polio (inactivated) multi", 
+  "opv" = "Polio (oral)",
+  "multi_opv" = "Polio (oral) multi", 
+  
+  "hib" = "H. influenzae Type B", 
+  "men" = "N. meningitidis (c)",
+  "multi_men" = "N. meningitidis (c and a) multi",
+  "multi_hib-men" = "Men-Hib", 
+  
+  "strep" = "S. pneumoniae", 
+  "multi_strep" = "S. pneumoniae multi", 
+  
+  "measl" = "Measles", 
+  "mumps" = "Mumps", 
+  "rubel" = "Rubella", 
+  "multi_mmr" = "MMR multi", 
+  "vzv" = "Varicella",
+  "multi_mmr-vzv" = "MMRV multi")
+
+pat_tidy_df <- (data.frame(pat_tidy_names) %>%
+  rename(pat_tidy_name = 1) %>%
+  rownames_to_column("pathogen") %>%
+  mutate(pat_tidy_name = factor(pat_tidy_name, levels = pat_tidy_names)))
 ```
 
 ## Data for the plot 
 ```{r}
+# dat_pl1 <- bind_rows(spa_dat_l, .id = "mod") %>%
+#   ungroup() %>%
+#   rename(clu = all_of(clu_name)) %>%
+#   mutate(clu = str_remove_all(clu, " ")) %>%
+#   left_join(df_converged_sel, by = join_by(mod)) %>%
+#   mutate(imm_name = str_extract(imm_name, "(?<=immvals1anti).+?(?=\\.)"),
+#          pi_vac_week_v1 = round(pi_vac_week_v1, digits = 11)) %>%
+#   select(pathogen, imm_name, pi_vac_week_v1, clu, estimate__, sample__, estimate_norm) %>%
+#   left_join(rename(dat_plot, estimate_mean = estimate__), by = join_by(pathogen, imm_name, pi_vac_week_v1, clu)) %>%
+#   group_by(pathogen, imm_name, clu) %>%
+#   mutate(estimate_mean_norm = estimate_mean/mean(estimate_mean, na.rm = TRUE)) %>%
+#   ungroup() %>%
+#   #filter(minwaic) %>%
+#   # filter(pathogen %in% c("multi_dtpa", "hav", "hbv", "hib", "ipv", "multi_mmr", "men",
+#   #                        "rota", "vzv")) %>%
+#   filter(pathogen %in% c("rota", "measl", "mumps", "rubel", "vzv", "multi_dtpa", "hav", "hib", 
+#                          "multi_ipv", "men", "hbv", "strep", "dtpw", "multi_opv")) %>%
+#   mutate(imm_name = replace_na(imm_name, ""), 
+#          sam_imm = paste0(sample__, "_", pathogen, imm_name), 
+#          pat_tidy = case_when(pathogen %in% c("multi_mmr", "multi_dtpa") ~ imm_name,
+#                               .default = pathogen),
+#          #pat_tidy = factor(pat_tidy,  levels = names(pat_tidy_names), labels = pat_tidy_names),
+#          imm_tidy = case_when(pathogen %in% c("multi_men", "multi_ipv", "multi_opv") ~ imm_name,
+#                               .default = NA)) %>%
+#   left_join(pat_tidy_df) %>%
+#   filter(!is.na(mod))
+
 dat_pl1 <- bind_rows(spa_dat_l, .id = "mod") %>%
   ungroup() %>%
   rename(clu = all_of(clu_name)) %>%
@@ -354,34 +405,57 @@ dat_pl1 <- bind_rows(spa_dat_l, .id = "mod") %>%
   group_by(pathogen, imm_name, clu) %>%
   mutate(estimate_mean_norm = estimate_mean/mean(estimate_mean, na.rm = TRUE)) %>%
   ungroup() %>%
-  #filter(minwaic) %>%
-  filter(pathogen %in% c("multi_dtpa", "hav", "hbv", "hib", "ipv", "multi_mmr", "men",
-                         "rota", "vzv")) %>%
+  filter(pathogen %in% c("rota", "measl", "mumps", "rubel", "vzv", "multi_dtpa", "hav", "hib", 
+                         "multi_ipv", "men", "hbv", "strep", "dtpw")) %>%
   mutate(imm_name = replace_na(imm_name, ""), 
          sam_imm = paste0(sample__, "_", pathogen, imm_name), 
          pat_tidy = case_when(pathogen %in% c("multi_mmr", "multi_dtpa") ~ imm_name,
-                              .default = pathogen),
-         pat_tidy = factor(pat_tidy,  levels = names(pat_tidy_names), labels = pat_tidy_names),
+                              .default = ""),
          imm_tidy = case_when(pathogen %in% c("multi_men", "multi_ipv") ~ imm_name,
                               .default = NA)) %>%
+  left_join(pat_tidy_df) %>%
   filter(!is.na(mod))
 ```
 
 ```{r}
 library(viridis)
+# dat_pl1 %>%
+#   filter(clu == unique(dat_pl1$clu)[2]) %>%
+#   group_by(sam_imm) %>%
+#   mutate(date_min = vac_week_v1[estimate_norm == min(estimate_norm)],
+#          date_max = vac_week_v1[estimate_norm == max(estimate_norm)]) %>%
+#   group_by(pathogen, pat_tidy) %>%
+#   mutate(date_min_mean = mean(date_min)) %>% 
+#   ggplot(aes(x = vac_week_v1, y = estimate_norm - 1, group = sam_imm, color = date_max)) + 
+#     #geom_line(alpha = 0.2) + 
+#     geom_point(shape = ".", size = 4, alpha = 0.2) + 
+#     #geom_line(alpha = 0.2) + 
+#     geom_line(aes(y = estimate_mean_norm - 1, group = imm_tidy), size = 1) +
+#     scale_x_continuous("Week of vaccination", breaks = c(1,18,35,52), limits = c(1,52)) + 
+#     scale_y_continuous("Conditional effect in temperate regions") + 
+#     scale_color_gradientn("Peak timing",
+#                           breaks = c(1,18,35,52), limits = c(1,52),
+#                           colours = c(viridis(100, begin = 0, option = "C"), 
+#                                     rev(viridis(100, begin = 0, option = "C"))),
+#                           guide = guide_colorbar(title.position = "top",
+#                                                  title.hjust = 0.5,
+#                                                  barheight = 0.8)) + 
+#   geom_point(aes(y = -Inf), shape = "|", size = 3) +
+#     facet_wrap(reorder(pat_tidy, as.numeric(factor(phase_group)))~., scales = "free", nrow = 3) + 
+#   theme(legend.position = "top")
+
 dat_pl1 %>%
   filter(clu == unique(dat_pl1$clu)[1]) %>%
   group_by(sam_imm) %>%
   mutate(date_min = vac_week_v1[estimate_norm == min(estimate_norm)],
          date_max = vac_week_v1[estimate_norm == max(estimate_norm)]) %>%
-  group_by(pat_tidy) %>%
+  group_by(pathogen, pat_tidy) %>%
   mutate(date_min_mean = mean(date_min)) %>% 
   ggplot(aes(x = vac_week_v1, y = estimate_norm - 1, group = sam_imm, color = date_max)) + 
-    #geom_line(alpha = 0.2) + 
     geom_point(shape = ".", size = 4, alpha = 0.2) + 
     geom_line(aes(y = estimate_mean_norm - 1, group = imm_tidy), size = 1) +
     scale_x_continuous("Week of vaccination", breaks = c(1,18,35,52), limits = c(1,52)) + 
-    scale_y_continuous("Conditional effect in temperate regions") + 
+    scale_y_continuous("Conditional effect in tropical regions") + 
     scale_color_gradientn("Peak timing",
                           breaks = c(1,18,35,52), limits = c(1,52),
                           colours = c(viridis(100, begin = 0, option = "C"), 
@@ -390,7 +464,7 @@ dat_pl1 %>%
                                                  title.hjust = 0.5,
                                                  barheight = 0.8)) + 
   geom_point(aes(y = -Inf), shape = "|", size = 3) +
-    facet_wrap(reorder(pat_tidy, as.numeric(factor(phase_group)))~., scales = "free", nrow = 3) + 
+    facet_wrap(pat_tidy_name+pat_tidy~., scales = "free", nrow = 3) + 
   theme(legend.position = "top")
 ```
 
@@ -418,7 +492,7 @@ dat_pl1 %>%
                           guide = guide_colorbar(title.position = "top",
                                                  title.hjust = 0.5,
                                                  barheight = 0.8)) + 
-  geom_point(aes(y = -Inf, size = tot)) +
+  geom_point(aes(y = -Inf), shape = "|") +
     facet_wrap(reorder(clu, as.numeric(as.factor(clu)))~., scales = "free", dir = "h", ncol = 3) + 
   theme(legend.position = "top")
 ```
@@ -466,7 +540,7 @@ names(pat_tidy_names) <- c("rota", "varicella", "measles", "mumps", "rubella", "
 for (i in unique(df_fixed$parameter)) {
 pl <- df_fixed %>%
   filter(parameter == i)  %>%
-  filter(reg == "base") %>%
+  filter(reg %in% c("base", "base_gauss")) %>%
   mutate(effect_cuali = case_when(`l-95% CI` < 0 & `u-95% CI` < 0 ~ "negative",
                                   `l-95% CI` > 0 & `u-95% CI` > 0 ~ "positive",
                                   .default = "nonsig")) %>%
@@ -486,6 +560,36 @@ pl <- df_fixed %>%
   ggtitle(i)
 print(pl)
 }
+
+pl_l <- list() 
+for (i in unique(df_fixed$parameter)) {
+pl_l[[i]] <- df_fixed %>%
+  filter(parameter == i)  %>%
+  filter(reg %in% c("base", "base_gauss")) %>%
+  mutate(effect_cuali = case_when(`l-95% CI` < 0 & `u-95% CI` < 0 ~ "negative",
+                                  `l-95% CI` > 0 & `u-95% CI` > 0 ~ "positive",
+                                  .default = "nonsig"),
+         imm_name = replace_na(imm_name, "")) %>%
+  left_join(pat_tidy_df) %>%
+  ggplot(aes(x = Estimate, y = imm_name, color = effect_cuali)) + 
+    geom_vline(aes(xintercept = 0), color = "grey", linetype = "dotted") + 
+    geom_segment(aes(x = `l-95% CI`, xend = `u-95% CI`, yend = imm_name), alpha = 0.8) + 
+    geom_point(size = 4, color = "white") + 
+    geom_point(size = 2, alpha = 0.8) + 
+    scale_color_manual(values = c("orange", "grey", "#0D0887FF")) + 
+    scale_x_continuous("Estimated effect") + 
+  facet_grid(reorder(pat_tidy_name, -Estimate) ~., scales = "free") + 
+  theme(#axis.text.y = element_blank(),
+        axis.title.y = element_blank(),
+        axis.ticks.y = element_blank(), 
+        axis.line.y = element_blank(),
+        strip.text.y = element_text(angle = 0),
+        legend.position = "none") + 
+  ggtitle(i)
+print(pl)
+}
+
+pl_l$age
 ```
 
 # Checking the correlation matrices ================================================================
@@ -523,6 +627,14 @@ wrap_plots(corrmatrix_pl)
 ```
 
 
+```{r}
+mod_f <-"tes"
+        clu_name <- if (str_detect(mod_f, "csi")) {
+            paste0(":", str_extract(mod_f, "(?<=csi_).*(?=\\.rds)"))
+        } else if (str_detect(mod_f, "cs.rds")) {
+            ""
+        }
+```
 
 
 

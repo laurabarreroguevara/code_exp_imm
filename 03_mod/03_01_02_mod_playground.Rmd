@@ -15,16 +15,16 @@ rm(list = ls())
 source("../00_pck.R")
 source("fun_brms_mod.R")
 
-pathogen <- "multi_men"
+pathogen <- "hbv"
 dose <- if(pathogen %in% c("vzv", "measl", "mumps", "rubel", 
                            "hav", "multi_mmr-vzv", "multi_mmr")) "v1" else "vl"
-dirs$outputs <- glue("../outputs/perpathogen/{pathogen}")
+dirs$outputs <- glue("../outputs/modfit")
 ```
 
 # Read formulas 
 ```{r}
 l_formula <- readRDS(file = glue("{dirs$outputs}/formula_brms_{pathogen}_l.rds"))
-play_fo <- l_formula[[3]]
+play_fo <- l_formula[[1]]
 ```
 
 # Read data
@@ -46,6 +46,7 @@ play_mod <- brm(
   warmup = 1000, iter = 3000, chains = 1,
   init = 0, control = list(adapt_delta = 0.95))
 
+plot(play_mod)
 conditional_effects(play_mod)
 play_mod
 stancode(play_mod)

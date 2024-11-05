@@ -90,6 +90,16 @@ fun_dgsk_exceptions <- function(stu_dfs, study_id = "10555") {
       .default = ""), 
       # Incomplete treatmnt (binding treatmnt studies)
       treatmnt = as.character(glue("{treat001}_{treat003}")))
+    
+    # Missing hbv at birth vaccine (adding from dates)
+    stu_dfs$expo <- stu_dfs$expo %>%
+      bind_rows(left_join(stu_dfs$dates, select(stu_dfs$pid, pid, group_nb, treat001), 
+                          by = join_by(pid)) %>%
+                filter(treat001 == "HBV at birth + DTPw-HB/HibKft", tit_lst == "VISIT1") %>% 
+                mutate(vaccine = "hbv",
+                       p_rdat = raw_date,
+                       v_adm = "Y") %>%
+                select(pid, vaccine, p_rdat, group_nb, v_adm))
   }
   
   ## 101223 ----------------------------------------------------------------------------------------
@@ -246,6 +256,15 @@ fun_dgsk_exceptions <- function(stu_dfs, study_id = "10555") {
                   select(pid, vaccine, p_rdat, group_nb, v_adm)) %>%
       arrange(pid, activity)
     
+    # Missing hbv at birth vaccine (adding from age)
+    stu_dfs$expo <- stu_dfs$expo %>%
+      bind_rows(stu_dfs$demo %>%
+                  mutate(p_rdat = fun_dgsk_tidydates(date_ref) - as.numeric(age)*7,
+                         p_rdat = toupper(format.Date(p_rdat, format = "%d%b%Y")),
+                         vaccine = "hbv",
+                         v_adm = "Y") %>%
+                  select(pid, vaccine, p_rdat, group_nb, v_adm))
+    
     # Surplus seroname hbv (eliminate serotest 8 TNR) 
     stu_dfs$sero <- filter(stu_dfs$sero, serotest != "8")
   }
@@ -297,6 +316,15 @@ fun_dgsk_exceptions <- function(stu_dfs, study_id = "10555") {
     stu_dfs$expo <- stu_dfs$expo %>%
       left_join(distinct(stu_dfs$pid, pid, treatmnt), by = join_by(pid)) %>%
       mutate(vaccine = treatmnt)
+    
+    # Missing hbv at birth vaccine (adding from age and checked with vacc_con)
+    stu_dfs$expo <- stu_dfs$expo %>%
+      bind_rows(stu_dfs$demo %>%
+                  mutate(p_rdat = fun_dgsk_tidydates(date_ref) - as.numeric(age)*7,
+                         p_rdat = toupper(format.Date(p_rdat, format = "%d%b%Y")),
+                         vaccine = "hbv",
+                         v_adm = "Y") %>%
+                  select(pid, vaccine, p_rdat, group_nb, v_adm))
   }
   
   ## 105539 ----------------------------------------------------------------------------------------
@@ -575,6 +603,19 @@ fun_dgsk_exceptions <- function(stu_dfs, study_id = "10555") {
   if(study_id == "110521") {
     # Missing group_nb (adding from pid)
     stu_dfs$expo <- left_join(stu_dfs$expo, select(stu_dfs$pid, pid, group_nb), by = join_by(pid))
+  }
+  
+  ## 111157 ----------------------------------------------------------------------------------------
+  if(study_id == "111157") {
+    # Missing hbv at birth vaccine (adding from age)
+    stu_dfs$expo <- stu_dfs$expo %>%
+      bind_rows(stu_dfs$demo %>%
+                  left_join(select(stu_dfs$pid, pid, group_nb)) %>%
+                  mutate(p_rdat = fun_dgsk_tidydates(date_ref) - as.numeric(age)*7,
+                         p_rdat = toupper(format.Date(p_rdat, format = "%d%b%Y")),
+                         vaccine = "hbv",
+                         v_adm = "Y") %>%
+                  select(pid, vaccine, p_rdat, group_nb, v_adm))
   }
   
   ## 111188 ----------------------------------------------------------------------------------------
@@ -1047,6 +1088,18 @@ fun_dgsk_exceptions <- function(stu_dfs, study_id = "10555") {
       mutate(method = case_when(str_detect(seroname, "POLIO") ~ "prnt", .default = "elisa"))
   }
   
+  ## 217744-077 ------------------------------------------------------------------------------------
+  if(study_id == "217744-077") {
+    # Missing hbv at birth vaccine (adding from age)
+    stu_dfs$expo <- stu_dfs$expo %>%
+      bind_rows(stu_dfs$demo %>%
+                  left_join(select(stu_dfs$pid, pid, group_nb)) %>%
+                  mutate(p_rdat = fun_dgsk_tidydates(date_ref) - as.numeric(age)*7,
+                         p_rdat = toupper(format.Date(p_rdat, format = "%d%b%Y")),
+                         vaccine = "hbv",
+                         v_adm = "Y") %>%
+                  select(pid, vaccine, p_rdat, group_nb, v_adm))
+  }
   ## 217744-078 ------------------------------------------------------------------------------------
   if(study_id == "217744-078") {
     # Read in studies 217744-081 and 106745
@@ -1442,6 +1495,18 @@ fun_dgsk_exceptions <- function(stu_dfs, study_id = "10555") {
       filter(!(seroname %in% c("IGG DIPHTERIA", "SBA-MenA L10")))
   }
   
+  ## 759346-007 ------------------------------------------------------------------------------------
+  if(study_id == "759346-007") {
+    # Missing hbv at birth vaccine (adding from dates)
+    stu_dfs$expo <- stu_dfs$expo %>%
+      bind_rows(filter(stu_dfs$dates, tit_lst == "VISIT1") %>% 
+                  left_join(select(stu_dfs$pid, pid, group_nb), by = join_by(pid)) %>%
+                  mutate(vaccine = "hbv",
+                         p_rdat = raw_date,
+                         v_adm = "Y") %>%
+                  select(pid, vaccine, p_rdat, group_nb, v_adm))
+  }
+  
   ## 759348-001 ------------------------------------------------------------------------------------
   if(study_id == "759348-001") {
     # Read in study 759348-002
@@ -1506,6 +1571,16 @@ fun_dgsk_exceptions <- function(stu_dfs, study_id = "10555") {
       vaccine == "TREATMENT A" & group_nb %in% c("3", "5") ~ "acthib",
       .default = vaccine)) %>%
       bind_rows(stu_dfs2$expo)
+    
+    # Missing hbv at birth vaccine (adding from age)
+    stu_dfs$expo <- stu_dfs$expo %>%
+      bind_rows(stu_dfs$demo %>%
+                  mutate(p_rdat = fun_dgsk_tidydates(date_ref) - as.numeric(age)*7,
+                         p_rdat = toupper(format.Date(p_rdat, format = "%d%b%Y")),
+                         vaccine = "hbv",
+                         v_adm = "Y") %>%
+                  select(pid, vaccine, p_rdat, group_nb, v_adm))
+    
     stu_dfs$sero <- bind_rows(stu_dfs$sero, stu_dfs2$sero) %>%
       # Surplus seroname men (eliminate repeated test)
       filter(!(seroname %in% c("N MEN C AB", "N MEN Y AB")))

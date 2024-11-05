@@ -1,0 +1,298 @@
+---
+title: "BRMS plots"
+author: "Laura Andrea Barrrero Guevara"
+date: "2023-02-23"
+output: html_document
+---
+
+################################################################################
+Purpose of script: To check the model results and plot it 
+################################################################################
+
+```{r}
+rm(list = ls())
+source("00_pck.R")
+library(colorspace)
+theme_set(theme_classic())
+```
+
+```{r}
+# Functions limits and breaks
+fun_breaks <- function(x) {
+  if (max(x) > 2) {
+    if (((ceiling(max(x)) - floor(min(x))) %% 2) == 0) { # Check if even or odd
+      seq(floor(min(x)), ceiling(max(x)), length.out = 3)
+    } else {
+      seq(floor(min(x)), ceiling(max(x)+1), length.out = 3)
+    }
+  } else {
+    if (((ceiling(max(x*10)) - floor(min(x*10))) %% 2) == 0) { # Check if even or odd
+      seq(floor(min(x*10)), ceiling(max(x*10)), length.out = 3)/10
+    } else {
+      seq(floor(min(x*10)), ceiling(max(x*10)+1), length.out = 3)/10
+    }
+  }
+}
+fun_limits <- function(x) {
+  if (max(x) > 2) {
+    if (((ceiling(max(x)) - floor(min(x))) %% 2) == 0) { # Check if even or odd
+      c(floor(min(x)), ceiling(max(x)))
+    } else {
+      c(floor(min(x)), ceiling(max(x)+1))
+    }
+  }  else {
+    if (((ceiling(max(x*10)) - floor(min(x*10))) %% 2) == 0) { # Check if even or odd
+      c(floor(min(x*10)), ceiling(max(x*10)))/10
+    } else {
+      c(floor(min(x*10)), ceiling(max(x*10)+1))/10
+    }
+  }
+}
+```
+
+# Get data from all pathogens 
+```{r}
+# Read in the data 
+dat_l <- lapply(str_subset(list.files(glue("{dirs$modfit}"), full.names = TRUE), "s08.rds"), readRDS)
+names(dat_l) <- sub(".*brms_(.*?)_(vl|v1)_s08.*", "\\1", 
+                    str_subset(list.files(glue("{dirs$modfit}")), "s08.rds"))
+```
+
+# Who? 
+```{r}
+# Obtain country data 
+df_pl1 <- bind_rows(lapply(dat_l, distinct, study, pid, sex, age), .id = "pathogen") %>%
+  left_join(pat_tidy_names, join_by(pathogen == pat)) %>%
+  mutate(mod = case_when(str_detect(pathogen, "multi", negate = TRUE) ~ "UVN unipathogen",
+                         pathogen %in% c("multi_ipv", "multi_opv", "multi_polio", "multi_pertu",
+                                         "multi_strep", "multi_men") ~ "MVN unipathogen",
+                         pathogen %in% c("multi_dtp", "multi_dtpa", "multi_dtpw", "multi_hib-men",
+                                         "multi_mmr", "multi_mmr-vzv") ~ "MVN multipathogen")) %>%
+  group_by(pathogen) %>%
+  mutate(median_age = median(age)) %>%
+  ungroup()
+  
+# Plot it ----------------------------------------------------------------------------------------
+pl1.1 <- ggplot(df_pl1, aes(y = fct_rev(pat_tidy), group = study, fill = mod)) +
+  geom_histogram(aes(group = mod), color = "white", stat = "count", size = 0.1) + 
+  geom_histogram(color = "white", stat = "count", fill = "transparent", size = 0.1) + 
+  geom_label(data = distinct(df_pl1, pat_tidy, study, pid) %>%
+               group_by(pat_tidy) %>%
+               summarise(study_tot = length(unique(study)), tot = n()), 
+             aes(x = tot + 800, label = as.character(study_tot), y = fct_rev(pat_tidy)), 
+             fill = "transparent", color = "grey50", inherit.aes = FALSE, size = 2) + 
+  scale_x_continuous("Total vaccinated individuals", expand = c(0,0), limits = c(0,22500)) +
+  scale_y_discrete("") + 
+  scale_fill_manual(values = c("orange", "dodgerblue", "darkblue")) + 
+  theme(legend.position = "none",
+        panel.grid.major.y = element_line())
+
+pl1.2 <- ggplot(df_pl1, aes(x = age/4, y = fct_rev(pat_tidy), color = mod)) +
+  geom_point(alpha = 0.1, shape = "|", size = 5) +
+  scale_x_continuous("Age at first vaccination (months)", expand = c(0,0),
+                     breaks = c(0, 2, 4, 6, 12, 18, 24, 36, 48, 60, 72, 84)) +
+  scale_y_discrete("") + 
+  scale_fill_manual(values = c("orange", "dodgerblue", "darkblue")) + 
+  scale_color_manual(values = c("orange", "dodgerblue", "darkblue")) + 
+  theme(legend.position = "none",
+        axis.title.y = element_blank(),
+        axis.text.y = element_blank(),
+        axis.ticks.y = element_blank(),
+        axis.line.y = element_blank(),
+        panel.grid.major.y = element_line())
+
+pl1.3 <- ggplot(df_pl1, aes(y = fct_rev(pat_tidy), alpha = sex, fill = mod)) +
+  geom_bar(color = "white", position="fill") + 
+  scale_alpha_discrete(range = c(0.1, 1)) + 
+  scale_x_continuous("Sex proportion", breaks = c(0, 0.5, 1), expand = c(0,0)) + 
+  scale_fill_manual(values = c("orange", "dodgerblue", "darkblue")) + 
+  theme(legend.position = "none",
+        axis.title.y = element_blank(),
+        axis.text.y = element_blank(),
+        axis.ticks.y = element_blank(),
+        axis.line.y = element_blank())
+
+pl1 <- pl1.1 + pl1.2 + pl1.3 + plot_layout(widths = c(3,6,1))
+ggsave(pl1, file = "figures/data_raw_individuals.pdf", width = 9.5, height = 5)
+```
+
+# Where? 
+```{r}
+# Obtain world map 
+world <- map_data("world") 
+
+# Obtain country data 
+df_pl1 <- bind_rows(lapply(dat_l[str_subset(names(dat_l), "multi", negate = TRUE)], function(x) 
+  x %>%
+    distinct(pid, country, lat_med, lon_med) %>%
+    group_by(country) %>%
+    summarise(tot = n(),
+              lat_med = mean(lat_med),
+              lon_med = mean(lon_med))
+  ), .id = "pathogen") %>%
+  left_join(pat_tidy_names, join_by(pathogen == pat)) %>%
+  # Rename countries to match 
+  mutate(country = case_when(country == "United States" ~ "USA",
+                               .default = country))
+
+# Selected countries 
+selected_map <- map_data("world") %>%
+  filter(region %in% c(unique(as.character(df_pl1$country))))
+  
+# Plot it ----------------------------------------------------------------------------------------
+  
+pl2 <-ggplot() +
+  geom_hline(aes(yintercept = c(-35, -23.5, 0, 23.5, 35)), linewidth = 0.5, color = "grey85") + 
+  geom_polygon(data = world, aes(x = long, y = lat, group = group), fill = "grey90") +
+  geom_polygon(data = selected_map, aes(x = long, y = lat, group = group), fill = "grey75") + 
+  geom_point(data = df_pl1, aes(x = lon_med, y = lat_med, color = pat_tidy, size = tot),
+             alpha = 0.8) + 
+  ggrepel::geom_text_repel(data = df_pl1, aes(x = lon_med, y = lat_med, color = pat_tidy, label = pat_tidy),
+             alpha = 0.8, max.overlaps = 15) + 
+  scale_y_continuous("Latitude (°)", breaks = c(-35, -23.5, 0, 23.5, 35),
+                     limits = c(-60,80), expand = c(0,0)) +
+  scale_x_continuous("Longitude (°)", expand = c(0,0)) + 
+  scale_color_viridis_d(name = "Vaccination") +
+  scale_size_continuous("Total vaccinated \nindividuals", limits = c(1,5000),
+                        breaks = c(500, 1500, 2500)) + 
+  guides(size = guide_legend(title.position = "top", nrow = 3, byrow = T),
+         color = guide_legend(title.position = "top", nrow = 3, byrow = T),
+         shape = "none") +
+  theme_void() + 
+  theme(legend.position = "bottom",
+        strip.background = element_rect(fill = "grey", colour = "white"),
+        strip.text = element_text(colour = "white"),
+        panel.grid = element_blank()) + 
+  coord_quickmap()
+
+
+ggsave(pl2, file = "figures/data_raw_map.pdf", width = 15, height = 15)
+```
+
+# When?
+```{r}
+df_pl3 <- bind_rows(lapply(dat_l, distinct, study, pid, vac_week_v1, age, reg_6), .id = "pathogen") %>%
+  left_join(pat_tidy_names, join_by(pathogen == pat)) %>%
+  mutate(mod = case_when(str_detect(pathogen, "multi", negate = TRUE) ~ "UVN unipathogen",
+                         pathogen %in% c("multi_ipv", "multi_opv", "multi_polio", "multi_pertu",
+                                         "multi_strep", "multi_men") ~ "MVN unipathogen",
+                         pathogen %in% c("multi_dtp", "multi_dtpa", "multi_dtpw", "multi_hib-men",
+                                         "multi_mmr", "multi_mmr-vzv") ~ "MVN multipathogen"),
+         reg_6 = as.character(reg_6)) %>%
+  group_by(pathogen) %>%
+  mutate(median_age = median(age)) %>%
+  ungroup() %>%
+  group_by(pathogen, reg_6, vac_week_v1) %>%
+  mutate(tot = n())
+
+pl3 <- ggplot(df_pl3 %>%
+         group_by(pathogen, study, vac_week_v1) %>%
+         mutate(tot = n()), 
+       aes(x = vac_week_v1, fill = study)) +
+  geom_histogram(color = "transparent", size = 0.1) + 
+  facet_wrap(pat_tidy~., scales = "free_y", ncol = 5) +
+  scale_fill_viridis_d() +
+  scale_y_continuous("", expand = c(0,0), breaks = fun_breaks, limits = fun_limits) + 
+  scale_x_continuous("Week of vaccination", expand = c(0,0), breaks = c(1, 18, 35, 52)) + 
+  theme(strip.background = element_blank(),
+        legend.position = "none") +
+ggplot(df_pl3 %>%
+         group_by(pathogen, reg_6, vac_week_v1) %>%
+         mutate(tot = n()), 
+       aes(x = vac_week_v1, y = reg_6, color = reg_6, alpha = tot)) +
+  geom_point() + 
+  scale_color_viridis_d() +
+  scale_y_discrete("", limits = rev) + 
+  scale_x_continuous("Week of vaccination", expand = c(0,0), breaks = c(1, 18, 35, 52)) + 
+  facet_wrap(pat_tidy~., ncol = 5) +
+  theme(strip.background = element_blank(),
+        legend.position = "none") +
+  plot_layout(ncol = 1)
+
+ggsave(pl3, file = "figures/data_raw_vaccinations.pdf", width = 10, height = 13)
+```
+
+# Measured?
+```{r}
+df_pl3.1 <- bind_rows(lapply(dat_l, function(x) 
+  x %>%
+    distinct(study, pid, time_vl_s1, age)
+  ), .id = "pathogen") %>%
+  left_join(pat_tidy_names, join_by(pathogen == pat)) %>%
+  group_by(pathogen) %>%
+  mutate(median_age = median(age)) %>%
+  ungroup()
+
+pl3.1 <- ggplot(data = df_pl3.1,
+              aes(x = time_vl_s1/7, y = pat_tidy, fill = pat_tidy)) +
+  geom_jitter(alpha = 0.1) + 
+  scale_x_continuous("Time to immunogenicity measurement (weeks)",
+                     breaks = c(2,4,6,8,10,12,14,16,18,20,22,24)) +
+  scale_y_discrete("") + 
+  scale_fill_viridis_d(name = "") + 
+  facet_grid(pat_tidy~., scales = "free", switch = "y") +
+  theme(legend.position = "none",
+        strip.background = element_blank(),
+        strip.text.y.left = element_text(angle = 0, hjust = 1),
+        axis.title.y = element_blank(),
+        axis.text.y = element_blank(),
+        axis.ticks.y = element_blank(),
+        axis.line.y = element_blank())
+
+ggsave(pl3.1, file = "figures/data_raw_immunogenicity_time.pdf", width = 10, height = 9)
+
+dat_long_l <- sapply(filter(pat_tidy_names, pat %in% names(dat_l))$pat, function(x) 
+  if(str_detect(x, "multi") == FALSE) { 
+    distinct(dat_l[[x]], study, pid, imm_val_s1, imm_sero_s1, imm_met_s1, imm_cutoff_s1, age)
+  } else if(str_detect(x, "multi") == TRUE) { dat_l[[x]] %>%
+    select(study, pid, age, starts_with("imm_val_s1"), starts_with("imm_met_s1"), 
+           starts_with("imm_cutoff_s1")) %>%
+    pivot_longer(cols = starts_with("imm_"), names_to = c(".value", "imm_sero_s1"), 
+                 names_pattern = "^(imm_[a-z]+_s1)_(.*)$")
+  }, simplify = FALSE
+)
+
+dat_long_l <- sapply(names(dat_long_l), function(x) {
+  if(!any(str_detect(names(dat_long_l[[x]]), "imm_met_s1"))) {
+    dat_long_l[[x]] %>%
+      mutate(imm_met_s1 = case_when(!is.na(imm_val_s1) ~ unique(dat_l[[x]]$imm_met_s1)),
+             pathogen = x) %>%
+      left_join(pat_tidy_names, join_by(pathogen == pat))
+  } else
+    dat_long_l[[x]] %>%
+    mutate(pathogen = x) %>%
+    left_join(pat_tidy_names, join_by(pathogen == pat))
+}, simplify = FALSE)
+
+pl3_l <- list()
+for(i in names(dat_long_l)) {
+  pl3_l[[i]] <- dat_long_l[[i]] %>%
+    filter(!is.na(imm_val_s1)) %>%
+    mutate(
+      imm_sero_s1 = str_remove(imm_sero_s1, "anti_"),
+      imm_name_met = as.character(glue("{imm_sero_s1} ({imm_met_s1})"))) %>%
+    ggplot(aes(x = imm_val_s1, fill = study)) +
+    geom_histogram(color = "transparent") + 
+    scale_x_continuous("Immunogenicity", expand = c(0,0), trans = "log10") +
+    scale_y_continuous(unique(dat_long_l[[i]]$pat_tidy), expand = c(0,0)) + 
+    scale_fill_viridis_d(name = "") + 
+    facet_wrap(imm_name_met~., scales = "free", dir = "v", ncol = 5) +
+    theme(legend.position = "none",
+        strip.background = element_blank())
+}
+
+pl3.2 <- wrap_plots(pl3_l) + plot_layout(ncol = 3)
+
+ggsave(pl3.2, file = "figures/data_raw_immunogenicity.pdf", width = 16, height = 25)
+```
+
+
+
+
+
+
+
+
+
+
+

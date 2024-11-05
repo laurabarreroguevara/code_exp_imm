@@ -14,35 +14,47 @@ rm(list = ls())
 source("../00_pck.R")
 library(colorspace)
 theme_set(theme_classic() + theme(strip.background = element_blank()))
-dirs$outputs <- "../outputs/perpathogen"
-dirs$rhats <- "../outputs/modres_rhats"
-
-pat_l <- c("rota", "varicella", "measles", "mumps", "rubella", "men", "pn", "polio", "hib",
-           "dipht", "tetan", "pertu", "hbv", "ipv", "opv", "multi_men", "multi_hibmen", "multi_polio", 
-           "multi_dtp", "multi_mmrv", "multi_mmr", "multi_pertu", "multi_pn", "multi_ipv", "multi_opv")
+dirs <- lapply(dirs, function(x) paste0("../", x))
 ```
 
 # Check convergence of the photoperiod models 
 ```{r}
-rhats <- readRDS(glue("{dirs$rhats}/df_rhats_cs.rds"))
-rhats %>%
-  filter(Rhat == TRUE)
+# Check that Rhats < 1
+rhats <- bind_rows(lapply(str_subset(list.files(glue("{dirs$rhats}"), full.names = TRUE), 
+                                     "all", negate = TRUE), readRDS)) %>%
+  group_by(mod) %>%
+  filter(Rhat == max(Rhat)) %>%
+  mutate(Rhat = round(Rhat, digits = 1),
+         Rhat_cond = Rhat == 1) %>%
+  select(mod, Rhat_cond)
 
-# pat_l <- c("hav", "ipv", "polio", "tetan", "multi_polio", "multi_ipv", "multi_dtp", "multi_dtpa", "multi_dtpw")
-# Multi dtp 4
-# Multi dtpw 3 and 4
-# Muti hib-men 2, 3, 4, 6
-# Muti men 2, 3, 4, 6
-# Multi opv all
+rhats
+
+# Save it 
+saveRDS(rhats, glue("{dirs$rhats}/all_rhats.rds"))
+
+# Check which coefficients were problematic for models with Rhats > 1 
+bind_rows(lapply(filter(rhats, Rhat_cond == FALSE)$mod, 
+                 function(x) readRDS(glue("{dirs$rhats}/rhats_{x}")))) %>%
+  mutate(Rhat = round(Rhat, digits = 1)) %>%
+  filter(Rhat != 1) %>%
+  select(mod, coef, Rhat)
+
+# Multi dtpw 4 (not a problem)
+# Multi hib-men 2, 3, 4, 6 (lack of data, nothing to do)
+# Multi ipv 3 (not a problem)
+# Multi opv cs, 2, 3, 4, 6 (lack of data, nothing to do)
+# Multi strep all (vac conc and vac name)
+# Multi dtpa all (Tetanus seems to be the problem)
 ```
 
 # Check convergence of the photoperiod-climate models 
 ```{r}
-rhats <- readRDS(glue("{dirs$rhats}/df_rhats_cs2i.rds"))
-rhats %>%
-  filter(Rhat == FALSE) %>%
-  arrange(pathogen, df) %>%
-  filter(str_detect(pathogen, "multi"))
+# rhats <- readRDS(glue("{dirs$rhats}/df_rhats_cs2i.rds"))
+# rhats %>%
+#   filter(Rhat == FALSE) %>%
+#   arrange(pathogen, df) %>%
+#   filter(str_detect(pathogen, "multi"))
 
 # converging:
 # kgc_3 dipht, dtpa, polio, rota, 
@@ -55,6 +67,14 @@ rhats %>%
 ```
 
 
+```{r}
+bmvl_s08_multi_dtpa_base_gauss$data %>%
+  ggplot(aes(x = log(imm_val_s1_anti_tetan))) + 
+  geom_histogram() + 
+  facet_wrap(~study*center)
+  
+  
+```
 
 
 

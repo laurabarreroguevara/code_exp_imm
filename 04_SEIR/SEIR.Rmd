@@ -1,15 +1,12 @@
 ---
-title: "Data for SE2I2R model with covariate"
+title: "SE2I2R model with seasonal vaccine protection"
 author: "Laura Andrea Barrrero Guevara"
-date: "1/27/2022"
+date: "6/27/2024"
 output: html_document
 ---
-################################################################################
-Purpose of script: Check climate and school data and create covars df for the 
-SE2I2R model (Colombia)
-Output:
-- df_covars (covariate for the SE2I2R model)
-################################################################################
+####################################################################################################
+Purpose of script: Simulate SE2I2R model with seasonal vaccine protection
+####################################################################################################
 
 # Setup
 ```{r setup, include=FALSE}
@@ -26,6 +23,7 @@ source("fun_createSE2I2Rmod.R")
 theme_set(theme_classic())
 ```
 
+# Function to reformat simulations
 ```{r}
 fun_reformatsimulations <- function(sims_wide, delta_t = delta_t) {
   # Args: 
@@ -49,87 +47,129 @@ fun_reformatsimulations <- function(sims_wide, delta_t = delta_t) {
 }
 ```
 
-# Read in and plot school and climate data 
+# Define a location
 ```{r}
-# School terms
+# Tropical = SKBO, Colombia
+# Temperate = Rostock, Germany 
+loc = "SKBO"
+```
+
+# Seasonal transmission ============================================================================
+```{r}
+# Climate data
+dat_clim <- readRDS(glue("covars_{loc}.rds")) %>%
+  group_by(week = week(week_date)) %>%
+  summarise(Te = mean(Te, na.rm = TRUE),
+            RH_pred = mean(RH_pred, na.rm = TRUE))
+
+# Plot climate data
+dat_clim %>%
+  pivot_longer(cols = c(Te, RH_pred)) %>%
+  ggplot(aes(x = week, y = value)) +
+  geom_line() +
+  facet_grid(name~., scales = "free")
+
+# School terms (only for Colombia)
+if(loc == "SKBO") {
 dat_school <- readRDS("data_school_calendar.rds") %>%
   filter(country == "colombia") %>%
-  mutate(school = case_when(school == 0 ~ -1, .default = school))
+  mutate(school = case_when(school == 0 ~ -1, .default = school)) 
 
-# Climatic variables 
-dat_clim <- readRDS(glue("data_clim_sel_week_nc_col.rds")) %>% 
-  pivot_longer(cols = starts_with("w_"), names_to = "clim_var") %>% 
-  mutate(week = str_remove(week, pattern = "week_"),
-         week = as.integer(week)) %>% 
-  filter(!is.na(value)) %>%
-  # Summarise per year
-  group_by(clim_var, mun_cod, mun_name, mun_latitude, mun_longitude, week) %>%
-  summarise(value = mean(value, na.rm = T)) %>%
-  ungroup() %>%
-  # Standardize 
-  group_by(clim_var, mun_cod, mun_name) %>%
-  mutate(value_stand = scale(value)) %>%
-  ungroup()
-
-# Plot data school calendar
+# Plot data school calendar (only for Colombia)
 ggplot(dat_school, 
        aes(x = as.numeric(week), y = school, color = country)) + 
   geom_line() + 
   geom_point()
-
-# Plot data climate
-ggplot(filter(dat_clim, clim_var == "w_hum_spe"),
-       aes(x = week, y = value_stand)) + 
-  geom_line() + 
-  facet_wrap(~ reorder(mun_name, -mun_latitude), scales = "free_y") + 
-  scale_color_viridis_c() + 
-  theme(legend.position = "none") 
+}
 ```
+
+# Seasonal vaccine protection ======================================================================
 
 ```{r}
-coef_cosine_l <- readRDS("~/Nextcloud/Projects/_seas_imm/code_exp_imm_seas/outputs/modres_coef_cosine.rds")
+coef_cosine_l <- readRDS("../outputs/modres_coef_cosine.rds")
 coef_cosine_l %>%
   filter(pathogen == "vzv")
+omega <- 2.0 * pi / 52.0
+
+# Plot it
+filter(coef_cosine_l, pathogen == "vzv", str_detect(mod, "cs.rds|csi_reg_3")) %>%
+  uncount(weights = 52) %>%
+  group_by(pathogen, mod, reg, clu) %>%
+  mutate(week = row_number(),
+         prot = (amp*cos((omega * week) - ((phi) * omega))),
+         wain = (amp*cos((omega * week) - ((phi+(52/2)) * omega)))) %>%
+  ungroup() %>%
+  ggplot(aes(x = week, y = prot, color = clu)) + 
+  geom_line() + 
+  geom_line(aes(y = wain), alpha = 0.3) + 
+  geom_vline(aes(xintercept = phi, color = clu), linetype = "dotted") + 
+  geom_vline(aes(xintercept = phi+(52/2), color = clu), linetype = "dotted") + 
+  geom_hline(aes(yintercept = amp, color = clu), linetype = "dotted") + 
+  scale_y_continuous("Protection") + 
+  scale_x_continuous("Week") + 
+  scale_color_manual(values = c("dodgerblue", "orange"), na.value = "grey20") + 
+  facet_grid(~clu) + 
+  theme(legend.position = "top",
+        strip.background = element_blank())
+
+# Select coefficients according to the location
+prot_coef <- if(loc == "SKBO") {
+  filter(coef_cosine_l, pathogen == "vzv", reg == "reg_4", clu == "2_Tropical")
+} else if (loc == "Rostock") {
+  filter(coef_cosine_l, pathogen == "vzv", reg == "reg_4", clu == "1_Temperate")
+}
+```
+# Simulations ======================================================================================
+
+# Parameters
+```{r}
+parms <- c(
+  "mu" = 1 / 80 / 52, # Birth/death rate
+  "R0" = 10, # Basic reproduction no
+  "sigma" = 7 / 14, # 1 / average latent period
+  "gamma" = 7 / 7, # 1 / average infectious period
+  "amp_term" = 0, # amplitude of term-time forcing
+  "e_RH" = -0.2, # effect of relative humidity
+  "e_Te" = -0.2, # effect of temperature 
+  "p_V" = 0.80, # coverage (probability to get vaccinated)
+  "prot0" = 0, # average vaccine protection
+  "amp_prot" = prot_coef$amp, # amplitude of seasonal vaccine protection
+  "phi_prot" = prot_coef$phi # phase of seasonal vaccine protection
+)
 ```
 
-
+# Simulate just 1 
 ```{r}
 # 1. Prepare covars 
 covars <- data.frame(week = rep(1:52, 200), time = 1:(52*200)) %>%
-  left_join(filter(dat_clim, mun_name == "BOGOTA", clim_var == "w_hum_spe") %>%
-              select(week, value_stand) %>%
-              rename(AH = value_stand), by = join_by(week)) %>%
-  left_join(filter(dat_clim, mun_name == "BOGOTA", clim_var == "w_temp_mean") %>%
-              select(week, value_stand) %>%
-              rename(Te = value_stand), by = join_by(week)) %>%
-  select(-week)
+  left_join(dat_clim)  
 
 # 2. Create pomp object and make basic checks
-mod <- fun_createSE2I2Rmod(n_years = 200, country_name = "Colombia", covars = covars, 
-                           amp_term = 0.25, e_AH = -0.04, e_Te = 0, dt = 0.1, prot0 = 0.9, amp_prot = 0.3,
-                           debug_bool = F)
+mod <- fun_createSE2I2Rmod(n_years = 1000, country_name = "Colombia", covars = covars, debug_bool = F)
 
 # 3. Run 1 simulation
-tj <- trajectory(object = mod, format = "data.frame", method = "lsoda")
+coef(mod)[names(parms)] <- parms
+tj <- trajectory(object = mod, format = "data.frame")
 stopifnot(round(rowSums(select(tj, c("V", "S", "E1", "E2", "I1", "I2", "R"))), digits = 3) == 1)
 fun_reformatsimulations(tj, delta_t = 0.1) %>%
   mutate(state_var = factor(state_var, levels = c("V", "S", "E", "I", "R", "CC"))) %>%
   filter(year > 190) %>%
-  ggplot(aes(x = time, y = val)) + 
+  ggplot(aes(x = time/52, y = val)) + 
   geom_line() + 
   facet_grid(state_var~., scales = "free")
+```
 
+# Simulate with different parameters
+```{r}
 # 4. Run different simulations 
 # Define grid of parameters to change
 chg_parms <- expand.grid(
-  prot0 = c(0, 0.90),
-  #amp_prot = c(0, 0.2, 0.4),
-  #phi_prot = c(5, 17.83, 25, 35, 47.5)
-  amp_prot = c(0, 0.8),
-  phi_prot = c(17.83),
-  amp_term = c(0, 0.25)
-  ) %>% 
+  prot0 = c(0, 0.70, 0.95),
+  amp_prot = prot_coef$amp * c(0, 0.5, 1, 2),
+  phi_prot = prot_coef$phi + c(0, 13, 26, 39), 
+  amp_term = c(0)) %>% 
   mutate(.id = as.character(seq_len(nrow(.))))
+
 # Create mat of parameters with changes 
 p_mat <- parmat(params = coef(mod), nrep = nrow(chg_parms))
 p_mat["prot0", ] <- chg_parms$prot0
@@ -139,159 +179,50 @@ p_mat["amp_term", ] <- chg_parms$amp_term
 
 tjm <- trajectory(object = mod, format = "data.frame", method = "lsoda", params = p_mat)
 
-tjm %>%
+tjm_long <- tjm %>%
   mutate(N = round(V + S + E1 + E2 + I1 + I2 + R, digits = 3),
          VR = R+V) %>%
   fun_reformatsimulations(delta_t = 0.1) %>%
   filter(year > 195) %>%
-  left_join(chg_parms) %>%
-  #filter(phi_prot == 25) %>%
-  filter(prot0 == 0.90) %>%
+  left_join(chg_parms) 
+
+# Exact seasonal protection parameters:
+tjm_long %>%
+  filter(phi_prot == prot_coef$phi, amp_prot == prot_coef$amp, amp_term == 0) %>%
+  ggplot(aes(x = time/52, y = val, color = as.factor(prot0), group = prot0)) + 
+  geom_line() + 
+  facet_wrap(state_var~., scales = "free", ncol = 1)
+
+# Changing the seasonal protection parameters:
+tjm_long %>%
+  filter(prot0 == 0.70, amp_term == 0) %>%
   ggplot(aes(x = time/52, y = val, color = amp_prot, group = amp_prot)) + 
   geom_line() + 
+  scale_colour_viridis_c() + 
+  facet_wrap(state_var~as.factor(phi_prot), scales = "free", ncol = 4)
+
+# Adding school terms
+tjm_long %>%
+  filter(prot0 == 0.70, phi_prot == prot_coef$phi) %>%
+  ggplot(aes(x = time/52, y = val, color = amp_prot, group = amp_prot)) + 
+  geom_line() + 
+  scale_colour_viridis_c() + 
   facet_wrap(state_var~amp_term, scales = "free", ncol = 2)
-
 ```
 
-
-
+# Checking changes in phi and amp
 ```{r}
-week = 1:52
-omega = 2.0 * pi / 52.0
-prot0 = 1
-#amp_prot = 0.5
-a1 = 0.26
-b1 = -0.16 
-
-A = 0.3
-phi = 47.5
-prot_seas = a1 * cos(omega * week) + b1 * sin(omega * week)
-prot_t = prot0 * (1.0 + prot_seas)
-prot_seas2 = A*cos(omega * (week - phi))
-prot_t2 = prot0 * (1.0 + prot_seas2)
-
-prot_seas3 = A*cos((omega * week) - (phi * omega))
-prot_t3 = prot0 * (1.0 + prot_seas2)
-
-data.frame(week, prot_t, prot_t3) %>%
-  ggplot(aes(x = week, y = prot_t)) + 
-  geom_line() +
-  geom_line(aes(y = prot_t3), color = "red") +
-  geom_line(aes(y = prot_t3), color = "red")
-
-
+expand.grid(week = 1:52,
+            amp = prot_coef$amp * c(0.5, 1, 2),
+            phi = prot_coef$phi + c(13, 26, 39, 52)) %>%
+  mutate(prot = amp*cos((omega * week) - (phi * omega)),
+         amp_phi = glue("{amp}_{phi}")) %>%
+  ggplot(aes(x = week, y = prot, group = amp_phi, color = as.factor(round(amp, digits = 2)))) + 
+  geom_line() + 
+  facet_grid(~round(phi)) +
+  scale_color_viridis_d("Amplitude") + 
+  theme(legend.position = "top")
 ```
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-```{r}
-# fun_createSE2I2Rmod <- function(n_years = 100, 
-#                                 country_name = "Colombia",
-#                                 dt = 0.1,
-#                                 covars,
-#                                 amp_term = 0.25,
-#                                 amp_clim = -0.2,
-#                                 prot0 = 0.2,
-#                                 amp_prot = 0,
-#                                 debug_bool = F) {
-#   # Args: 
-#   # n_years: no of years of simulations (integer)
-#   # country_name: country name (string, "Colombia", "Mexico", "Panama", 
-#   ## "Costa Rica", "Nicaragua", "Honduras", "El Salvador", "Guatemala" or "Belize")
-#   # debug_bool: boolean (T or F), should messages be displayed to help debug? 
-#   # dt: time step separating consecutive observations (in weeks)
-#   # Returns:
-#   # pomp object 
-#   
-#   # ADD IN COVARIATES
-#   covars <- as.data.frame(covars[, c("time", "clim")])
-#   
-#   # Extract C code from file
-#   mod_code <- readLines("c-SE2I2R_wcovars.c")
-#   components_nm <- c("globs", "skel", "rinit")
-#   components_l <- vector(mode = 'list', length = length(components_nm))
-#   names(components_l) <- components_nm
-#   
-#   for(nm in components_nm) {
-#     components_l[[nm]] <- mod_code[str_which(mod_code, paste0("start_", nm)):str_which(mod_code, paste0("end_", nm))] %>% 
-#       str_flatten(collapse = "\n")
-#     
-#     if(nm == "globs") {
-#       components_l[[nm]] <- paste(components_l[[nm]], 
-#                                   sprintf("static int c_name = %d;\nstatic int debug = %d;", 
-#                                           if(country_name == "Colombia") {1}
-#                                           else if(country_name == "Mexico") {2}
-#                                           else if(country_name == "Panama") {3}
-#                                           else if(country_name == "Costa Rica") {4}
-#                                           else if(country_name == "Nicaragua") {5}
-#                                           else if(country_name == "Honduras") {6}
-#                                           else if(country_name == "El Salvador") {7}
-#                                           else if(country_name == "Guatemala") {8}
-#                                           else if(country_name == "Belize") {9}
-#                                           else {0}, 
-#                                           as.integer(debug_bool)), 
-#                                   sep = "\n")
-#     }
-#     components_l[[nm]] <- Csnippet(text = components_l[[nm]])
-#   }
-#   
-#   po <- pomp(data = data.frame(time = seq(from = dt, to = n_years * 52, by = dt), X = NA),
-#              times = "time",
-#              covar = covariate_table(covars, times = "time"),
-#              t0 = 0,
-#              obsnames = "X",
-#              statenames = c("S", "E1", "E2", "I1", "I2", "R", "CC"),
-#              accumvars = c("CC"), # Incidence of cases, reset to 0 at the end of every time step
-#              paramnames = c("mu", # Birth/death rate
-#                             "R0", # Basic reproduction no
-#                             "sigma", # 1 / average latent period
-#                             "gamma", # 1 / average infectious period
-#                             "amp_term", # amplitude of term-time forcing
-#                             "amp_clim", # amplitude of climate forcing
-#                             "S0", "E0", "I0", # Initial conditions 
-#                             "prot0", # protection
-#                             "amp_prot", # amplitude of protection forcing
-#                             "a1", "b1", # Coefficients of first Fourier component (1-yr period)
-#                             "a2", "b2" # Coefficients of second Fourier component (6-mo period), 
-#                             ), 
-#              params = c(mu = 1 / 75 / 52, # Average life expectancy: 75 yr
-#                         R0 = 10, 
-#                         sigma = 7 / 14, # Average latent period: 14
-#                         gamma = 7 / 7, # Average infectious period: 7 
-#                         amp_term = 0, 
-#                         amp_clim = amp_clim, 
-#                         S0 = 1 / 10, 
-#                         E0 = 1e-4, 
-#                         I0 = 1e-4,
-#                         prot0 = prot0,
-#                         amp_prot = amp_prot,
-#                         a1 = 0.15, 
-#                         b1 = 0, 
-#                         a2 = 0, 
-#                         b2 = 0
-#                         ),
-#              globals = components_l[["globs"]],
-#              skeleton = vectorfield(components_l[["skel"]]),
-#              rinit = components_l[["rinit"]],
-#              verbose = F
-#   )
-#   return(po)
-# }
-```
-
 
 
 

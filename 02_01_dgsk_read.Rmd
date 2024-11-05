@@ -243,7 +243,7 @@ lapply(list(stu_che$naspid, stu_che$nasexpo, stu_che$nassero), function(x) {
 # This section provides a way to drill down into the details of a specific study.
 ```{r}
 # Select a specific study by its ID
-study_pat <- "111870"
+study_pat <- "104977"
 
 # Load the raw data for the selected study
 stu_dfs <- fun_dgsk_readdfs(stu_l[study_pat], cdi = F, info_files = F)

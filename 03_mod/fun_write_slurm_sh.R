@@ -3,6 +3,7 @@
 ################################################################################
 
 fun_write_slurm_sh <- function(args_fo = args_fo,
+                               args_iter = args_iter,
                                dat_name = "data_brms_1dose_ii.rds",
                                pathogen = "varicella",
                                time = "23:00:00") {
@@ -23,6 +24,7 @@ fun_write_slurm_sh <- function(args_fo = args_fo,
     "\n\nexport arg_pat=\"", pathogen, "\"",
     "\nexport arg_dat=\"", dat_name, "\"",
     "\nexport arg_fo=\"", args_fo, "\"",
+    "\nexport arg_iter=\"", args_iter, "\"",
     "\n\nsrun R --quiet --no-save <fune_mod_fit.R")
   # Create a new shell script file with the argument name
   file_name <- glue("{dirs$outputs}/slurm_sh/run_{pathogen}_brms_{args_fo}.sh")

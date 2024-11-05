@@ -19,7 +19,7 @@ The working copy of the vacc_con files of some studies (unzipped):
 # Set the working directory to the project directory
 ```{r setup}
 rm(list = ls())
-knitr::opts_knit$set(root.dir = '~/Nextcloud/Projects/_seas_imm/code_exp_imm_seas')
+knitr::opts_knit$set(root.dir = '~/Nextcloud/Projects/_seas_imm/code_exp_imm')
 ```
 
 # Load packages, themes, directories, and functions

@@ -258,6 +258,13 @@ var_names <- c("age", "sex", "vac_name_v1", "vac_date_v1", "vac_conc",
                "imm_sero_s0", "imm_date_s0", "imm_val_s0")
 ```
 
+# Exception for birth vaccination for hbv (no need for baseline ab)
+```{r}
+lapply(patdf_l, function(x) distinct(filter(x, (vac_date_v1 - birth_date) < 7), study))
+lapply(patdf_l, function(x) distinct(filter(x, age < 1), study))
+exphbv_l <- distinct(filter(patdf_l$hbv, (vac_date_v1 - birth_date) < 7), study)
+```
+
 # Full studies and RCT groups-countries to be excluded
 ```{r}
 # Identify complete studies missing variables 
@@ -268,6 +275,10 @@ exclu_group_l$perstudy <- sapply(names(patdf_l), function(i) {
     }), ~left_join(.x, .y, by = join_by(study)))
 }, simplify = FALSE) %>%
   bind_rows(.id = "pat") %>%
+  # Exception for hbv studies
+  mutate(na_imm_sero_s0 = case_when(study %in% exphbv_l$study ~ FALSE, .default = na_imm_sero_s0),
+         na_imm_date_s0 = case_when(study %in% exphbv_l$study ~ FALSE, .default = na_imm_date_s0),
+         na_imm_val_s0 = case_when(study %in% exphbv_l$study ~ FALSE, .default = na_imm_val_s0)) %>%
   rowwise() %>%
   mutate(include = all(c_across(starts_with("na")) == FALSE)) %>%
   ungroup()
@@ -285,6 +296,10 @@ exclu_group_l$perrctg <- sapply(names(patdf_l), function(i){
   # sickle cell disease, HIV+)
   # Result: 10 study-RCT group pair excluded
   mutate(na_pop = str_detect(rct_group, "pre-term|pre_term|sickle|hiv \\+")) %>%
+  # Exception for hbv studies
+  mutate(na_imm_sero_s0 = case_when(study %in% exphbv_l$study ~ FALSE, .default = na_imm_sero_s0),
+         na_imm_date_s0 = case_when(study %in% exphbv_l$study ~ FALSE, .default = na_imm_date_s0),
+         na_imm_val_s0 = case_when(study %in% exphbv_l$study ~ FALSE, .default = na_imm_val_s0)) %>%
   rowwise() %>%
   mutate(include = all(c_across(starts_with("na")) == FALSE)) %>%
   ungroup()
@@ -374,6 +389,25 @@ for (i in names(patdf_l)) {
   # Missing immunogenicity method
   patdf_row_l[[i]] <- filter(patdf_row_l[[i]], !is.na(imm_met_s1))
   filter_l$imm_met_s1[[i]] <- fun_filter_data(patdf_row_l[[i]])
+  
+  if(i == "hbv") {
+  # Missing baseline immunogenicity
+  patdf_row_l[[i]] <- filter(patdf_row_l[[i]], (!is.na(imm_sero_s0)) |
+                               (is.na(imm_sero_s0) & study %in% exphbv_l$study & age < 4))
+  filter_l$imm_sero_s0[[i]] <- fun_filter_data(patdf_row_l[[i]])
+  # Missing baseline immunogenicity date
+  patdf_row_l[[i]] <- filter(patdf_row_l[[i]], (!is.na(imm_date_s0)) |
+                               (is.na(imm_date_s0) & study %in% exphbv_l$study & age < 4))
+  filter_l$imm_date_s0[[i]] <- fun_filter_data(patdf_row_l[[i]])
+  # Missing baseline immunogenicity value
+  patdf_row_l[[i]] <- filter(patdf_row_l[[i]], (!is.na(imm_val_s0)) |
+                               (is.na(imm_val_s0) & study %in% exphbv_l$study & age < 4))
+  filter_l$imm_val_s0[[i]] <- fun_filter_data(patdf_row_l[[i]])
+  # Missing baseline immunogenicity method
+  patdf_row_l[[i]] <- filter(patdf_row_l[[i]], (!is.na(imm_met_s0)) |
+                               (is.na(imm_met_s0) & study %in% exphbv_l$study & age < 4))
+  filter_l$imm_met_s0[[i]] <- fun_filter_data(patdf_row_l[[i]])
+  } else {
   # Missing baseline immunogenicity
   patdf_row_l[[i]] <- filter(patdf_row_l[[i]], !is.na(imm_sero_s0))
   filter_l$imm_sero_s0[[i]] <- fun_filter_data(patdf_row_l[[i]])
@@ -386,19 +420,41 @@ for (i in names(patdf_l)) {
   # Missing baseline immunogenicity method
   patdf_row_l[[i]] <- filter(patdf_row_l[[i]], !is.na(imm_met_s0))
   filter_l$imm_met_s0[[i]] <- fun_filter_data(patdf_row_l[[i]])
+  }
   
   # Eligibility
   patdf_row_l[[i]] <- filter(patdf_row_l[[i]], eligibility %in% c(
     "Y", "", "EI_109509", "EI_bo111344", "EI_bo110478", "EI_bo106602","EI_bo104065", "EI_bo111535"))
   filter_l$eligibility[[i]] <- fun_filter_data(patdf_row_l[[i]])
-  # Small time s0 to vaccination (no more than 15 days)
-  patdf_row_l[[i]] <- filter(patdf_row_l[[i]], time_s0_v1 < 15)
+  # Small time s0 to vaccination (no more than 30 days)
+  patdf_row_l[[i]] <- filter(patdf_row_l[[i]], time_s0_v1 <= 30)
   filter_l$time_s0_v1[[i]] <- fun_filter_data(patdf_row_l[[i]])
+  
+  # Age 
+  if(i %in% c("hav", "measl", "mumps", "rubel", "vzv")) {
+    patdf_row_l[[i]] <- filter(patdf_row_l[[i]], age < 26*4, age >= 4)
+    filter_l$age[[i]] <- fun_filter_data(patdf_row_l[[i]])
+  } else {
+    patdf_row_l[[i]] <- filter(patdf_row_l[[i]], age < 6*4, age >= 4)
+    filter_l$age[[i]] <- fun_filter_data(patdf_row_l[[i]])
+  }
+  
   # Small time vaccination to s1 (no more than 6 months)
-  patdf_row_l[[i]] <- filter(patdf_row_l[[i]], time_vl_s1 < 30*6)
+  patdf_row_l[[i]] <- filter(patdf_row_l[[i]], time_vl_s1 < 30*5)
   filter_l$time_vl_s1[[i]] <- fun_filter_data(patdf_row_l[[i]])
   
-  
+  if(i == "hbv") {
+  patdf_row_l[[i]] <- patdf_row_l[[i]] %>%
+    mutate(imm_val_cutoff_s0 = imm_val_s0 > imm_cutoff_s0) %>%
+    group_by(across(-c(imm_val_s0, imm_date_s0, imm_met_s0, imm_sero_s0, imm_cutoff_s0))) %>%
+    summarise(
+      imm_val_s0_any = any(imm_val_cutoff_s0, na.rm = TRUE),
+      imm_val_s0_all = all(imm_val_cutoff_s0, na.rm = TRUE),
+      .groups = "drop") %>%
+    filter(imm_val_s0_any == FALSE) %>%
+    select(-imm_val_s0_any)
+  filter_l$imm_val_s0_any[[i]] <- fun_filter_data(patdf_row_l[[i]])
+  } else {
   # Baseline ab titers (measured in any way)
   patdf_row_l[[i]] <- patdf_row_l[[i]] %>%
     mutate(imm_val_cutoff_s0 = imm_val_s0 > imm_cutoff_s0) %>%
@@ -412,6 +468,7 @@ for (i in names(patdf_l)) {
     filter(imm_val_s0_any == FALSE) %>%
     select(-imm_val_s0_any)
   filter_l$imm_val_s0_any[[i]] <- fun_filter_data(patdf_row_l[[i]])
+  }
 }
 
 # Checks

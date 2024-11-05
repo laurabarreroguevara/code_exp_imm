@@ -10,7 +10,7 @@ fun_formulas <- function(pathogen = "rota",
                          cens = TRUE) {
   
   # Base covariates always included and additions 
-  covars_mod <- c("1", "sex", "age", "(1|study)", "(1|study:country:center:rct_group)", others)
+  covars_mod <- c("1", "sex", "age", others)
   
   # Seasonal covariates based on model name
   seasonal_covars <- switch(

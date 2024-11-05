@@ -29,14 +29,14 @@ outputs/perpathogen/{i} 4 files:
 ```{r}
 rm(list = ls())
 source("00_pck.R")
-source("fun_data/fun_dgsk_pat.R")
-
-data_brms_hib_vl_s08
+source("fun_data/fun_dgsk_modpat.R")
 ```
 
 # Load the list of data frames per pathogen
 ```{r}
 stu_ppat <- readRDS(glue("{dirs$processed}/stu_ppat.rds"))
+# No diphteria combined nor polio combined
+stu_ppat <- stu_ppat[!(names(stu_ppat) %in% c("dipht", "polio"))]
 ```
 
 # Data frames for unipathogen models ===============================================================
@@ -104,7 +104,7 @@ stu_mpat <- lapply(list(
   "multi_mmr" = c("measl", "mumps", "rubel"),
   "multi_mmr-vzv" = c("measl", "mumps", "rubel", "vzv"),
   "multi_hib-men" = c("hib", "men"),
-  "multi_dtp" = c("dipht", "tetan", "pertu"),
+  #"multi_dtp" = c("dipht", "tetan", "pertu"),
   "multi_dtpa" = c("dtpa", "tetan", "pertu"),
   "multi_dtpw" = c("dtpw", "tetan", "pertu")), function(x) {
     lapply(unlist(x), function(pat_i) {
@@ -157,6 +157,8 @@ dat_comb_multi <- lapply(stu_mpat, function(x) {
          imm_met_s1 = strsplit(imm_met_s1, "-"),
          multi = "multipat_multi",
          prefx = "") 
+
+dat_comb_multi
 ```
 
 # List of data frame combinations
@@ -168,6 +170,27 @@ dat_select <- bind_rows(dat_comb_uni, dat_comb_multi, .id = "multi_pat") %>%
     thr = 0.8) %>%
   mutate(name_df = glue("data_brms_{prefx}{pat_dat}_v{doses}_s{str_remove(thr, '\\\\.')}_{kgc}"),
          name_df = str_remove_all(name_df, "_NA"))
+```
+
+# Extra analyses for ipv2 and ipv3 and pertuprn and pertufha
+```{r}
+dat_select <- dat_select %>% 
+  bind_rows(dat_select %>%
+  filter(multi == "unipat_mono", pat_dat == "ipv") %>%
+  mutate(name_df = str_replace(name_df, "ipv", "ipv2"),
+         imm_sero_s1 = list("anti_polio_2"))) %>%
+  bind_rows(dat_select %>%
+  filter(multi == "unipat_mono", pat_dat == "ipv") %>%
+  mutate(name_df = str_replace(name_df, "ipv", "ipv3"),
+         imm_sero_s1 = list("anti_polio_3"))) %>%
+  bind_rows(dat_select %>%
+  filter(multi == "unipat_mono", pat_dat == "pertu") %>%
+  mutate(name_df = str_replace(name_df, "pertu", "pertuprn"),
+         imm_sero_s1 = list("anti_pertu_prn"))) %>%
+  bind_rows(dat_select %>%
+  filter(multi == "unipat_mono", pat_dat == "pertu") %>%
+  mutate(name_df = str_replace(name_df, "pertu", "pertufha"),
+         imm_sero_s1 = list("anti_pertu_fha")))
 ```
 
 # Create data frames according to the combinations
@@ -234,6 +257,8 @@ lapply(pat_df_l, function(x) c(studies_vl = length(unique(x$study)),
   bind_rows(.id = "name_df") %>%
   left_join(dat_select, by = join_by(name_df)) %>%
   filter(is.na(kgc))
+
+#summary(bind_rows(pat_df_l[which(str_detect(names(pat_df_l), "kgc", negate = TRUE))], .id = "pathogen"))
 ```
 
 # Save data frames 
@@ -241,7 +266,7 @@ lapply(pat_df_l, function(x) c(studies_vl = length(unique(x$study)),
 walk(names(pat_df_l), function(x) {
   pat <- paste0(dat_select[dat_select$name_df == x, "prefx"][[1]], 
                 dat_select[dat_select$name_df == x, "pat_dat"][[1]])
-  saveRDS(pat_df_l[[x]], glue("{dirs$outputs}/perpathogen/{pat}/{x}.rds"))
+  saveRDS(pat_df_l[[x]], glue("{dirs$outputs}/modfit/{x}.rds"))
 })
 ```
 

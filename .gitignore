@@ -14,6 +14,7 @@ _extra
 _archiv
 *.rds
 *.Rds
+figures
 # Example code in package build process
 *-Ex.R
 
