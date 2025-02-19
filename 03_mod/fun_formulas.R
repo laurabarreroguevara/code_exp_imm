@@ -44,7 +44,8 @@ fun_formulas <- function(pathogen = "rota",
     response_mod <- if(cens) { glue("imm_val_s1_{multi} | cens(censored_{multi})")
     } else { glue("imm_val_s1_{multi}") }
   } else {
-    response_mod <- "imm_val_s1 | cens(censored)"
+    response_mod <- if(cens) { "imm_val_s1 | cens(censored)"
+    } else { glue("imm_val_s1") }
   }
   
   # Build the formula
@@ -98,7 +99,38 @@ fun_formulas_multipathogen <- function(pathogen = "multi_men",
   return(mbf_formula)
 }
 
+# Multi long ---------------------------------------------------------------------------------------
 
+fun_formulas_multipathogenlong <- function(pathogen = "multi_men", 
+                                       data = "s08",
+                                       doses = "d3", 
+                                       model_nm = "base", 
+                                       varname = "", 
+                                       varname2 = "",
+                                       others = "", 
+                                       multi_pat = NULL,
+                                       cens = FALSE) {
+  
+  # Run for each response fun_formula 
+  bf_formula <- fun_formulas(pathogen = pathogen, data = data, doses = doses, model_nm = model_nm, 
+                 varname = varname, varname2 = varname2, others = others, multi = NULL, cens = cens)
+  
+  # Add family distribution 
+  if(cens == FALSE) {
+    name_cens <- "gauss"
+    mbf_formula <- bf(bf_formula[[1]], sigma ~ 0 + imm_sero_s1) + gaussian(link = "log")
+  } else {
+    name_cens <- "gamma"
+    mbf_formula <- bf(bf_formula[[1]], sigma ~ 0 + imm_sero_s1)
+  }
+  
+  # Generate the model name based on parameters
+  model_suffix <- paste0(names(bf_formula)[[1]], "_", name_cens)
+  mbf_formula <- list(mbf_formula)
+  names(mbf_formula) <- model_suffix
+  
+  return(mbf_formula)
+}
 
 
 

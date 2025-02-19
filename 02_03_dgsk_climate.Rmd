@@ -59,7 +59,8 @@ stu_spatial <- sapply(stu_included$study, function(x) {
 # Extract KGC classification for each location in each study =======================================
 ```{r}
 stu_kgc <- sapply(stu_included$study, function(x) {
-  pomp::bake(file = glue("{dirs$processed_clim}/stu_kgc_{x}.rds"), {
+  pomp::bake(file = glue("{dirs$processed_clim}/stu_kgc_{x}.rds"), 
+             dir = getOption("pomp_archive_dir", dirs$pomp), {
     fun_data_kgc(dat = stu_spatial[[x]])
   })}, simplify = F)
 # Please note that using the kgc package creates conflicts with tidyverse, best to restart session.
@@ -73,7 +74,8 @@ classification for each country
 
 ```{r}
 stu_clusters <- sapply(stu_included$study, function(x) {
-  pomp::bake(file = glue("{dirs$processed_clim}/stu_clusters_{x}.rds"), {
+  pomp::bake(file = glue("{dirs$processed_clim}/stu_clusters_{x}.rds"), 
+             dir = getOption("pomp_archive_dir", dirs$pomp), {
     
     # Assign clusters based on KGC classification --------------------------------------------------
     stu_kgc[[x]] %>%

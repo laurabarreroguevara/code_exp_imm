@@ -17,22 +17,36 @@ theme_set(theme_classic())
 dirs <- list()
 # To Kramer's server "saved zipped" data 
 dirs$server_save_kramer <- "/Volumes/public-dom/kramer/gsk_data"
-# To Barrero Guevaras's server "saved zipped" data 
-dirs$server_save_bg <- "/Volumes/public-dom/barrero-guevara/gsk_data_save"
-# To Barrero Guevaras's server "working unzipped" data 
-dirs$server_bg <- "/Volumes/public-dom/barrero-guevara/gsk_data"
-dirs$server_vacc_con <- "/Volumes/public-dom/barrero-guevara/vacc_con_data"
-# To local data 
-dirs$raw <- "data/raw"
-dirs$processed <- "data/processed"
-dirs$outputs <- "outputs"
-dirs$rhats <- "outputs/modres_rhats"
-dirs$waic <- "outputs/modres_waic"
-dirs$coef <- "outputs/modres_coef"
-dirs$ceffects <- "outputs/modres_ceffects"
-dirs$figures <- "figures"
-dirs$modfit <- "outputs/modfit"
 
+# To Barrero Guevaras's server main 
+dirs$seas_imm_server  <- "/Volumes/public-dom/barrero-guevara/_seas_imm_server"
+# To Barrero Guevaras's server "saved zipped" data 
+dirs$server_save_bg   <- paste0(dirs$seas_imm_server, "/gsk_raw/gsk_data_save")
+# To Barrero Guevaras's server "working unzipped" data 
+dirs$server_bg        <- paste0(dirs$seas_imm_server, "/gsk_raw/gsk_data")
+dirs$server_vacc_con  <- paste0(dirs$seas_imm_server, "/gsk_raw/vacc_con_data")
+
+# To data 
+dirs$raw              <- paste0(dirs$seas_imm_server, "/data/raw")
+dirs$processed        <- paste0(dirs$seas_imm_server, "/data/processed")
+
+# To outputs
+dirs$outputs          <- paste0(dirs$seas_imm_server, "/outputs")
+dirs$modfit           <- paste0(dirs$seas_imm_server, "/outputs/modfit")
+dirs$rhats            <- paste0(dirs$seas_imm_server, "/outputs/modres_rhats")
+dirs$waic             <- paste0(dirs$seas_imm_server, "/outputs/modres_waic")
+dirs$coef             <- paste0(dirs$seas_imm_server, "/outputs/modres_coef")
+dirs$ceffects         <- paste0(dirs$seas_imm_server, "/outputs/modres_ceffects")
+dirs$cespa            <- paste0(dirs$seas_imm_server, "/outputs/modres_cespa")
+dirs$pred             <- paste0(dirs$seas_imm_server, "/outputs/modres_pred")
+
+# To local
+dirs$figures <- "figures"
+
+# For pomp
+dirs$pomp <- ""
+
+# List of pathogen names
 pat_tidy_names <- data.frame(
   pat = c(
     "rota", "hav", "hbv", "dipht", "dtpa", 
@@ -54,6 +68,7 @@ pat_tidy_names <- data.frame(
     "S. pneumoniae", "S. pneumoniae multi","Measles", "Mumps", "Rubella", "MMR multi", "Varicella",
     "MMRV multi")) %>%
   mutate(pat_tidy = factor(pat_tidy, levels = pat_tidy))
+
 ####################################################################################################
 # END
 ####################################################################################################

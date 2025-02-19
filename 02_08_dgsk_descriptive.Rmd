@@ -1,96 +1,66 @@
 ---
-title: "BRMS plots"
+title: "Descriptive plots"
 author: "Laura Andrea Barrrero Guevara"
 date: "2023-02-23"
 output: html_document
 ---
 
-################################################################################
-Purpose of script: To check the model results and plot it 
-################################################################################
+####################################################################################################
+Purpose of script: Descriptive plots of the data 
+Figures saved in /figures
+####################################################################################################
 
 ```{r}
 rm(list = ls())
 source("00_pck.R")
+source("fun_figures/fun_breaks.R")
+source("fun_figures/fun_limits.R")
 library(colorspace)
 theme_set(theme_classic())
 ```
 
-```{r}
-# Functions limits and breaks
-fun_breaks <- function(x) {
-  if (max(x) > 2) {
-    if (((ceiling(max(x)) - floor(min(x))) %% 2) == 0) { # Check if even or odd
-      seq(floor(min(x)), ceiling(max(x)), length.out = 3)
-    } else {
-      seq(floor(min(x)), ceiling(max(x)+1), length.out = 3)
-    }
-  } else {
-    if (((ceiling(max(x*10)) - floor(min(x*10))) %% 2) == 0) { # Check if even or odd
-      seq(floor(min(x*10)), ceiling(max(x*10)), length.out = 3)/10
-    } else {
-      seq(floor(min(x*10)), ceiling(max(x*10)+1), length.out = 3)/10
-    }
-  }
-}
-fun_limits <- function(x) {
-  if (max(x) > 2) {
-    if (((ceiling(max(x)) - floor(min(x))) %% 2) == 0) { # Check if even or odd
-      c(floor(min(x)), ceiling(max(x)))
-    } else {
-      c(floor(min(x)), ceiling(max(x)+1))
-    }
-  }  else {
-    if (((ceiling(max(x*10)) - floor(min(x*10))) %% 2) == 0) { # Check if even or odd
-      c(floor(min(x*10)), ceiling(max(x*10)))/10
-    } else {
-      c(floor(min(x*10)), ceiling(max(x*10)+1))/10
-    }
-  }
-}
-```
-
-# Get data from all pathogens 
-```{r}
 # Read in the data 
-dat_l <- lapply(str_subset(list.files(glue("{dirs$modfit}"), full.names = TRUE), "s08.rds"), readRDS)
+```{r}
+dat_l <- lapply(
+  str_subset(str_subset(list.files(glue("{dirs$modfit}"), full.names = TRUE), "s08.rds"), 
+             "long", negate = TRUE), readRDS)
 names(dat_l) <- sub(".*brms_(.*?)_(vl|v1)_s08.*", "\\1", 
-                    str_subset(list.files(glue("{dirs$modfit}")), "s08.rds"))
+                    str_subset(str_subset(list.files(glue("{dirs$modfit}")), "s08.rds"), "long", negate = TRUE))
 ```
 
-# Who? 
+# Who? Plot on the information about the participants  
 ```{r}
-# Obtain country data 
+# Prepare data for the plot 
 df_pl1 <- bind_rows(lapply(dat_l, distinct, study, pid, sex, age), .id = "pathogen") %>%
+  # Add tidy names for the pathogens 
   left_join(pat_tidy_names, join_by(pathogen == pat)) %>%
   mutate(mod = case_when(str_detect(pathogen, "multi", negate = TRUE) ~ "UVN unipathogen",
                          pathogen %in% c("multi_ipv", "multi_opv", "multi_polio", "multi_pertu",
                                          "multi_strep", "multi_men") ~ "MVN unipathogen",
                          pathogen %in% c("multi_dtp", "multi_dtpa", "multi_dtpw", "multi_hib-men",
-                                         "multi_mmr", "multi_mmr-vzv") ~ "MVN multipathogen")) %>%
-  group_by(pathogen) %>%
-  mutate(median_age = median(age)) %>%
-  ungroup()
-  
-# Plot it ----------------------------------------------------------------------------------------
+                                         "multi_mmr", "multi_mmr-vzv") ~ "MVN multipathogen"))
+
+# Plot it ------------------------------------------------------------------------------------------
+## Histogram of the number of participants per pathogen and study (with number of studies as label)
 pl1.1 <- ggplot(df_pl1, aes(y = fct_rev(pat_tidy), group = study, fill = mod)) +
-  geom_histogram(aes(group = mod), color = "white", stat = "count", size = 0.1) + 
-  geom_histogram(color = "white", stat = "count", fill = "transparent", size = 0.1) + 
+  geom_bar(aes(group = mod), stat = "count", color = "white", size = 0.1) + 
+  geom_bar(stat = "count", color = "white", fill = "transparent", size = 0.1) + 
   geom_label(data = distinct(df_pl1, pat_tidy, study, pid) %>%
                group_by(pat_tidy) %>%
                summarise(study_tot = length(unique(study)), tot = n()), 
-             aes(x = tot + 800, label = as.character(study_tot), y = fct_rev(pat_tidy)), 
-             fill = "transparent", color = "grey50", inherit.aes = FALSE, size = 2) + 
+             aes(x = tot + 800, y = fct_rev(pat_tidy), label = as.character(study_tot)), 
+             color = "grey50", fill = "transparent", size = 2, inherit.aes = FALSE) + 
   scale_x_continuous("Total vaccinated individuals", expand = c(0,0), limits = c(0,22500)) +
   scale_y_discrete("") + 
   scale_fill_manual(values = c("orange", "dodgerblue", "darkblue")) + 
   theme(legend.position = "none",
         panel.grid.major.y = element_line())
 
+## Histogram (and density) of the age at vaccination 
 pl1.2 <- ggplot(df_pl1, aes(x = age/4, y = fct_rev(pat_tidy), color = mod)) +
-  geom_point(alpha = 0.1, shape = "|", size = 5) +
-  scale_x_continuous("Age at first vaccination (months)", expand = c(0,0),
-                     breaks = c(0, 2, 4, 6, 12, 18, 24, 36, 48, 60, 72, 84)) +
+  geom_point(shape = "|", size = 2.5, alpha = 0.1) +
+  scale_x_continuous("Age at first vaccination (months)", 
+                     breaks = c(0, 2, 4, 6, 12, 18, 24, 36, 48, 60, 72, 84), expand = c(0,0)) +
   scale_y_discrete("") + 
   scale_fill_manual(values = c("orange", "dodgerblue", "darkblue")) + 
   scale_color_manual(values = c("orange", "dodgerblue", "darkblue")) + 
@@ -101,60 +71,60 @@ pl1.2 <- ggplot(df_pl1, aes(x = age/4, y = fct_rev(pat_tidy), color = mod)) +
         axis.line.y = element_blank(),
         panel.grid.major.y = element_line())
 
-pl1.3 <- ggplot(df_pl1, aes(y = fct_rev(pat_tidy), alpha = sex, fill = mod)) +
-  geom_bar(color = "white", position="fill") + 
-  scale_alpha_discrete(range = c(0.1, 1)) + 
+## Histogram (proportion) of the sex ratio (dark is males, light is females)
+pl1.3 <- ggplot(df_pl1, aes(y = fct_rev(pat_tidy), fill = mod, alpha = sex)) +
+  geom_bar(color = "white", position = "fill") + 
   scale_x_continuous("Sex proportion", breaks = c(0, 0.5, 1), expand = c(0,0)) + 
   scale_fill_manual(values = c("orange", "dodgerblue", "darkblue")) + 
+  scale_alpha_discrete(range = c(0.1, 1)) + 
   theme(legend.position = "none",
         axis.title.y = element_blank(),
         axis.text.y = element_blank(),
         axis.ticks.y = element_blank(),
         axis.line.y = element_blank())
 
+## Patch plots together
 pl1 <- pl1.1 + pl1.2 + pl1.3 + plot_layout(widths = c(3,6,1))
-ggsave(pl1, file = "figures/data_raw_individuals.pdf", width = 9.5, height = 5)
+
+# Save the plot 
+ggsave(pl1, file = glue("{dirs$figures}/data_raw_individuals.pdf"), width = 9.5, height = 5)
 ```
 
-# Where? 
+# Where? Plot on the location of the studies 
 ```{r}
-# Obtain world map 
+# Prepare data for the plot 
+## Read in world map 
 world <- map_data("world") 
-
-# Obtain country data 
-df_pl1 <- bind_rows(lapply(dat_l[str_subset(names(dat_l), "multi", negate = TRUE)], function(x) 
-  x %>%
-    distinct(pid, country, lat_med, lon_med) %>%
-    group_by(country) %>%
-    summarise(tot = n(),
-              lat_med = mean(lat_med),
-              lon_med = mean(lon_med))
-  ), .id = "pathogen") %>%
+## Extract country data 
+df_pl2 <- bind_rows(lapply(dat_l[str_subset(names(dat_l), "multi", negate = TRUE)], function(x) {
+  # Obtain the number of individuals per location in a country
+  distinct(x, pid, country, lat_med, lon_med) %>%
+    group_by(country, lat_med, lon_med) %>%
+    summarise(tot = n(), .groups = "drop")
+  }), .id = "pathogen") %>%
+  # Add tidy names for the pathogens 
   left_join(pat_tidy_names, join_by(pathogen == pat)) %>%
-  # Rename countries to match 
-  mutate(country = case_when(country == "United States" ~ "USA",
-                               .default = country))
+  # Rename countries to match world map
+  mutate(country = case_when(country == "United States" ~ "USA", .default = country))
 
-# Selected countries 
-selected_map <- map_data("world") %>%
-  filter(region %in% c(unique(as.character(df_pl1$country))))
-  
-# Plot it ----------------------------------------------------------------------------------------
-  
+# Plot it ------------------------------------------------------------------------------------------
 pl2 <-ggplot() +
+  # Add latitude lines and polygons (dark for countries included in the study)
   geom_hline(aes(yintercept = c(-35, -23.5, 0, 23.5, 35)), linewidth = 0.5, color = "grey85") + 
   geom_polygon(data = world, aes(x = long, y = lat, group = group), fill = "grey90") +
-  geom_polygon(data = selected_map, aes(x = long, y = lat, group = group), fill = "grey75") + 
-  geom_point(data = df_pl1, aes(x = lon_med, y = lat_med, color = pat_tidy, size = tot),
-             alpha = 0.8) + 
-  ggrepel::geom_text_repel(data = df_pl1, aes(x = lon_med, y = lat_med, color = pat_tidy, label = pat_tidy),
-             alpha = 0.8, max.overlaps = 15) + 
-  scale_y_continuous("Latitude (°)", breaks = c(-35, -23.5, 0, 23.5, 35),
-                     limits = c(-60,80), expand = c(0,0)) +
+  geom_polygon(data = filter(world, region %in% c(unique(as.character(df_pl2$country)))), 
+               aes(x = long, y = lat, group = group), fill = "grey75") + 
+  # Add points of the locations 
+  geom_point(data = df_pl2, aes(x = lon_med, y = lat_med, color = pat_tidy, size = tot), alpha = 0.8) + 
+  ggrepel::geom_text_repel(data = df_pl2, aes(x = lon_med, y = lat_med, 
+                                              color = pat_tidy, label = pat_tidy),
+                           alpha = 0.8, max.overlaps = 15) + 
+  scale_y_continuous("Latitude (°)", 
+                     breaks = c(-35, -23.5, 0, 23.5, 35), limits = c(-60,80), expand = c(0,0)) +
   scale_x_continuous("Longitude (°)", expand = c(0,0)) + 
   scale_color_viridis_d(name = "Vaccination") +
-  scale_size_continuous("Total vaccinated \nindividuals", limits = c(1,5000),
-                        breaks = c(500, 1500, 2500)) + 
+  scale_size_continuous("Total vaccinated \nindividuals",
+                        breaks = c(500, 1500, 2500), limits = c(1,5000)) + 
   guides(size = guide_legend(title.position = "top", nrow = 3, byrow = T),
          color = guide_legend(title.position = "top", nrow = 3, byrow = T),
          shape = "none") +
@@ -165,125 +135,364 @@ pl2 <-ggplot() +
         panel.grid = element_blank()) + 
   coord_quickmap()
 
-
-ggsave(pl2, file = "figures/data_raw_map.pdf", width = 15, height = 15)
+# Save the plot 
+ggsave(pl2, file = glue("{dirs$figures}/data_raw_map.pdf"), width = 15, height = 15)
 ```
 
-# When?
+# When? Plot on when the vaccinations were given 
 ```{r}
+# Prepare data for the plot 
 df_pl3 <- bind_rows(lapply(dat_l, distinct, study, pid, vac_week_v1, age, reg_6), .id = "pathogen") %>%
+  # Add tidy names for the pathogens 
   left_join(pat_tidy_names, join_by(pathogen == pat)) %>%
-  mutate(mod = case_when(str_detect(pathogen, "multi", negate = TRUE) ~ "UVN unipathogen",
-                         pathogen %in% c("multi_ipv", "multi_opv", "multi_polio", "multi_pertu",
-                                         "multi_strep", "multi_men") ~ "MVN unipathogen",
-                         pathogen %in% c("multi_dtp", "multi_dtpa", "multi_dtpw", "multi_hib-men",
-                                         "multi_mmr", "multi_mmr-vzv") ~ "MVN multipathogen"),
-         reg_6 = as.character(reg_6)) %>%
-  group_by(pathogen) %>%
-  mutate(median_age = median(age)) %>%
-  ungroup() %>%
-  group_by(pathogen, reg_6, vac_week_v1) %>%
-  mutate(tot = n())
+  # Change names of the models 
+  mutate(reg_6 = as.character(reg_6))
 
-pl3 <- ggplot(df_pl3 %>%
-         group_by(pathogen, study, vac_week_v1) %>%
-         mutate(tot = n()), 
-       aes(x = vac_week_v1, fill = study)) +
-  geom_histogram(color = "transparent", size = 0.1) + 
+# Plot it ------------------------------------------------------------------------------------------
+## Histogram of week of vaccination by pathogen and study 
+pl3.1 <- ggplot(group_by(df_pl3, pathogen, study, vac_week_v1) %>%
+                  mutate(tot = n()), 
+                aes(x = vac_week_v1, fill = study)) +
+  geom_histogram(color = "transparent", size = 0.1, bins = 52) + 
   facet_wrap(pat_tidy~., scales = "free_y", ncol = 5) +
   scale_fill_viridis_d() +
-  scale_y_continuous("", expand = c(0,0), breaks = fun_breaks, limits = fun_limits) + 
-  scale_x_continuous("Week of vaccination", expand = c(0,0), breaks = c(1, 18, 35, 52)) + 
+  scale_x_continuous("Week of vaccination", breaks = c(1, 18, 35, 52), expand = c(0,0)) + 
+  scale_y_continuous("", breaks = fun_breaks, limits = fun_limits, expand = c(0,0)) + 
   theme(strip.background = element_blank(),
-        legend.position = "none") +
-ggplot(df_pl3 %>%
-         group_by(pathogen, reg_6, vac_week_v1) %>%
-         mutate(tot = n()), 
-       aes(x = vac_week_v1, y = reg_6, color = reg_6, alpha = tot)) +
-  geom_point() + 
-  scale_color_viridis_d() +
-  scale_y_discrete("", limits = rev) + 
-  scale_x_continuous("Week of vaccination", expand = c(0,0), breaks = c(1, 18, 35, 52)) + 
-  facet_wrap(pat_tidy~., ncol = 5) +
-  theme(strip.background = element_blank(),
-        legend.position = "none") +
-  plot_layout(ncol = 1)
+        legend.position = "none")
 
-ggsave(pl3, file = "figures/data_raw_vaccinations.pdf", width = 10, height = 13)
+## Plot of week of vaccination by pathogen and region 
+pl3.2 <- ggplot(group_by(df_pl3, pathogen, reg_6, vac_week_v1) %>%
+                  mutate(tot = n()), 
+                aes(x = vac_week_v1, y = reg_6, color = reg_6, alpha = tot)) +
+  geom_point() + 
+  facet_wrap(pat_tidy~., ncol = 5) +
+  scale_x_continuous("Week of vaccination", breaks = c(1, 18, 35, 52), expand = c(0,0)) + 
+  scale_y_discrete("", limits = rev) + 
+  scale_color_viridis_d() +
+  theme(strip.background = element_blank(),
+        legend.position = "none")
+
+## Patch plots together
+pl3 <- pl3.1 + pl3.2 + plot_layout(ncol = 1)
+
+# Save the plot 
+ggsave(pl3, file = glue("{dirs$figures}/data_raw_vaccinations.pdf"), width = 10, height = 13)
 ```
 
-# Measured?
+# When? Plot on when the samples for immunogenciticy were taken 
 ```{r}
-df_pl3.1 <- bind_rows(lapply(dat_l, function(x) 
-  x %>%
-    distinct(study, pid, time_vl_s1, age)
-  ), .id = "pathogen") %>%
-  left_join(pat_tidy_names, join_by(pathogen == pat)) %>%
-  group_by(pathogen) %>%
-  mutate(median_age = median(age)) %>%
-  ungroup()
+# Prepare data for the plot 
+df_pl4 <- bind_rows(lapply(dat_l, distinct, study, pid, time_vl_s1, age), .id = "pathogen") %>%
+  # Add tidy names for the pathogens 
+  left_join(pat_tidy_names, join_by(pathogen == pat))
 
-pl3.1 <- ggplot(data = df_pl3.1,
-              aes(x = time_vl_s1/7, y = pat_tidy, fill = pat_tidy)) +
+# Plot it ------------------------------------------------------------------------------------------
+pl4 <- ggplot(data = df_pl4, aes(x = time_vl_s1/7, y = pat_tidy)) +
   geom_jitter(alpha = 0.1) + 
-  scale_x_continuous("Time to immunogenicity measurement (weeks)",
-                     breaks = c(2,4,6,8,10,12,14,16,18,20,22,24)) +
+  scale_x_continuous("Time to immunogenicity measurement (weeks)", breaks = seq(2, 24, by = 2)) +
+  scale_y_discrete("")
+
+# Save the plot 
+ggsave(pl4, file = glue("{dirs$figures}/data_raw_immunogenicity_time.pdf"), width = 10, height = 9)
+```
+
+# What? Plot on values of the immunogenicity after vaccination
+```{r}
+# Prepare data for the plot 
+## Multi pathogen or multi immunogenicity to long format 
+df_pl5 <- sapply(filter(pat_tidy_names, pat %in% names(dat_l))$pat, function(x) {
+  ## If not multi, just distinct 
+  if(str_detect(x, "multi") == FALSE) { 
+    distinct(dat_l[[x]], study, pid, imm_val_s1, imm_sero_s1, imm_met_s1, imm_cutoff_s1, age)
+  ## If multi, select and pivot 
+  } else { 
+    select(dat_l[[x]], study, pid, age, 
+           starts_with("imm_val_s1"), starts_with("imm_met_s1"), starts_with("imm_cutoff_s1")) %>%
+    pivot_longer(cols = starts_with("imm_"), names_to = c(".value", "imm_sero_s1"), 
+                 names_pattern = "^(imm_[a-z]+_s1)_(.*)$")
+  }
+}, simplify = FALSE)
+
+## Fixing missing immunogenicity methods and add tidy names 
+df_pl5 <- sapply(names(df_pl5), function(x) {
+  if(!any(str_detect(names(df_pl5[[x]]), "imm_met_s1"))) {
+    mutate(df_pl5[[x]], 
+           imm_met_s1 = case_when(!is.na(imm_val_s1) ~ unique(dat_l[[x]]$imm_met_s1)),
+           pathogen = x) %>%
+      # Add tidy names for the pathogens 
+      left_join(pat_tidy_names, join_by(pathogen == pat))
+  } else {
+    mutate(df_pl5[[x]], pathogen = x) %>%
+      # Add tidy names for the pathogens 
+      left_join(pat_tidy_names, join_by(pathogen == pat))
+  }  
+}, simplify = FALSE)
+
+# Plot it ------------------------------------------------------------------------------------------
+pl5_l <- list()
+for(i in names(df_pl5)) {
+  pl5_l[[i]] <- filter(df_pl5[[i]], !is.na(imm_val_s1)) %>%
+    mutate(imm_sero_s1 = str_remove(imm_sero_s1, "anti_"),
+           imm_name_met = as.character(glue("{imm_sero_s1} ({imm_met_s1})"))) %>%
+    ggplot(aes(x = imm_val_s1, fill = study)) +
+    geom_histogram(color = "transparent", bins = 30) + 
+    facet_wrap(imm_name_met~., scales = "free", dir = "v", ncol = 5) +
+    scale_x_continuous("Immunogenicity", expand = c(0,0), trans = "log10") +
+    scale_y_continuous(unique(df_pl5[[i]]$pat_tidy), expand = c(0,0)) + 
+    scale_fill_viridis_d(name = "") + 
+    theme(legend.position = "none", 
+          strip.background = element_blank())
+}
+## Patch plots together
+pl5 <- wrap_plots(pl5_l) + plot_layout(ncol = 3)
+
+# Save the plot 
+ggsave(pl5, file = glue("{dirs$figures}/data_raw_immunogenicity.pdf"), width = 16, height = 25)
+```
+
+# Figure 1 =========================================================================================
+
+# Figure 1a ----------------------------------------------------------------------------------------
+
+# Prepare data for the plot 
+```{r}
+pat_sel <- c("rota", "hav", "hbv", "dtpa", "tetan", "pertu", "ipv",
+             "hib", "men", "strep", "measl", "mumps", "rubel", "vzv")
+
+df_fig1a <- bind_rows(lapply(dat_l[pat_sel], distinct, study, pid, sex, age), .id = "pathogen") %>%
+  # Add tidy names for the pathogens 
+  left_join(pat_tidy_names, join_by(pathogen == pat))
+```
+
+# Plot it
+```{r}
+fig1a.1 <- df_fig1a %>%
+  # Obtain number of participants per study 
+  group_by(pathogen, pat_tidy, study) %>%
+  summarise(tot = n(), .groups = "drop") %>%
+  # Obtain proportion of participants per pathogen
+  group_by(pathogen, pat_tidy) %>%
+  arrange(pathogen, tot) %>%
+  mutate(tot_prop = tot/sum(tot)) %>%
+  # Plot
+  ggplot(aes(y = fct_rev(pat_tidy), x = tot, group = reorder(study,tot), fill = tot_prop)) +
+  geom_bar(stat = "identity", color = "white", size = 0.1) + 
+  geom_label(data = distinct(df_fig1a, pat_tidy, study, pid) %>%
+               group_by(pat_tidy) %>%
+               summarise(study_tot = length(unique(study)), tot = n()), 
+             aes(x = tot + 800, label = as.character(study_tot), y = fct_rev(pat_tidy)), 
+             fill = "white", color = "grey50", inherit.aes = FALSE, size = 2) + 
+  scale_x_continuous("Total vaccinated individuals", expand = c(0, 0), limits = c(0, 22500)) +
   scale_y_discrete("") + 
-  scale_fill_viridis_d(name = "") + 
-  facet_grid(pat_tidy~., scales = "free", switch = "y") +
+  scale_fill_viridis_c(option = "rocket", trans = "log") + 
   theme(legend.position = "none",
-        strip.background = element_blank(),
-        strip.text.y.left = element_text(angle = 0, hjust = 1),
+        panel.grid.major.y = element_line())
+
+fig1a.2 <- df_fig1a %>%
+  # Obtain age in weeks 
+  mutate(age = round(age/4, digits = 0)) %>%
+  # Obtain number of individuals per age  
+  group_by(pat_tidy, pathogen, age) %>%
+  summarise(tot = n(), .groups = "drop") %>%
+  # Plot
+  ggplot(aes(x = age, y = fct_rev(pat_tidy), size = tot, color = tot)) +
+  geom_point(alpha = 0.9) + 
+  scale_color_viridis_c(option = "rocket", trans = "log", end = 0.9) + 
+  scale_x_continuous("Age at first vaccination (months)",
+                     breaks = c(0, 2, 4, 6, 12, 18, 24, 36, 48, 60, 72, 84)) +
+  scale_y_discrete("") + 
+  theme(legend.position = "none",
+        axis.title.y = element_blank(),
+        axis.text.y = element_blank(),
+        axis.ticks.y = element_blank(),
+        axis.line.y = element_blank(),
+        panel.grid.major.y = element_line())
+
+fig1a.3 <- ggplot(df_fig1a, aes(y = fct_rev(pat_tidy), fill = sex)) +
+  geom_bar(color = "white", position="fill") + 
+  scale_x_continuous("Sex proportion", breaks = c(0, 0.5, 1), expand = c(0,0)) + 
+  scale_fill_viridis_d(option = "rocket", begin = 0.6, end = 0.9) + 
+  theme(legend.position = "none",
         axis.title.y = element_blank(),
         axis.text.y = element_blank(),
         axis.ticks.y = element_blank(),
         axis.line.y = element_blank())
 
-ggsave(pl3.1, file = "figures/data_raw_immunogenicity_time.pdf", width = 10, height = 9)
+fig1a <- fig1a.1 + fig1a.2 + fig1a.3 + plot_layout(widths = c(3,4,0.5))
+```
 
-dat_long_l <- sapply(filter(pat_tidy_names, pat %in% names(dat_l))$pat, function(x) 
-  if(str_detect(x, "multi") == FALSE) { 
-    distinct(dat_l[[x]], study, pid, imm_val_s1, imm_sero_s1, imm_met_s1, imm_cutoff_s1, age)
-  } else if(str_detect(x, "multi") == TRUE) { dat_l[[x]] %>%
-    select(study, pid, age, starts_with("imm_val_s1"), starts_with("imm_met_s1"), 
-           starts_with("imm_cutoff_s1")) %>%
-    pivot_longer(cols = starts_with("imm_"), names_to = c(".value", "imm_sero_s1"), 
-                 names_pattern = "^(imm_[a-z]+_s1)_(.*)$")
-  }, simplify = FALSE
-)
+# Figure 1b (OPTION 1) -----------------------------------------------------------------------------
 
-dat_long_l <- sapply(names(dat_long_l), function(x) {
-  if(!any(str_detect(names(dat_long_l[[x]]), "imm_met_s1"))) {
-    dat_long_l[[x]] %>%
-      mutate(imm_met_s1 = case_when(!is.na(imm_val_s1) ~ unique(dat_l[[x]]$imm_met_s1)),
-             pathogen = x) %>%
-      left_join(pat_tidy_names, join_by(pathogen == pat))
-  } else
-    dat_long_l[[x]] %>%
-    mutate(pathogen = x) %>%
-    left_join(pat_tidy_names, join_by(pathogen == pat))
-}, simplify = FALSE)
+# Prepare data for the plot 
+```{r}
+## Read in world map 
+world <- map_data("world") 
 
-pl3_l <- list()
-for(i in names(dat_long_l)) {
-  pl3_l[[i]] <- dat_long_l[[i]] %>%
-    filter(!is.na(imm_val_s1)) %>%
-    mutate(
-      imm_sero_s1 = str_remove(imm_sero_s1, "anti_"),
-      imm_name_met = as.character(glue("{imm_sero_s1} ({imm_met_s1})"))) %>%
-    ggplot(aes(x = imm_val_s1, fill = study)) +
-    geom_histogram(color = "transparent") + 
-    scale_x_continuous("Immunogenicity", expand = c(0,0), trans = "log10") +
-    scale_y_continuous(unique(dat_long_l[[i]]$pat_tidy), expand = c(0,0)) + 
-    scale_fill_viridis_d(name = "") + 
-    facet_wrap(imm_name_met~., scales = "free", dir = "v", ncol = 5) +
-    theme(legend.position = "none",
-        strip.background = element_blank())
-}
+## Separate data in two groups (add tidy names fot the pathogens and rename country names)
+df_fig1b1 <- bind_rows(dat_l[pat_sel[1:7]], .id = "pat") %>%
+  left_join(pat_tidy_names, by = join_by(pat)) %>%
+  mutate(country = case_when(country == "United States" ~ "USA", .default = country))
+df_fig1b2 <- bind_rows(dat_l[pat_sel[8:14]], .id = "pat") %>%
+  left_join(pat_tidy_names, by = join_by(pat)) %>%
+  mutate(country = case_when(country == "United States" ~ "USA", .default = country))
 
-pl3.2 <- wrap_plots(pl3_l) + plot_layout(ncol = 3)
+## All the data 
+df_ple <- bind_rows(lapply(dat_l[pat_sel], function(x) {
+  distinct(x, pid, country, reg_4, reg_6, lat_med, lon_med) %>%
+    group_by(country, reg_4, reg_6) %>%
+    summarise(tot = n(),
+              lat_med = mean(lat_med),
+              lon_med = mean(lon_med), 
+              .groups = "drop")
+  }), .id = "pathogen") %>%
+  # Add tidy names for the pathogens 
+  left_join(pat_tidy_names, join_by(pathogen == pat)) %>%
+  # Rename countries to match world map
+  mutate(country = case_when(country == "United States" ~ "USA", .default = country))
+```
 
-ggsave(pl3.2, file = "figures/data_raw_immunogenicity.pdf", width = 16, height = 25)
+# Plot it
+
+## Histogram of week of vaccination per region 
+```{r}
+fig1b.1.1 <- df_fig1b1 %>%
+  # Obtain total participants per week and region
+  group_by(pat, pat_tidy, vac_week_v1, reg_4) %>%
+  summarise(tot = n(), .groups = "drop") %>%
+  group_by(pat, pat_tidy) %>%
+  complete(vac_week_v1, reg_4, fill = list(tot = 0)) %>%
+  # Plot
+  ggplot(aes(x = vac_week_v1, y = tot, color = reg_4)) +
+  geom_step() +
+  facet_wrap(.~pat_tidy, scales = "free_y", ncol = 1) +
+  scale_x_continuous("Week of vaccination", breaks = c(1, 18, 35, 52), expand = c(0,0)) +
+  scale_y_continuous("Count", breaks = fun_breaks, limits = fun_limits, expand = c(0,0)) +
+  scale_color_viridis_d(option = "mako", begin = 0.2, end = 0.8) +
+  theme(strip.background = element_blank(),
+        strip.text = element_text(hjust = 0),
+        legend.position = "none") 
+fig1b.1.2 <- df_fig1b2 %>%
+  # Obtain total participants per week and region
+  group_by(pat, pat_tidy, vac_week_v1, reg_4) %>%
+  summarise(tot = n(), .groups = "drop") %>%
+  group_by(pat, pat_tidy) %>%
+  complete(vac_week_v1, reg_4, fill = list(tot = 0)) %>%
+  # Plot
+  ggplot(aes(x = vac_week_v1, y = tot, color = reg_4)) +
+  geom_step() +
+  facet_wrap(.~pat_tidy, scales = "free_y", ncol = 1) +
+  scale_x_continuous("Week of vaccination", breaks = c(1, 18, 35, 52), expand = c(0,0)) +
+  scale_y_continuous("Count", breaks = fun_breaks, limits = fun_limits, expand = c(0,0)) +
+  scale_color_viridis_d(option = "mako", begin = 0.2, end = 0.8) +
+  theme(strip.background = element_blank(),
+        strip.text = element_text(hjust = 0),
+        legend.position = "none") 
+```
+
+## Density of immunogenicity results per region 
+```{r}
+fig1b.2.1 <- df_fig1b1 %>%
+  ggplot(aes(x = imm_val_s1, fill = reg_4, color = reg_4)) +
+  geom_density(alpha = 0.1, stat = "ecdf") + 
+  facet_wrap(.~pat_tidy, scales = "free_y", ncol = 1) +
+  scale_x_log10("Immunogenicity", expand = c(0,0)) + 
+  scale_y_continuous("Density", expand = c(0,0), breaks = fun_breaks, limits = fun_limits) + 
+  scale_color_viridis_d(option = "mako", begin = 0.2, end = 0.8) +
+  scale_fill_viridis_d(option = "mako", begin = 0.2, end = 0.8) +
+  theme(strip.background = element_blank(),
+        strip.text = element_text(color = "transparent"),
+        legend.position = "none") 
+fig1b.2.2 <- df_fig1b2 %>%
+  ggplot(aes(x = imm_val_s1, fill = reg_4, color = reg_4)) +
+  geom_density(alpha = 0.1, stat = "ecdf") + 
+  facet_wrap(.~pat_tidy, scales = "free_y", ncol = 1) +
+  scale_x_log10("Immunogenicity", expand = c(0,0)) + 
+  scale_y_continuous("Density", expand = c(0,0), breaks = fun_breaks, limits = fun_limits) + 
+  scale_color_viridis_d(option = "mako", begin = 0.2, end = 0.8) +
+  scale_fill_viridis_d(option = "mako", begin = 0.2, end = 0.8) +
+  theme(strip.background = element_blank(),
+        strip.text = element_text(color = "transparent"),
+        legend.position = "none") 
+```
+
+## Map of study locations 
+```{r}
+fig1b.3.1 <- bind_rows(lapply(unique(df_fig1b1$pat), function(x) {
+  mutate(world, 
+         pat = x,
+         dat = case_when(region %in% (filter(df_fig1b1, pat == x))$country ~ TRUE, .default = FALSE)
+         )})) %>%
+  # Add tidy names for the pathogens 
+  left_join(pat_tidy_names, by = join_by(pat)) %>%
+  # Plot 
+  ggplot(aes(x = long, y = lat, group = group, fill = dat)) +
+  facet_grid(pat_tidy~.) +
+  geom_polygon() +
+  geom_point(data = filter(df_ple, pathogen %in% df_fig1b1$pat),
+             aes(x = lon_med, y = lat_med, color = reg_4, size = tot, group = 1, fill = NA), 
+             alpha = 0.8) +
+  scale_x_continuous("Longitude (°)", expand = c(0,0)) + 
+  scale_y_continuous("Latitude (°)", 
+                     breaks = c(-23.5, 0,23.5), limits = c(-60,80), expand = c(0,0)) +
+  scale_size_continuous("Total vaccinated \nindividuals",
+                        breaks = c(500, 1500, 2500), limits = c(1,5000)) + 
+  scale_color_viridis_d(name = "Vaccination", option = "mako", begin = 0.2, end = 0.8) +
+  scale_fill_manual(values = c("grey90", "grey75")) + 
+  guides(size = guide_legend(title.position = "top", nrow = 3, byrow = T),
+         color = guide_legend(title.position = "top", nrow = 3, byrow = T),
+         shape = "none") +
+  theme(legend.position = "none",
+        strip.background = element_blank(),
+        strip.text = element_blank(),
+        panel.grid = element_blank()) + 
+  coord_quickmap()
+  
+fig1b.3.2 <- bind_rows(lapply(unique(df_fig1b2$pat), function(x) {
+  mutate(world, 
+         pat = x,
+         dat = case_when(region %in% (filter(df_fig1b2, pat == x))$country ~ TRUE, .default = FALSE)
+         )})) %>%
+  # Add tidy names for the pathogens 
+  left_join(pat_tidy_names, by = join_by(pat)) %>%
+  # Plot 
+  ggplot(aes(x = long, y = lat, group = group, fill = dat)) +
+  facet_grid(pat_tidy~.) +
+  geom_polygon() +
+  geom_point(data = filter(df_ple, pathogen %in% df_fig1b2$pat),
+             aes(x = lon_med, y = lat_med, color = reg_4, size = tot, group = 1, fill = NA), 
+             alpha = 0.8) +
+  scale_x_continuous("Longitude (°)", expand = c(0,0)) + 
+  scale_y_continuous("Latitude (°)", 
+                     breaks = c(-23.5, 0,23.5), limits = c(-60,80), expand = c(0,0)) +
+  scale_size_continuous("Total vaccinated \nindividuals",
+                        breaks = c(500, 1500, 2500), limits = c(1,5000)) + 
+  scale_color_viridis_d(name = "Vaccination", option = "mako", begin = 0.2, end = 0.8) +
+  scale_fill_manual(values = c("grey90", "grey75")) + 
+  guides(size = guide_legend(title.position = "top", nrow = 3, byrow = T),
+         color = guide_legend(title.position = "top", nrow = 3, byrow = T),
+         shape = "none") +
+  theme(legend.position = "none",
+        strip.background = element_blank(),
+        strip.text = element_blank(),
+        panel.grid = element_blank()) + 
+  coord_quickmap()
+```
+
+# Figure 1b 
+```{r}
+## Patch plots together 
+fig1b <- fig1b.1.1 + fig1b.2.1 + fig1b.3.1 + fig1b.1.2 + fig1b.2.2 + fig1b.3.2 + 
+  plot_layout(nrow = 1, widths = c(0.75,0.75,2,0.75,0.75,2))
+```
+
+# Figure 1 
+```{r}
+## Patch plots together 
+fig1 <- free(fig1a) + fig1b + plot_layout(nrow = 2, heights  = c(1,2))
+
+# Save the plot 
+ggsave(glue("{dirs$figures}/fig1.pdf"), width = 12, height = 10)
 ```
 
 
@@ -292,6 +501,257 @@ ggsave(pl3.2, file = "figures/data_raw_immunogenicity.pdf", width = 16, height =
 
 
 
+
+
+
+
+
+
+
+
+# Figure 1b (OPTION 2) -----------------------------------------------------------------------------
+
+# Prepare data for the plot 
+```{r}
+df_fig1b <- bind_rows(dat_l[pat_sel], .id = "pat") %>%
+  left_join(pat_tidy_names, by = join_by(pat)) %>%
+  mutate(country = case_when(country == "United States" ~ "USA", .default = country))
+```
+
+# Plot it
+```{r}
+## Histogram of week of vaccination per region 
+fig1b.1 <- df_fig1b %>%
+  # Obtain total participants per week and region
+  group_by(pat, pat_tidy, vac_week_v1, reg_4) %>%
+  summarise(tot = n(), .groups = "drop") %>%
+  group_by(pat, pat_tidy) %>%
+  complete(vac_week_v1, reg_4, fill = list(tot = 0)) %>%
+  # Plot
+  ggplot(aes(x = vac_week_v1, y = tot, color = reg_4)) +
+  geom_step() +
+  facet_wrap(.~pat_tidy, scales = "free_y", ncol = 7) +
+  scale_x_continuous("Week of vaccination", breaks = c(1, 18, 35, 52), expand = c(0,0)) +
+  scale_y_continuous("Count", breaks = fun_breaks, limits = fun_limits, expand = c(0,0)) +
+  scale_color_viridis_d(option = "mako", begin = 0.2, end = 0.8) +
+  theme(strip.background = element_blank(),
+        strip.text = element_text(hjust = 0),
+        legend.position = "none") 
+
+fig1b.1.1o <- df_fig1b1 %>%
+  # Obtain total participants per week and region
+  group_by(pat, pat_tidy, vac_week_v1, reg_4) %>%
+  summarise(tot = n(), .groups = "drop") %>%
+  group_by(pat, pat_tidy) %>%
+  complete(vac_week_v1, reg_4, fill = list(tot = 0)) %>%
+  # Plot
+  ggplot(aes(x = vac_week_v1, y = tot, color = reg_4)) +
+  geom_step() +
+  facet_wrap(.~pat_tidy, scales = "free_y", ncol = 7) +
+  scale_x_continuous("Week of vaccination", breaks = c(1, 18, 35, 52), expand = c(0,0)) +
+  scale_y_continuous("Count", breaks = fun_breaks, limits = fun_limits, expand = c(0,0)) +
+  scale_color_viridis_d(option = "mako", begin = 0.2, end = 0.8) +
+  theme(strip.background = element_blank(),
+        strip.text = element_text(hjust = 0),
+        legend.position = "none") 
+fig1b.1.2o <- df_fig1b2 %>%
+  # Obtain total participants per week and region
+  group_by(pat, pat_tidy, vac_week_v1, reg_4) %>%
+  summarise(tot = n(), .groups = "drop") %>%
+  group_by(pat, pat_tidy) %>%
+  complete(vac_week_v1, reg_4, fill = list(tot = 0)) %>%
+  # Plot
+  ggplot(aes(x = vac_week_v1, y = tot, color = reg_4)) +
+  geom_step() +
+  facet_wrap(.~pat_tidy, scales = "free_y", ncol = 7) +
+  scale_x_continuous("Week of vaccination", breaks = c(1, 18, 35, 52), expand = c(0,0)) +
+  scale_y_continuous("Count", breaks = fun_breaks, limits = fun_limits, expand = c(0,0)) +
+  scale_color_viridis_d(option = "mako", begin = 0.2, end = 0.8) +
+  theme(strip.background = element_blank(),
+        strip.text = element_text(hjust = 0),
+        legend.position = "none") 
+
+## Density of immunogenicity results per region 
+fig1b.2 <- df_fig1b %>%
+  ggplot(aes(x = imm_val_s1, fill = reg_4, color = reg_4)) +
+  geom_density(alpha = 0.1, stat = "ecdf") + 
+  facet_wrap(.~pat_tidy, scales = "free_y", ncol = 7) +
+  scale_x_log10("Immunogenicity", expand = c(0,0)) + 
+  scale_y_continuous("Density", expand = c(0,0), breaks = fun_breaks, limits = fun_limits) + 
+  scale_color_viridis_d(option = "mako", begin = 0.2, end = 0.8) +
+  scale_fill_viridis_d(option = "mako", begin = 0.2, end = 0.8) +
+  theme(strip.background = element_blank(),
+        strip.text = element_text(hjust = 0),
+        legend.position = "none")
+
+fig1b.2.1o <- df_fig1b1 %>%
+  ggplot(aes(x = imm_val_s1, fill = reg_4, color = reg_4)) +
+  geom_density(alpha = 0.1, stat = "ecdf") + 
+  facet_wrap(.~pat_tidy, scales = "free_y", ncol = 7) +
+  scale_x_log10("Immunogenicity", expand = c(0,0)) + 
+  scale_y_continuous("Density", expand = c(0,0), breaks = fun_breaks, limits = fun_limits) + 
+  scale_color_viridis_d(option = "mako", begin = 0.2, end = 0.8) +
+  scale_fill_viridis_d(option = "mako", begin = 0.2, end = 0.8) +
+  theme(strip.background = element_blank(),
+        strip.text = element_blank(),
+        legend.position = "none") 
+fig1b.2.2o <- df_fig1b2 %>%
+  ggplot(aes(x = imm_val_s1, fill = reg_4, color = reg_4)) +
+  geom_density(alpha = 0.1, stat = "ecdf") + 
+  facet_wrap(.~pat_tidy, scales = "free_y", ncol = 7) +
+  scale_x_log10("Immunogenicity", expand = c(0,0)) + 
+  scale_y_continuous("Density", expand = c(0,0), breaks = fun_breaks, limits = fun_limits) + 
+  scale_color_viridis_d(option = "mako", begin = 0.2, end = 0.8) +
+  scale_fill_viridis_d(option = "mako", begin = 0.2, end = 0.8) +
+  theme(strip.background = element_blank(),
+        strip.text = element_blank(),
+        legend.position = "none") 
+
+## Map of study locations 
+fig1b.3 <- bind_rows(lapply(unique(df_fig1b$pat), function(x) {
+  mutate(world, 
+         pat = x,
+         dat = case_when(region %in% (filter(df_fig1b, pat == x))$country ~ TRUE, .default = FALSE)
+         )})) %>%
+  # Add tidy names for the pathogens 
+  left_join(pat_tidy_names, by = join_by(pat)) %>%
+  # Plot 
+  ggplot(aes(x = long, y = lat, group = group, fill = dat)) +
+  facet_wrap(pat_tidy~., ncol = 4) +
+  geom_polygon() +
+  geom_point(data = filter(df_ple, pathogen %in% df_fig1b$pat),
+             aes(x = lon_med, y = lat_med, color = reg_4, size = tot, group = 1, fill = NA), 
+             alpha = 0.8) +
+  scale_x_continuous("Longitude (°)", expand = c(0,0)) + 
+  scale_y_continuous("Latitude (°)", 
+                     breaks = c(-23.5, 0,23.5), limits = c(-60,80), expand = c(0,0)) +
+  scale_size_continuous("Total vaccinated \nindividuals",
+                        breaks = c(500, 1500, 2500), limits = c(1,5000)) + 
+  scale_color_viridis_d(name = "Vaccination", option = "mako", begin = 0.2, end = 0.8) +
+  scale_fill_manual(values = c("grey90", "grey75")) + 
+  guides(size = guide_legend(title.position = "top", nrow = 3, byrow = T),
+         color = guide_legend(title.position = "top", nrow = 3, byrow = T),
+         shape = "none") +
+  theme(legend.position = "none",
+        strip.background = element_blank(),
+        panel.grid = element_blank()) + 
+  coord_quickmap()
+```
+
+# Figure 1b 
+```{r}
+## Patch plots together 
+free(fig1a) + fig1b.1.1o + fig1b.2.1o + fig1b.1.2o + fig1b.2.2o + fig1b.3 + plot_layout(ncol = 1, heights  = c(5,1,1,1,1,8))
+```
+
+
+
+
+
+# Per pathogen maps
+```{r}
+col_lat <- viridis::mako(length(unique(df_fig1b$reg_6)), begin = 0.2, end = 0.8)
+names(col_lat) <- sort(as.character(unique(df_fig1b$reg_6)))
+
+pl_l <- list()
+## Map of study locations 
+for (i in unique(df_fig1b$pat)) {
+pl_l[[i]] <- mutate(world,
+         pat = i,
+         dat = case_when(region %in% (filter(df_fig1b, pat == i))$country ~ TRUE, .default = FALSE)
+         ) %>%
+  # Add tidy names for the pathogens 
+  left_join(pat_tidy_names, by = join_by(pat)) %>%
+  # Plot 
+  ggplot(aes(x = long, y = lat, group = group, fill = dat)) +
+  facet_wrap(pat_tidy~., ncol = 4) +
+  geom_polygon() +
+  geom_point(data = filter(df_ple, pathogen == i),
+             aes(x = lon_med, y = lat_med, color = as.character(reg_6), size = tot, group = 1, fill = NA), 
+             alpha = 0.8) +
+  scale_x_continuous("Longitude (°)", expand = c(0,0)) + 
+  scale_y_continuous("Latitude (°)", 
+                     breaks = c(-23.5, 0,23.5), limits = c(-60,80), expand = c(0,0)) +
+  scale_size_continuous("Total vaccinated \nindividuals",
+                        breaks = c(500, 1500, 2500), limits = c(1,5000)) + 
+  scale_color_manual(name = "Vaccination", values = col_lat) +
+  scale_fill_manual(values = c("grey90", "grey75")) + 
+  guides(size = guide_legend(title.position = "top", nrow = 3, byrow = T),
+         color = guide_legend(title.position = "top", nrow = 3, byrow = T),
+         shape = "none", fill = "none") +
+  theme(legend.position = "right",
+        strip.background = element_blank(),
+        panel.grid = element_blank()) + 
+  coord_quickmap()
+
+ggsave(pl_l[[i]], file = glue("{dirs$figures}/map_reg_6_{i}.pdf"), width = 10, height = 5)
+}
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+```{r}
+# df_figp2 %>%
+#   ggplot(aes(x = imm_val_s1, fill = reg_4, color = reg_4)) +
+#   geom_density(alpha = 0.5, adjust = 2, stat ="ecdf") + 
+#   geom_vline(aes(xintercept = imm_cutoff_s1)) + 
+#   scale_fill_viridis_d(option = "mako", begin = 0.2, end = 0.8) +
+#   scale_color_viridis_d(option = "mako", begin = 0.2, end = 0.8) +
+#   scale_y_continuous("Density", expand = c(0,0), breaks = fun_breaks, limits = fun_limits) + 
+#   #scale_x_log10("Immunogenicity", expand = c(0,0)) + 
+#   facet_wrap(.~pat_tidy, scales = "free", ncol = 1) +
+#   theme(strip.background = element_blank(),
+#         strip.text = element_text(color = "transparent"),
+#         #panel.spacing = unit(0.5, "lines"),
+#         legend.position = "none")
+
+# pla <- bind_rows(dat_l[c("dtpa", "hav", "hbv", "hib", "ipv", "measl", "men", "mumps", "pertu", "rota", "rubel",
+#            "strep", "tetan", "vzv")], .id = "pat") %>%
+#   left_join(pat_tidy_names) %>%
+#   distinct(pat, pat_tidy, study, pid, vac_date_v1) %>%
+#   ggplot(aes(x = vac_date_v1, y = reorder(pat_tidy, -as.numeric(pat_tidy)), fill = study, color = study)) + 
+#   geom_point(shape = "|", alpha = 0.5) + 
+#   scale_fill_viridis_d() + 
+#   scale_color_viridis_d() + 
+#   scale_x_date("Date of vaccination (year)", breaks = "1 year", date_labels = "%Y", expand = c(0,0)) + 
+#   scale_y_discrete(" ") + 
+#   theme(legend.position = "none",
+#         panel.grid.major.x = element_line())
+# 
+# plb <- bind_rows(dat_l[c("dtpa", "hav", "hbv", "hib", "ipv", "measl", "men", "mumps", "pertu", "rota", "rubel",
+#            "strep", "tetan", "vzv")], .id = "pat") %>%
+#   left_join(pat_tidy_names) %>%
+#   distinct(pat, pat_tidy, study, pid, vac_date_v1) %>%
+#   mutate(vac_week = as.numeric(isoweek(vac_date_v1))) %>%
+#   filter(vac_week != 53) %>%
+#   group_by(pat, pat_tidy, vac_week) %>%
+#   summarise(tot = n(), .groups = "drop") %>%
+#   group_by(pat, pat_tidy) %>%
+#   mutate(tot = (tot) / (max(tot))) %>%
+#   ggplot(aes(x = vac_week, y = reorder(pat_tidy, -as.numeric(pat_tidy)), fill = tot)) + 
+#   geom_tile() + 
+#   scale_fill_viridis_c(option = "mako") + 
+#   scale_x_continuous("Date of vaccination (week)", breaks = c(1, 18, 35, 52), expand = c(0,0)) + 
+#   scale_y_discrete(" ") + 
+#   theme(legend.position = "none",
+#         panel.grid.major.x = element_line(),
+#         axis.text.y = element_blank())
+# 
+# pla + plb + plot_layout(widths = c(10,2))
+```
 
 
 

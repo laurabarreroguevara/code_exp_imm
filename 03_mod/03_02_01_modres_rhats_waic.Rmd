@@ -1,0 +1,351 @@
+---
+title: "BRMS Rhats and WAIC results"
+author: "Laura Andrea Barrrero Guevara"
+date: "2023-02-23"
+output: html_document
+---
+
+####################################################################################################
+Purpose of script: To check the convergence and WAIC of the models 
+####################################################################################################
+
+```{r}
+rm(list = ls())
+source("../00_pck.R")
+library(colorspace)
+theme_set(theme_classic() + theme(strip.background = element_blank()))
+dirs$figures <- "../figures"
+```
+
+# Check convergence (Rhats) of the photoperiod models ==============================================
+```{r}
+# Check that Rhats < 1
+rhats <- bind_rows(lapply(str_subset(list.files(glue("{dirs$rhats}"), full.names = TRUE), 
+                                     "all|archiv", negate = TRUE), readRDS)) %>%
+  group_by(mod) %>%
+  filter(Rhat == max(Rhat)) %>%
+  mutate(Rhat = round(Rhat, digits = 1),
+         Rhat_cond = Rhat == 1) %>%
+  select(mod, Rhat_cond)
+
+rhats
+# Save it 
+saveRDS(rhats, glue("{dirs$rhats}/all_rhats.rds"))
+```
+
+# Check which coefficients were problematic for models with Rhats > 1 
+```{r}
+# Check which coefficients were problematic for models with Rhats > 1 
+bind_rows(lapply(filter(rhats, Rhat_cond == FALSE)$mod, 
+                 function(x) readRDS(glue("{dirs$rhats}/rhats_{x}")))) %>%
+  mutate(Rhat = round(Rhat, digits = 1)) %>%
+  filter(Rhat != 1) %>%
+  select(mod, coefficient, Rhat)
+
+# Multi dtpw 4 (not a problem)
+## Without country now dtpw 3 (not a problem)
+# Multi hib-men 2, 3, 4, 6 (lack of data, nothing to do) (same)
+## WC same
+# Multi ipv 3 (not a problem)
+## WC solved for all 
+# Multi opv cs, 2, 3, 4, 6 (lack of data, nothing to do)
+## WC same
+# Multi strep all (vac conc and vac name) (improved to 2, 3, 4, 6)
+## WC improved to 3, 4, 6 
+# Multi dtpa all (Tetanus seems to be the problem) (improved to just 2, 3, and 6)
+## WC back to all 
+```
+
+# Check WAIC of the photoperiod models =============================================================
+```{r}
+# Read in the waic of the models that converged
+waic_df <- bind_rows(lapply(str_subset(list.files(glue("{dirs$waic}"), full.names = TRUE), 
+                         "archiv|all", negate = TRUE), readRDS)) %>%
+  select(mod, Estimate_waic) %>%
+  rename(waic = Estimate_waic) %>%
+  mutate(pat = sub(".*s08_(.*?)_(base|cs|csi).*", "\\1", mod),
+         mod_name = str_remove_all(str_remove(string = mod, pattern = pat), 
+                                   "bmvl_s08__|bmv1_s08__|_gauss.rds|.rds"),
+         vac = sub(".*bmv(.*?)_s08(.*?)_.*", "\\1\\2", mod)) %>%
+  left_join(pat_tidy_names) %>%
+  left_join(rhats, by = join_by(mod)) %>%
+  filter(Rhat_cond) %>%
+  arrange(waic) %>%
+  group_by(pat) %>%
+  mutate(delta_waic = waic - waic[1])
+
+waic_df
+# Save it 
+saveRDS(waic_df, glue("{dirs$waic}/all_waic.rds"))
+```
+
+# Check waic table per pathogen
+```{r}
+waic_l <- sapply(unique(waic_df$pat), function(x) filter(waic_df, pat == x), simplify = FALSE)
+waic_l$rota
+
+# Check best for each pathogen
+waic_best <- waic_df %>%
+  group_by(pat) %>%
+  mutate(waic_base = waic[mod_name == "base"]) %>%
+  arrange(pat, waic) %>%
+  mutate(waic_best = waic[1]) %>%
+  mutate(delta_waic = waic_base - waic_best) %>%
+  slice(1) %>%
+  select(pat, mod, delta_waic, waic_base, waic_best, vac)
+```
+
+# Plot waic comparisons 
+```{r}
+pl_waic <- waic_df %>%
+  mutate(pat_tidy = factor(pat_tidy, levels = pat_tidy_names$pat_tidy)) %>%
+  ggplot(aes(x = delta_waic, y = mod_name, color = mod_name)) +
+  geom_vline(aes(xintercept = 1), color = "grey", linetype = "dotted") + 
+  geom_point(size = 2) +
+  geom_segment(aes(xend = 0, yend = mod_name), size = 2.5, alpha = 0.3) + 
+  scale_x_continuous("Delta WAIC (log10)", trans = "log10") + 
+  scale_color_manual(values = c("black", "grey", "red","red", "red", "red")) +
+  facet_wrap(pat_tidy~., scales = "free_y", ncol = 5) + 
+  theme(legend.position = "none",
+        axis.title.y = element_blank()) 
+
+pl_waic
+ggsave(pl_waic, file = glue("{dirs$figures}/mod_waic.pdf"), height = 7, width = 11)
+```
+# Figure 2 =========================================================================================
+
+# Prepare data for the plot 
+```{r}
+pat_sel <- c("rota", "hav", "hbv", "dtpa", "tetan", "pertu", "ipv", "hib", "men", "strep",
+                "measl", "mumps", "rubel", "vzv")
+
+pred_l <- sapply(
+  str_subset(waic_best$mod, "multi|ipv2|ipv3|opv|pertuprn|dtpw|pertufha", negate = TRUE), function(x) {
+    waic_mod <- waic_df[waic_df$mod == x, ]
+    dat <- readRDS(glue("{dirs$modfit}/data_brms_{waic_mod$pat[[1]]}_v{waic_mod$vac[[1]]}_s08.rds"))
+    mod_reg <- if(str_detect(waic_mod$mod_name[[1]], "reg")) "reg_4"
+    as.data.frame(t(readRDS(glue("{dirs$pred}/pred_{x}")))) %>%
+      select(1:20) %>%
+      bind_cols(data.frame(
+        data = dat$imm_val_s1,
+        imm_cutoff_s1 = dat$imm_cutoff_s1,
+        imm_cutoff_min = min(dat$imm_val_s1),
+        reg = if(!is.null(mod_reg)) dat[,mod_reg][[1]] else NA
+      )) %>%
+      pivot_longer(-c(reg, imm_cutoff_s1, imm_cutoff_min)) %>%
+      mutate(type = case_when(name == "data" ~ "2data", .default = "1draw"))
+    }, simplify = FALSE)
+```
+
+
+```{r}
+pred_df1 <- bind_rows(pred_l[which(str_detect(names(pred_l), c("rota|hav|hbv|dtpa|tetan|pertu|ipv")))], .id = "mod") %>%
+  left_join(distinct(waic_df, mod, pat, pat_tidy), by = join_by(mod)) %>% 
+  mutate(name_draw = paste0(name,reg)) 
+
+pred_df2 <- bind_rows(pred_l[which(str_detect(names(pred_l), c("hib|men|strep|measl|mumps|rubel|vzv")))], .id = "mod") %>%
+  left_join(distinct(waic_df, mod, pat, pat_tidy), by = join_by(mod)) %>% 
+  mutate(name_draw = paste0(name,reg)) 
+
+waic_pldf <- waic_df %>%
+  filter(pat %in% pat_sel) %>%
+  filter(mod_name %in% c("base", "cs", "csi_reg_2", "csi_reg_3", "csi_reg_4", "csi_reg_6")) %>%
+  ungroup() %>%
+  mutate(mod_name = factor(mod_name, labels = c(
+    "Base", "Seasonal", "Seasonal by latitude (2)" , "Seasonal by latitude (3)", 
+    "Seasonal by latitude (4)", "Seasonal by latitude (6)"))) %>%
+  arrange(waic) %>%
+  group_by(pat) %>%
+  mutate(delta_waic = waic - waic[1]) %>%
+  mutate(pat_tidy = factor(pat_tidy, levels = pat_tidy_names$pat_tidy)) %>%
+  mutate(delta_waic = case_when(delta_waic < 0.5 ~ 0.5, .default = delta_waic)) 
+
+waic_pldf1 <- filter(waic_pldf, pat %in% c("rota", "hav", "hbv", "dtpa", "tetan", "pertu", "ipv")) 
+waic_pldf2 <- filter(waic_pldf, pat %in% c("hib", "men", "strep", "measl", "mumps", "rubel", "vzv"))
+```
+
+
+```{r}
+fig2a.1 <- waic_pldf1 %>%
+  ggplot(aes(x = delta_waic, y = mod_name, color = mod_name)) +
+  geom_vline(aes(xintercept = 1), color = "grey", linetype = "dotted") + 
+  geom_point(size = 2) +
+  geom_segment(aes(xend = 0.5, yend = mod_name), size = 2.5, alpha = 0.3) + 
+  scale_x_continuous("Delta WAIC (log10)", trans = "log2") + 
+  scale_color_viridis_d(option = "rocket", end = 0.8) + 
+  facet_wrap(pat_tidy~., ncol = 1) + 
+  theme(legend.position = "none",
+        axis.title.y = element_blank()) 
+
+fig2a.2 <- waic_pldf2 %>%
+  ggplot(aes(x = delta_waic, y = mod_name, color = mod_name)) +
+  geom_vline(aes(xintercept = 1), color = "grey", linetype = "dotted") + 
+  geom_point(size = 2) +
+  geom_segment(aes(xend = 0.5, yend = mod_name), size = 2.5, alpha = 0.3) + 
+  scale_x_continuous("Delta WAIC (log10)", trans = "log2") + 
+  scale_color_viridis_d(option = "rocket", end = 0.8) + 
+  facet_wrap(pat_tidy~., ncol = 1) + 
+  theme(legend.position = "none",
+        axis.text.y = element_blank(),
+        axis.ticks.y = element_blank(),
+        axis.title.y = element_blank())
+```
+
+
+```{r}
+fig2b.1 <- pred_df1 %>%
+  filter(type == "1draw") %>%
+  mutate(value = case_when(value <= imm_cutoff_s1 ~ imm_cutoff_min, .default = value)) %>%
+  ggplot(aes(x = value, group = name_draw, color = as.character(reg))) + 
+  geom_line(stat = "ecdf", alpha = 0.1) + 
+  geom_line(data = filter(pred_df1, type == "2data"), stat = "ecdf", linetype = "dashed") +  
+  facet_wrap(~pat_tidy, scales = "free_y", ncol = 1) +
+  scale_x_continuous("Immunogenicity (log10)", trans = "log10") + 
+  scale_color_viridis_d("", option = "mako", na.value = "grey50", begin = 0, end = 0.8) + 
+  theme(legend.position = "none")
+  
+fig2b.2 <- pred_df2 %>%
+  filter(type == "1draw") %>%
+  mutate(value = case_when(value <= imm_cutoff_s1 ~ imm_cutoff_min, .default = value)) %>%
+  ggplot(aes(x = value, group = name_draw, color = as.character(reg))) + 
+  geom_line(stat = "ecdf", alpha = 0.1) + 
+  geom_line(data = filter(pred_df2, type == "2data"), stat = "ecdf", linetype = "dashed") +  
+  facet_wrap(~pat_tidy, scales = "free_y", ncol = 1) +
+  scale_x_continuous("Immunogenicity (log10)", trans = "log10") + 
+  scale_color_viridis_d("", option = "mako", na.value = "grey50", begin = 0, end = 0.8) + 
+  theme(legend.position = "top",
+        legend.direction = "vertical")
+```
+
+```{r}
+## Patch plots together 
+fig2 <- fig2a.1 + fig2b.1 + fig2a.2 + fig2b.2 + plot_layout(ncol = 4, widths = c(1,1,1,1))
+
+# Save the plot 
+ggsave(glue("{dirs$figures}/fig2.pdf"), width = 12, height = 10)
+```
+
+
+```{r}
+# test <- pp_check(bmv1_s08_hav_csi_reg_6, ndraws = 100) + 
+#   scale_x_log10()
+# 
+# test$data
+# 
+# epred <- posterior_epred(bmv1_s08_hav_csi_reg_6, ndraws = 100)
+# epred_base <- posterior_epred(bmv1_s08_hav_base, ndraws = 100)
+# 
+# pred <- posterior_predict(bmv1_s08_hav_csi_reg_6, ndraws = 100)
+# pred_base <- posterior_predict(bmv1_s08_hav_base, ndraws = 100)
+# 
+# dat <- data.frame(data = bmv1_s08_hav_csi_reg_6$data$imm_val_s1,
+#                   reg_6 = bmv1_s08_hav_csi_reg_6$data$reg_6)
+# 
+# dfplot <- as.data.frame(t(pred)) %>%
+#   bind_cols(dat = dat) %>%
+#   pivot_longer(-reg_6) %>%
+# 
+# ggplot(dfplot, aes(x = value, group = name)) + 
+#   geom_density(alpha = 0.1) + 
+#   geom_density(data = dfplot %>% filter(name == "data"), color = "red") +
+#   facet_grid(~reg_6) + 
+#   scale_x_continuous(trans = "log10")
+# 
+# dfplot2 <- as.data.frame(t(pred_base)) %>%
+#   bind_cols(dat = dat) %>%
+#   pivot_longer(-reg_6) 
+# 
+# ggplot(dfplot2, aes(x = value, group = name)) + 
+#   geom_density(alpha = 0.1) + 
+#   geom_density(data = dfplot2 %>% filter(name == "data"), color = "red") +
+#   facet_grid(~reg_6) + 
+#   scale_x_continuous(trans = "log10")
+# 
+# bind_rows(dfplot, dfplot2, .id = "mod") %>%
+#   ggplot(aes(x = value, group = name)) + 
+#   geom_density(alpha = 0.1) + 
+#   geom_density(data = dfplot2 %>% filter(name == "data"), color = "red") +
+#   facet_grid(mod~reg_6) + 
+#   scale_x_continuous(trans = "log10")
+```
+
+
+
+
+####################################################################################################
+# END 
+####################################################################################################
+
+
+```{r}
+# waic_df %>%
+#   filter(pat %in% pat_sel) %>%
+#   filter(mod_name %in% c("base", "cs", "csi_reg_2", "csi_reg_3", "csi_reg_4", "csi_reg_6")) %>%
+#   ungroup() %>%
+#   mutate(mod_name = factor(mod_name, labels = c(
+#     "Base", "Seasonal", "Seasonal-Latitude (2)" , "Seasonal-Latitude (3)", 
+#     "Seasonal-Latitude (4)", "Seasonal-Latitude (6)"))) %>%
+#   arrange(waic) %>%
+#   group_by(pat) %>%
+#   mutate(delta_waic = waic - waic[1]) %>%
+#   mutate(pat_tidy = factor(pat_tidy, levels = pat_tidy_names$pat_tidy)) %>%
+#   mutate(delta_waic = case_when(delta_waic < 0.5 ~ 0.5, .default = delta_waic)) %>%
+#   ggplot(aes(x = delta_waic, y = mod_name, color = mod_name)) +
+#   geom_vline(aes(xintercept = 1), color = "grey", linetype = "dotted") + 
+#   geom_point(size = 2) +
+#   geom_segment(aes(xend = 0.5, yend = mod_name), size = 2.5, alpha = 0.3) + 
+#   scale_x_continuous("Delta WAIC (log10)", trans = "log2") + 
+#   scale_color_viridis_d(option = "rocket", end = 0.8) + 
+#   #scale_color_manual(values = c("black", "orange", "red","red", "red", "red")) +
+#   facet_wrap(pat_tidy~., ncol = 7) + 
+#   theme(legend.position = "none",
+#         axis.title.y = element_blank())
+
+# pred_l <- sapply(str_subset(
+#   waic_best$mod, "multi|ipv2|ipv3|opv|pertuprn|dtpw|pertufha", negate = TRUE), function(x) {
+#     waic_mod <- waic_df[waic_df$mod == x, ]
+#     dat <- readRDS(glue("{dirs$modfit}/data_brms_{waic_mod$pat[[1]]}_v{waic_mod$vac[[1]]}_s08.rds"))
+#     mod_reg <- if(str_detect(waic_mod$mod_name[[1]], "reg")) {
+#       #"reg_4"
+#       str_remove_all(waic_mod$mod_name[[1]], "csi_")
+#     }
+#     as.data.frame(t(readRDS(glue("{dirs$pred}/pred_{x}")))) %>%
+#       select(1:20) %>%
+#       bind_cols(data.frame(
+#         data = dat$imm_val_s1,
+#         reg = if(!is.null(mod_reg)) dat[,mod_reg][[1]] else NA
+#       )) %>%
+#       pivot_longer(-reg) %>%
+#       mutate(type = case_when(name == "data" ~ "2data", .default = "1draw"))
+#     }, simplify = FALSE)
+# 
+# pred_base_l <- sapply(str_subset(str_subset(waic_df$mod, "base"), 
+#                             "multi|ipv2|ipv3|opv|pertuprn|dtpw|pertufha", negate = TRUE), function(x) {
+#     waic_mod <- waic_df[waic_df$mod == x, ]
+#     dat <- readRDS(glue("{dirs$modfit}/data_brms_{waic_mod$pat[[1]]}_v{waic_mod$vac[[1]]}_s08.rds"))
+#     as.data.frame(t(readRDS(glue("{dirs$pred}/pred_{x}")))) %>%
+#       select(1:20) %>%
+#       pivot_longer(everything()) %>%
+#       mutate(type = "1draw")
+#     }, simplify = FALSE)
+# 
+# pred_df <- bind_rows(pred_l, .id = "mod") %>%
+#   left_join(distinct(waic_df, mod, pat, pat_tidy), by = join_by(mod)) %>% 
+#   mutate(name_draw = paste0(name,reg)) 
+# 
+# pred_base_df <- bind_rows(pred_base_l, .id = "mod") %>%
+#   left_join(distinct(waic_df, mod, pat, pat_tidy), by = join_by(mod))
+# 
+# pred_base_best_df <- bind_rows(list("base" = pred_base_df, "best" = pred_df), .id = "base") %>%
+#   mutate(name_base = paste0(name, base)) 
+# 
+# pred_base_best_df %>%
+#   filter(type == "1draw") %>%
+#   ggplot(aes(x = value, group = name_base, color = base)) + 
+#     geom_line(stat = "density", alpha = 0.5) + 
+#     geom_line(data = filter(pred_base_best_df, type == "2data"), stat="density", adjust = 2, linetype = "dashed", color = "gold") +  
+#     scale_x_continuous(trans = "log10") + 
+#     scale_color_manual(values = c("black", "red")) + 
+#   facet_wrap(~pat_tidy, scales = "free")
+```
+

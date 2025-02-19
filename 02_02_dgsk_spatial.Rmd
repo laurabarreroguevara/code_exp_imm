@@ -193,7 +193,8 @@ stat_l <- list(
 
 # For each missing country, obtain first-level administrative division information
 stu_loc_stat <- lapply(1:length(stat_l), function(x) {
-  pomp::bake(file = glue("{dirs$raw}/coord1lv/coord1lv_{names(stat_l[x])}.rds"), {
+  pomp::bake(file = glue("{dirs$raw}/coord1lv/coord1lv_{names(stat_l[x])}.rds"),
+             dir = getOption("pomp_archive_dir", dirs$pomp), {
       fun_data_coord1lv(country_url = stat_l[[x]], country_name = names(stat_l[x]), latlon = FALSE,
                         api = api) %>%
       filter(!(city %in% c("10 counties", "14 regions", "8 regions", "17 divisions"))) %>%
@@ -229,7 +230,8 @@ stu_spatial <- list()
 # Loop through each study to obtain geocodes for the locations and save as RDS. 
 for (i in unique(stu_loc$study)) {
   stu_spatial[[i]] <- pomp::bake(
-    file = glue("{dirs$processed}/02_stu_spatial/stu_spat_{i}.rds"), {
+    file = glue("{dirs$processed}/02_stu_spatial/stu_spat_{i}.rds"), 
+    dir = getOption("pomp_archive_dir", dirs$pomp), {
     stu_loc %>%
         # Filter data for the current study
         filter(study == i) %>% 

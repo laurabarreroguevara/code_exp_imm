@@ -1,20 +1,19 @@
 ---
-title: "BRMS"
+title: "BRMS: Create formulas for each pathogen"
 author: "Laura Andrea Barrrero Guevara"
 date: "2023-02-23"
 output: html_document
 ---
 
-################################################################################
-Purpose of script: To fit brms models to all the studies
-################################################################################
+####################################################################################################
+Purpose of script: To create list of formulas for each pathogen 
+####################################################################################################
 
 ```{r}
 rm(list = ls())
 source("../00_pck.R")
-source("fun_add_new_expression.R")
+source("fun_add_formula.R")
 source("fun_formulas.R")
-dirs$outputs <- "../outputs/modfit"
 ```
 
 # Define the pathogen data frame with 'doses' and 'others' columns
@@ -26,14 +25,14 @@ patmono_df <- data.frame(
   mutate(
     doses = case_when(pat %in% c("vzv", "measl", "mumps", "rubel", "hav") ~ "d1", TRUE ~ "d3"),
     others = case_when(
-      pat %in% c("dipht") ~ list(c("vac_conc", "vac_name_v1", "(1|study)",
-                                   "(1|study:country:center:rct_group)")),
+      pat %in% c("dipht", "strep") ~ list(c("vac_conc", "vac_name_v1", "(1|study)",
+                                            "(1|study:center:rct_group)")),
       pat %in% c("rota", "vzv", "measl", "mumps", "rubel", "men", "hib", "dtpa", "dtpw", "tetan", 
-                 "pertu", "pertufha", "pertuprn", "strep") ~ list(c("vac_conc", "(1|study)", 
-                                            "(1|study:country:center:rct_group)")),
-      pat %in% c("polio") ~ list(c("vac_name_v1", "(1|study)", "(1|study:country:center:rct_group)")),
-      pat %in% c("ipv", "ipv2", "ipv3", "opv", "hbv") ~ list(c("(1|study)", "(1|study:country:center:rct_group)")),
-      pat %in% c("hav") ~ list(c("(1|country)", "(1|country:center:rct_group)")),
+                 "pertu", "pertufha", "pertuprn") ~ list(
+                   c("vac_conc", "(1|study)", "(1|study:center:rct_group)")),
+      pat %in% c("polio") ~ list(c("vac_name_v1", "(1|study)", "(1|study:center:rct_group)")),
+      pat %in% c("ipv", "ipv2", "ipv3", "opv", "hbv") ~ list(c("(1|study)", "(1|study:center:rct_group)")),
+      pat %in% c("hav") ~ list(c("(1|center)", "(1|center:rct_group)")),
       TRUE ~ list(NULL)))
 ```
 
@@ -45,19 +44,20 @@ patmulti_df <- data.frame(
   mutate(
     doses = case_when(pat %in% c("multi_mmr-vzv", "multi_mmr") ~ "d1", TRUE ~ "d3"),
     others = case_when(
-      # pat %in% c("multi_strep") ~ list(c("vac_conc", "vac_name_v1", "(1|study)",
-      #                                    "(1|study:country:center:rct_group)")),
-      pat %in% c("multi_men", "multi_pertu", "multi_strep") ~ list(c("vac_conc", "(1|study)",
-                                                      "(1|study:country:center:rct_group)")),
-      pat %in% c("multi_polio", "multi_dtp") ~ list(c("vac_name_v1", "(1|study)",
-                                                    "(1|study:country:center:rct_group)")),
-      pat %in% c("multi_dtpa", "multi_hib-men") ~ list(c("(1|study)")),
-      pat %in% c("multi_ipv", "multi_opv", "multi_dtpw", "multi_mmr", "multi_mmr-vzv") ~ 
-        list(c("(1|study)", "(1|study:country:center:rct_group)")),
+      pat %in% c("multi_men", "multi_pertu") ~ list(
+        c("vac_conc", "(1|study)", "(1|study:center:rct_group)")),
+      pat %in% c("multi_strep") ~ list(
+        c("vac_conc", "(1|study)", "(1|study:center)")),
+      pat %in% c("multi_polio", "multi_dtp") ~ list(
+        c("vac_name_v1", "(1|study)", "(1|study:center:rct_group)")),
+      pat %in% c("multi_dtpa") ~ list(
+        c("(1|study)", "(1|study:center)")),
+      pat %in% c("multi_ipv", "multi_opv", "multi_dtpw", "multi_mmr", "multi_mmr-vzv", "multi_hib-men") ~ 
+        list(c("(1|study)", "(1|study:center:rct_group)")),
       TRUE ~ list(NULL))) %>%
   rowwise() %>%  # Ensure operations happen row by row
   mutate(multi_pat = list(readRDS(glue(
-    "{dirs$outputs}/data_brms_{pat}_{case_when(doses == 'd1' ~ 'v1', .default = 'vl')}_s08.rds")) %>%
+    "{dirs$modfit}/data_brms_{pat}_{case_when(doses == 'd1' ~ 'v1', .default = 'vl')}_s08.rds")) %>%
       names() %>%
       str_subset("imm_val_s1") %>%
       str_remove("imm_val_s1_"))) %>%
@@ -92,7 +92,7 @@ patmulti_photo_df
 patmono_photo_formula_l <- sapply(unique(patmono_photo_df$pat), function(x) {
   l_formula <- list()
   for (i in which(patmono_photo_df$pat == x)) {
-    l_formula <- add_new_expression(
+    l_formula <- fun_add_formula(
       l_formula, fun_formulas(
         pathogen = patmono_photo_df[i,"pat"][[1]], 
         data = "s08", 
@@ -100,7 +100,7 @@ patmono_photo_formula_l <- sapply(unique(patmono_photo_df$pat), function(x) {
         model_nm = patmono_photo_df[i,"model_nm"][[1]], 
         others = patmono_photo_df[i,"others"][[1]][[1]],
         varname = patmono_photo_df[i,"varname"][[1]]))}
-  saveRDS(l_formula, file = glue("{dirs$outputs}/formula_brms_{x}_l.rds"))
+  saveRDS(l_formula, file = glue("{dirs$modfit}/formula_brms_{x}_l.rds"))
   return(l_formula)
 }, simplify = FALSE)
 ```
@@ -110,7 +110,7 @@ patmono_photo_formula_l <- sapply(unique(patmono_photo_df$pat), function(x) {
 patmulti_photo_formula_l <- sapply(unique(patmulti_photo_df$pat), function(x) {
   l_formula <- list()
   for (i in which(patmulti_photo_df$pat == x)) {
-    l_formula <- add_new_expression(
+    l_formula <- fun_add_formula(
       l_formula, fun_formulas_multipathogen(
         pathogen = patmulti_photo_df[i,"pat"][[1]], 
         data = "s08", 
@@ -120,13 +120,33 @@ patmulti_photo_formula_l <- sapply(unique(patmulti_photo_df$pat), function(x) {
         varname = patmulti_photo_df[i,"varname"][[1]],
         multi_pat = patmulti_photo_df[i,"multi_pat"][[1]][[1]]
         ))}
-  saveRDS(l_formula, file = glue("{dirs$outputs}/formula_brms_{x}_l.rds"))
+  saveRDS(l_formula, file = glue("{dirs$modfit}/formula_brms_{x}_l.rds"))
   return(l_formula)
 }, simplify = FALSE)
-
-patmulti_photo_formula_l$multi_dtpa
 ```
 
+# Univariate models: Long format 
+```{r}
+# patmultilong_photo_formula_l <- sapply(
+#   paste0(c("multi_men", "multi_strep", "multi_ipv", "multi_pertu", "multi_opv"), "_long"), function(x) {
+#   l_formula <- list()
+#   for (i in which(patmulti_photo_df$pat == str_remove_all(x, "_long"))) {
+#     l_formula <- fun_add_formula(
+#       l_formula, fun_formulas_multipathogenlong(
+#         pathogen = paste0(patmulti_photo_df[i,"pat"][[1]], "_long"), 
+#         data = "s08", 
+#         doses = patmulti_photo_df[i,"doses"][[1]], 
+#         model_nm = patmulti_photo_df[i,"model_nm"][[1]], 
+#         others = c(patmulti_photo_df[i,"others"][[1]][[1]], "ar(gr = imm_sero_s1, cov = TRUE)"),
+#         varname = patmulti_photo_df[i,"varname"][[1]],
+#         multi_pat = NULL
+#         ))}
+#   saveRDS(l_formula, file = glue("{dirs$modfit}/formula_brms_{x}_l.rds"))
+#   return(l_formula)
+# }, simplify = FALSE)
+```
+
+# ==================================================================================================
 # Photoperiod and climate models ===================================================================
  
 # Read in cluster variable names
@@ -157,7 +177,7 @@ ADD RANDOM EFFECTS!!!!!!!!!!
 patmono_phoreg_formula_l <- sapply(unique(patmono_phoreg_df$pat), function(x) {
   l_formula <- list()
   for (i in which(patmono_phoreg_df$pat == x)) {
-    l_formula <- add_new_expression(
+    l_formula <- fun_add_formula(
       l_formula, fun_formulas(
         pathogen = patmono_phoreg_df[i,"pat"][[1]], 
         data = patmono_phoreg_df[i,"dat"][[1]], 
@@ -167,7 +187,7 @@ patmono_phoreg_formula_l <- sapply(unique(patmono_phoreg_df$pat), function(x) {
         varname = patmono_phoreg_df[i,"varname"][[1]],
         varname2 = patmono_phoreg_df[i,"varname2"][[1]],
         ), omit_exp = TRUE)}
-  saveRDS(l_formula, file = glue("{dirs$outputs}/formula_brms_{x}_l.rds"))
+  saveRDS(l_formula, file = glue("{dirs$modfit}/formula_brms_{x}_l.rds"))
   return(l_formula)
 }, simplify = FALSE)
 
@@ -179,7 +199,7 @@ patmono_phoreg_formula_l$rota
 patmulti_phoreg_formula_l <- sapply(unique(patmulti_phoreg_df$pat), function(x) {
   l_formula <- list()
   for (i in which(patmulti_phoreg_df$pat == x)) {
-    l_formula <- add_new_expression(
+    l_formula <- fun_add_formula(
       l_formula, fun_formulas_multipathogen(
         pathogen = patmulti_phoreg_df[i,"pat"][[1]], 
         data = patmulti_phoreg_df[i,"dat"][[1]], 
@@ -190,7 +210,7 @@ patmulti_phoreg_formula_l <- sapply(unique(patmulti_phoreg_df$pat), function(x) 
         varname2 = patmulti_phoreg_df[i,"varname2"][[1]],
         multi_pat = patmulti_phoreg_df[i,"multi_pat"][[1]][[1]]
         ), omit_exp = TRUE)}
-  saveRDS(l_formula, file = glue("{dirs$outputs}/formula_brms_{x}_l.rds"))
+  saveRDS(l_formula, file = glue("{dirs$modfit}/formula_brms_{x}_l.rds"))
   return(l_formula)
 }, simplify = FALSE)
 
@@ -213,7 +233,7 @@ patmono_phoregbase_df <- patmono_photo_df %>%
 patmono_phoregbase_formula_l <- sapply(unique(patmono_phoregbase_df$pat), function(x) {
   l_formula <- list()
   for (i in which(patmono_phoregbase_df$pat == x)) {
-    l_formula <- add_new_expression(
+    l_formula <- fun_add_formula(
       l_formula, fun_formulas(
         pathogen = patmono_phoregbase_df[i,"pat"][[1]], 
         data = patmono_phoregbase_df[i,"dat"][[1]], 
@@ -221,7 +241,7 @@ patmono_phoregbase_formula_l <- sapply(unique(patmono_phoregbase_df$pat), functi
         model_nm = patmono_phoregbase_df[i,"model_nm"][[1]], 
         others = patmono_phoregbase_df[i,"others"][[1]][[1]],
         varname = patmono_phoregbase_df[i,"varname"][[1]]), omit_exp = TRUE)}
-  saveRDS(l_formula, file = glue("{dirs$outputs}/formula_brms_{x}_l.rds"))
+  saveRDS(l_formula, file = glue("{dirs$modfit}/formula_brms_{x}_l.rds"))
   return(l_formula)
 }, simplify = FALSE)
 
@@ -244,7 +264,7 @@ patmulti_phoregbase_df <- patmulti_photo_df %>%
 patmulti_phoregbase_formula_l <- sapply(unique(patmulti_phoregbase_df$pat), function(x) {
   l_formula <- list()
   for (i in which(patmulti_phoregbase_df$pat == x)) {
-    l_formula <- add_new_expression(
+    l_formula <- fun_add_formula(
       l_formula, fun_formulas_multipathogen(
         pathogen = patmulti_phoregbase_df[i,"pat"][[1]], 
         data = patmulti_phoregbase_df[i,"dat"][[1]], 
@@ -254,14 +274,16 @@ patmulti_phoregbase_formula_l <- sapply(unique(patmulti_phoregbase_df$pat), func
         varname = patmulti_phoregbase_df[i,"varname"][[1]],
         multi_pat = patmulti_phoregbase_df[i,"multi_pat"][[1]][[1]]
         ))}
-  saveRDS(l_formula, file = glue("{dirs$outputs}/formula_brms_{x}_l.rds"))
+  saveRDS(l_formula, file = glue("{dirs$modfit}/formula_brms_{x}_l.rds"))
   return(l_formula)
 }, simplify = FALSE)
 
 patmulti_phoregbase_formula_l$multi_men
 ```
 
-
+####################################################################################################
+# End
+####################################################################################################
 
 
 

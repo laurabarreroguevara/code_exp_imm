@@ -26,7 +26,7 @@ fun_dgsk_modpat <- function(dat = stu_ppat[[pat]], method = "elisa", seroname = 
     filter(imm_sero_s1 %in% seroname)
   
   # Filter doses
-  if(dose %in% c("1","2","3","4","5", "6")) {
+  if(dose %in% c("1","2","3","4","5","6")) {
     dat <- filter(dat, doses == dose) 
   } else if(dose == "l") {
     dat <- group_by(dat, study, pid) %>%

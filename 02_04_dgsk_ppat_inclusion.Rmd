@@ -96,7 +96,7 @@ filter(stu_perpat_included, seroname == FALSE)
 
 # 2. Identify studies permissive of previous routine vaccination per pathogen (the study planned 
 # vaccination and ab measurements but allowed previous vaccinations)
-# Result: 47 study-pathogen pairs excluded
+# Result: 48 study-pathogen pairs excluded
 ```{r}
 exclusions_perpat$pri <- stu_meta_pro %>%
   select(study, inclusion_criteria) %>%
@@ -118,7 +118,7 @@ filter(stu_perpat_included, inclusion_criteria == "excluded")
 ```
 
 # Define excluded studies and save data frame per pathogen 
-# Result: 546 study-pathogen combinations included 
+# Result: 545 study-pathogen combinations included 
 ```{r}
 stu_perpat_included <- stu_perpat_included %>%
   mutate(included = case_when(

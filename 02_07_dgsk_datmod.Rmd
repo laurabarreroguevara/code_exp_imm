@@ -259,6 +259,8 @@ lapply(pat_df_l, function(x) c(studies_vl = length(unique(x$study)),
   filter(is.na(kgc))
 
 #summary(bind_rows(pat_df_l[which(str_detect(names(pat_df_l), "kgc", negate = TRUE))], .id = "pathogen"))
+
+pat_df_l$data_brms_dtpa_vl_s08
 ```
 
 # Save data frames 

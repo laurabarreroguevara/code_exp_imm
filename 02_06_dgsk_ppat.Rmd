@@ -185,7 +185,7 @@ for (vac in c(unique(stu_perpat$pat), "ipv", "opv", "dtpw", "dtpa")) {
     # Calculate the week of first vaccination
     mutate(vac_week_v1 = week(vac_date_v1),
            vac_week_v1 = case_when(vac_week_v1 == 53 ~ 52, .default = vac_week_v1))
-  # Ensure no missing participants (pid) after tidying
+  # Ensure no repeats per pid
   stopifnot(length(stu_dfs$expo[[1]]) == length(distinct(stu_dfs$expo, study, pid)[[1]]))
   
   # Tidy concomitant vaccination (expo_conco) data -------------------------------------------------
@@ -554,7 +554,7 @@ fun_plcutoff <- function(pat = "dipht", method = "elisa", cut_off = 0.1, ncol_pa
   
 pl_s1 <- dat %>%
   filter(imm_met_s1 == method) %>%
-  filter(imm_val_s1 < cut_off*2) %>%
+  filter(imm_val_s1 < cut_off) %>%
   ggplot(aes(x = imm_val_s1)) + 
   geom_histogram() + 
   facet_wrap(study~., ncol = ncol_pat, strip.position = "right", scales = "free_y") + 
@@ -569,7 +569,7 @@ fun_plcutoff(pat = "dipht", method = "prnt", cut_off = 0.016, ncol_pat = 2)
 fun_plcutoff(pat = "hav", method = "elisa", cut_off = 15, ncol_pat = 2)
 # HBV
 fun_plcutoff(pat = "hbv", method = "elisa", cut_off = 10, ncol_pat = 2)
-fun_plcutoff(pat = "hbv", method = "clia", cut_off = 10, ncol_pat = 2)
+# fun_plcutoff(pat = "hbv", method = "clia", cut_off = 10, ncol_pat = 2)
 # HIB
 fun_plcutoff(pat = "hib", method = "elisa", cut_off = 0.15, ncol_pat = 4)
 # Measles
@@ -577,6 +577,9 @@ fun_plcutoff(pat = "measl", method = "elisa", cut_off = 150, ncol_pat = 4)
 # Men 
 fun_plcutoff(pat = "men", method = "bac", cut_off = 8, ncol_pat = 4, sero_spe = "anti_men_c")
 fun_plcutoff(pat = "men", method = "elisa", cut_off = 0.3, ncol_pat = 4, sero_spe = "anti_men_c")
+# Men 
+fun_plcutoff(pat = "men", method = "bac", cut_off = 8, ncol_pat = 4, sero_spe = "anti_men_a")
+fun_plcutoff(pat = "men", method = "elisa", cut_off = 0.3, ncol_pat = 4, sero_spe = "anti_men_a")
 # Pertussis
 fun_plcutoff(pat = "pertu", method = "elisa", cut_off = 5, ncol_pat = 4, sero_spe = "anti_pertu_fha")
 fun_plcutoff(pat = "pertu", method = "elisa", cut_off = 5, ncol_pat = 4, sero_spe = "anti_pertu_prn")

@@ -2,9 +2,9 @@
 # Write slurm sh file for each model
 ################################################################################
 
-fun_write_bayes_factor_slurm_sh <- function(pathogen = "varicella",
-                                            dfkgc = "",
-                               time = "23:00:00") {
+fun_write_slurmsh <- function(args_fo = args_fo, args_iter = args_iter, 
+                              dat_name = "data_brms_1dose_ii.rds", pathogen = "varicella",
+                              time = "23:00:00") {
   script_content <- paste0(
     "#!/bin/bash -l\n",
     "\n#SBATCH -J R",
@@ -20,10 +20,12 @@ fun_write_bayes_factor_slurm_sh <- function(pathogen = "varicella",
     "\n\n# avoid overbooking of the cores which might occur via NumPy/MKL threading",
     "\nexport OMP_NUM_THREADS=${SLURM_CPUS_PER_TASK:-1}",
     "\n\nexport arg_pat=\"", pathogen, "\"",
-    "\n\nexport arg_df=\"", dfkgc, "\"",
-    "\n\nsrun R --quiet --no-save <fune_mod_bayes_factor.R")
+    "\nexport arg_dat=\"", dat_name, "\"",
+    "\nexport arg_fo=\"", args_fo, "\"",
+    "\nexport arg_iter=\"", args_iter, "\"",
+    "\n\nsrun R --quiet --no-save <fune_mod_fit.R")
   # Create a new shell script file with the argument name
-  file_name <- paste0("../outputs/slurm_sh/run_mcom_", pathogen, ".sh")
+  file_name <- glue("{dirs$outputs}/slurm_sh/run_{pathogen}_brms_{args_fo}.sh")
   writeLines(script_content, file_name)
 }
 

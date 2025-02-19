@@ -59,7 +59,8 @@ stu_nctid <- stu_meta_gsk %>%
 filter(stu_nctid, !is.na(nctid)) # 189 studies
 
 # Check the URLs for each study using NCT ID or study ID
-ctgov_query_n <- pomp::bake(glue("{dirs$processed}/00_meta_ctgov/stu_meta_ctgov_query_n.rds"), {
+ctgov_query_n <- pomp::bake(glue("{dirs$processed}/00_meta_ctgov/stu_meta_ctgov_query_n.rds"),
+                            dir = getOption("pomp_archive_dir", dirs$pomp), {
   stu_query_n <- list()
   for(i in 1:length(stu_nctid$study)) {
     q_study <- ctrGetQueryUrl(url = glue("id={stu_nctid$study[i]}"), register = "CTGOV2")
@@ -106,12 +107,14 @@ db_query_l <- list()
 }
 
 # Load and save query success information
-db_query_success <- pomp::bake(glue("{dirs$processed}/00_meta_ctgov/stu_meta_ctgov_query_success.rds"), {
+db_query_success <- pomp::bake(glue("{dirs$processed}/00_meta_ctgov/stu_meta_ctgov_query_success.rds"),
+                               dir = getOption("pomp_archive_dir", dirs$pomp), {
   bind_rows(db_query_l)
 })
 
 # Obtain metadata of the GSK studies (sourced from clinicaltrialsgov) and save as an RDS file
-stu_meta_ctgov <- pomp::bake(glue("{dirs$processed}/stu_meta_ctgov.rds"), {
+stu_meta_ctgov <- pomp::bake(glue("{dirs$processed}/stu_meta_ctgov.rds"),
+                             dir = getOption("pomp_archive_dir", dirs$pomp), {
   dbGetFieldsIntoDf("protocolSection", con = db_ctgov) %>%
   rename(success = "_id") %>%
   left_join(db_query_success) %>%

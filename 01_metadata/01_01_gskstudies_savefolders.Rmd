@@ -48,7 +48,7 @@ stu_req <- read_excel(glue("{dirs$raw}/studies_requested.xlsx")) %>%
 ```{r}
 # Studies in Kramer's server zipped data
 save_kramer_l <- str_subset(list.files(glue("{dirs$server_save_kramer}")), negate = TRUE, 
-                            "allStudies_Apr.csv|resources_for_Laura.zip|seasonal_immunogenicity|vacc_con dataset")
+                            "allStudies_Apr.csv|resources_for_Laura.zip|seasonal_immunogenicity|vacc_con dataset|_seas_imm_server_kramer")
 # Studies in Barrero Guevaras's server zipped data (classified)
 save_bg_l <- sapply(list.files(glue("{dirs$server_save_bg}")), simplify = FALSE,
                     function(x) list.files(glue("{dirs$server_save_bg}/{x}")))
