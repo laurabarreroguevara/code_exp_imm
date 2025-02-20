@@ -12,7 +12,8 @@ exclusions per group and per participant.
 
 Functions Used:
 - `fun_dgsk_vacconco.R`: Function to create data frame of concomitant vaccines.
-- `fun_dgsk_vacimm.R`: Function to process and tidy immunogenicity data relative to vaccination doses, including time differences, baseline values, and censoring status
+- `fun_dgsk_vacimm.R`: Function to process and tidy immunogenicity data relative to vaccination doses, 
+including time differences, baseline values, and censoring status
 
 Output:
 - `stu_ppat.rds`:  List of data frames with all the included participants with all data on 
@@ -142,11 +143,11 @@ stu_cutoffs <- sapply(names(stu_seronames), function(x) {
 patdf_l <- list()
 patdf_checks <- list()
 
-# Loop through each pathogen and some specific vaccines (ipv, opv, dtpw, dtpa)
-for (vac in c(unique(stu_perpat$pat), "ipv", "opv", "dtpw", "dtpa")) {
+# Loop through each pathogen and some specific vaccines (ipv, opv, pertuw, pertua)
+for (vac in c(unique(stu_perpat$pat), "ipv", "opv", "pertuw", "pertua")) {
   
   # Map the vaccines to the correct pathogen name
-  i <- case_when(vac %in% c("dtpw", "dtpa") ~ "dipht",
+  i <- case_when(vac %in% c("pertuw", "pertua") ~ "pertu",
                  vac %in% c("ipv", "opv") ~ "polio",
                  .default = vac)
 
@@ -200,7 +201,7 @@ for (vac in c(unique(stu_perpat$pat), "ipv", "opv", "dtpw", "dtpa")) {
     left_join(select(filter(stu_cutoffs, pat == i), -pat), by = join_by(study, imm_met, imm_sero))
   
   # Integrate all data -----------------------------------------------------------------------------
-  patdf_l[[vac]] <- bind_rows(stu_dfs$pid) %>%
+  patdf_l[[vac]] <- stu_dfs$pid %>%
     # Combine participant, vaccination, concomitant vaccination, and serology data
     left_join(stu_dfs$expo, by = join_by(study, pid)) %>% 
     left_join(stu_dfs$expo_conco, by = join_by(study, pid)) %>%
@@ -216,9 +217,12 @@ for (vac in c(unique(stu_perpat$pat), "ipv", "opv", "dtpw", "dtpa")) {
   # Adjust country names for rotavirus studies
   if(vac == "rota") patdf_l[[vac]] <- mutate(patdf_l[[vac]], country = str_remove_all(country, "_.*"))
   
-  # Subset data for Polio and Diphtheria 
-  if(vac %in% c("dtpw", "dtpa", "ipv", "opv")) {
-    patdf_l[[vac]] <- filter(patdf_l[[vac]], if_all(starts_with("vac_name_v"), ~ . == vac | is.na(.)))}
+  # Subset data for Polio and Pertussis 
+  if(vac %in% c("pertuw", "pertua", "ipv", "opv")) {
+    patdf_l[[vac]] <- filter(patdf_l[[vac]], 
+                             if_all(starts_with("vac_name_v"), 
+                                    ~ . == str_replace(vac, "pertu", "dtp") | is.na(.))) 
+    } 
     
   # Checks -----------------------------------------------------------------------------------------
   patdf_checks[[vac]] <- c(missing_expo = length(setdiff(stu_pat, unique(stu_dfs$expo$study))),
@@ -229,7 +233,13 @@ for (vac in c(unique(stu_perpat$pat), "ipv", "opv", "dtpw", "dtpa")) {
 # This part can take up to 5 minutes 
 # Expect one warning due to min(doses) == 1 for hav 
 
+# Checks 
 bind_rows(patdf_checks, .id = "pat")
+
+# Check 121 studies 
+distinct(bind_rows(lapply(patdf_l, distinct, study)), study)
+# Check 94505 participants
+distinct(bind_rows(lapply(patdf_l, distinct, study, pid)), study, pid)
 ```
 
 # Group exclusions =================================================================================
@@ -260,8 +270,11 @@ var_names <- c("age", "sex", "vac_name_v1", "vac_date_v1", "vac_conc",
 
 # Exception for birth vaccination for hbv (no need for baseline ab)
 ```{r}
+# Check studies were children were vaccinated under 7 days old. 
 lapply(patdf_l, function(x) distinct(filter(x, (vac_date_v1 - birth_date) < 7), study))
+# Check studies were children were vaccinated at age < 1
 lapply(patdf_l, function(x) distinct(filter(x, age < 1), study))
+# Define studies in hbv were children were vaccinated at birth
 exphbv_l <- distinct(filter(patdf_l$hbv, (vac_date_v1 - birth_date) < 7), study)
 ```
 
@@ -343,6 +356,11 @@ for (i in names(patdf_l)) {
                          studies_exclusion_rctg = length(distinct(patdf_l[[i]], study)[[1]]))
 }
 bind_rows(patdf_checks, .id = "pathogen")
+
+# Check 117 studies 
+distinct(bind_rows(lapply(patdf_l, distinct, study)), study)
+# Check 85165 participants
+distinct(bind_rows(lapply(patdf_l, distinct, study, pid)), study, pid)
 ```
 
 # Participant exclusions ===========================================================================
@@ -488,6 +506,14 @@ saveRDS(stu_checks, file = glue("{dirs$processed}/stu_ppat_checks.rds"))
 
 # Checks ===========================================================================================
 
+```{r}
+# Total studies per exclusion criteria step 110
+lapply(filter_l, function(x) length(unique(unlist(lapply(x, function(p_name) p_name$studies)))))
+# Total participants 58765
+distinct(bind_rows(lapply(patdf_row_l, distinct, study, pid)), study, pid)
+```
+
+
 # After exclusion of individuals, some studies were completely excluded
 ```{r}
 # Studies excluded due to missing baseline ab titers (studies that did not measure baseline ab titers)
@@ -501,8 +527,8 @@ setdiff(filter_l$imm_sero_s0$tetan$studies, filter_l$time_s0_v1$tetan$studies)
 setdiff(filter_l$imm_sero_s0$pertu$studies, filter_l$time_s0_v1$pertu$studies)
 setdiff(filter_l$imm_sero_s0$hib$studies, filter_l$time_s0_v1$hib$studies)
 setdiff(filter_l$imm_sero_s0$rota$studies, filter_l$time_s0_v1$rota$studies)
-setdiff(filter_l$imm_sero_s0$dtpw$studies, filter_l$time_s0_v1$dtpw$studies)
-setdiff(filter_l$imm_sero_s0$dtpa$studies, filter_l$time_s0_v1$dtpa$studies)
+setdiff(filter_l$imm_sero_s0$pertuw$studies, filter_l$time_s0_v1$pertuw$studies)
+setdiff(filter_l$imm_sero_s0$pertua$studies, filter_l$time_s0_v1$pertua$studies)
 
 # Studies excluded due to long time between vl and s1
 setdiff(filter_l$time_s0_v1$dipht$studies, filter_l$time_vl_s1$dipht$studies)
@@ -512,7 +538,7 @@ setdiff(filter_l$time_s0_v1$hib$studies, filter_l$time_vl_s1$hib$studies)
 setdiff(filter_l$time_s0_v1$polio$studies, filter_l$time_vl_s1$polio$studies)
 setdiff(filter_l$time_s0_v1$strep$studies, filter_l$time_vl_s1$strep$studies)
 setdiff(filter_l$time_s0_v1$ipv$studies, filter_l$time_vl_s1$ipv$studies)
-setdiff(filter_l$time_s0_v1$dtpa$studies, filter_l$time_vl_s1$dtpa$studies)
+setdiff(filter_l$time_s0_v1$pertua$studies, filter_l$time_vl_s1$pertua$studies)
 
 # Studies excluded due to too high baseline ab 
 setdiff(filter_l$time_vl_s1$tetan$studies, filter_l$imm_val_s0_any$tetan$studies)

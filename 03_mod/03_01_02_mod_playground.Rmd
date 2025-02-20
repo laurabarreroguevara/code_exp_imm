@@ -1,46 +1,48 @@
 ---
-title: "BRMS: playground"
+title: "BRMS: Model playground"
 author: "Laura Andrea Barrrero Guevara"
 date: "2023-02-23"
 output: html_document
 ---
 
 ####################################################################################################
-Purpose of script: Try just one model to see if it works 
+Purpose of script: This script demonstrates running a single Bayesian regression model using the 
+'brms' package. It is designed as a playground to verify that a model can be executed successfully.
 ####################################################################################################
 
-# Set up
+# Load packages and directories
 ```{r}
 rm(list = ls())
 source("../00_pck.R")
 
-args_pat <- "multi_men"
+# Define pathogen
+args_pat <- "hav"
+# Define doses
 dose <- if(args_pat %in% c("vzv", "measl", "mumps", "rubel", 
                            "hav", "multi_mmr-vzv", "multi_mmr")) "v1" else "vl"
 ```
 
-# Read the data ----------------------------------------------------------------
+# Read in the data ---------------------------------------------------------------------------------
 ```{r}
 args_dat <- glue("data_brms_{args_pat}_{dose}_s08.rds")
 dat <- readRDS(file = glue("{dirs$modfit}/{args_dat}"))
 ```
 
-# Retrieve your model formula from the command line arguments ------------------
+# Retrieve your model formula from the command line arguments (in server script ) ------------------
 ```{r}
 l_formula <- readRDS(file = glue("{dirs$modfit}/formula_brms_{args_pat}_l.rds"))
 args_fo <- names(l_formula)[[1]]
 ```
 
-# Retrieve the iters from the command line arguments ---------------------------
+# Retrieve the iters from the command line arguments (in server script ) ---------------------------
 ```{r}
-args_iter <- 3000
+args_iter <- 2000
 # Add criterion? 
 crit <- FALSE
 ```
 
-# Run the models ---------------------------------------------------------------
+# Run the models -----------------------------------------------------------------------------------
 ```{r}
-# Run the models ---------------------------------------------------------------
 mod <- brm(formula = l_formula[[args_fo]],
              data = dat, family = Gamma(link = "log"),
              warmup = 1000, iter = args_iter, chains = 1,
@@ -49,172 +51,16 @@ mod <- brm(formula = l_formula[[args_fo]],
 if(crit == TRUE) mod <- add_criterion(mod, criterion = c("waic"))
 ```
 
-# Check it ----------------------------------------------------------------------
+# Check it -----------------------------------------------------------------------------------------
 ```{r}
-# plot(mod)
-# conditional_effects(mod)
-# play_mod
-# stancode(mod)
+plot(mod)
+vonditional_effects(mod)
+mod
+stancode(mod)
 ```
 
 ####################################################################################################
 END
 ####################################################################################################
 
-
-
-
-
-
-
-```{r}
-dat_long <- readRDS("../outputs/modfit/data_brms_multi_men_long_vl_s08.rds")
-l_formula$bmvl_s08_multi_men_base_gauss
-```
-
-
-# Test 
-```{r}
-set.seed(200)
-sample_pid <- sample(unique(dat$pid), 200)
-
-# Original 
-mod0 <- brm(formula = l_formula$bmvl_s08_multi_men_base_gauss,
-  data = filter(dat, pid %in% sample_pid), family = gaussian(link = "log"),
-  warmup = 1000, iter = args_iter, chains = 1,
-  init = 0, control = list(adapt_delta = 0.95),
-  save_all_pars = TRUE)
-```
-
-
-```{r}
-# Gaussian model: Works
-mod1 <- brm(formula = imm_val_s1 | cens(censored) ~ 1 + sex + age + vac_conc + 
-    (1 | study) + (1 | study:center:rct_group) + time_v1_v2 + time_v2_v3 + time_vl_s1,
-  data = filter(dat_long, pid %in% sample_pid), family = gaussian(link = "log"),
-  warmup = 1000, iter = args_iter, chains = 1,
-  init = 0, control = list(adapt_delta = 0.95),
-  save_all_pars = TRUE)
-```
-
-```{r}
-# Adding fixed effect by sero type: works 
-mod2 <- brm(formula = bf(
-  imm_val_s1 | cens(censored) ~ 1 + sex + age + vac_conc + 
-    (1 | study) + (1 | study:center:rct_group) + time_v1_v2 + time_v2_v3 + time_vl_s1 + imm_sero_s1),
-  data = filter(dat_long, pid %in% sample_pid), family = gaussian(link = "log"),
-  warmup = 1000, iter = args_iter, chains = 1,
-  init = 0, control = list(adapt_delta = 0.95),
-  save_all_pars = TRUE)
-```
-
-
-```{r}
-# Adding fixed effect by sero type and re(pid): works
-mod3 <- brm(formula = bf(
-  imm_val_s1 | cens(censored) ~ 1 + sex + age + vac_conc + 
-    (1 | study) + (1 | study:center:rct_group:pid) + time_v1_v2 + time_v2_v3 + time_vl_s1 + imm_sero_s1),
-  data = filter(dat_long, pid %in% sample_pid), family = gaussian(link = "log"),
-  warmup = 1000, iter = args_iter, chains = 1,
-  init = 0, control = list(adapt_delta = 0.95),
-  save_all_pars = TRUE)
-```
-
-
-```{r}
-# Adding sigma 
-mod4 <- brm(formula = bf(
-  imm_val_s1 | cens(censored) ~ 1 + sex + age + vac_conc + 
-    (1 | study) + (1 | study:center:rct_group:pid) + time_v1_v2 + time_v2_v3 + time_vl_s1 + imm_sero_s1,
-  sigma ~ 0 + imm_sero_s1
-  ),
-  data = filter(dat_long, pid %in% sample_pid), family = gaussian(link = "log"),
-  warmup = 1000, iter = args_iter, chains = 1,
-  init = 0, control = list(adapt_delta = 0.95),
-  save_all_pars = TRUE)
-```
-
-```{r}
-# Adding sigma 
-mod5 <- brm(formula = bf(
-  imm_val_s1 | cens(censored) ~ 1 + sex + age + vac_conc + 
-    (1 | study) + (1 | study:center:rct_group:pid) + time_v1_v2 + time_v2_v3 + time_vl_s1,
-  sigma ~ 0 + imm_sero_s1
-  ),
-  data = filter(dat_long, pid %in% sample_pid), family = gaussian(link = "log"),
-  warmup = 1000, iter = args_iter, chains = 1,
-  init = 0, control = list(adapt_delta = 0.95),
-  save_all_pars = TRUE)
-```
-
-```{r}
-# Adding sigma no pid 
-mod6 <- brm(formula = bf(
-  imm_val_s1 | cens(censored) ~ 1 + sex + age + vac_conc + 
-    (1 | study) + (1 | study:center:rct_group) + time_v1_v2 + time_v2_v3 + time_vl_s1,
-  sigma ~ 0 + imm_sero_s1
-  ),
-  data = filter(dat_long, pid %in% sample_pid), family = gaussian(link = "log"),
-  warmup = 1000, iter = args_iter, chains = 1,
-  init = 0, control = list(adapt_delta = 0.95),
-  save_all_pars = TRUE)
-```
-
-```{r}
-matrix(c(0.24, 0, 0, 3.75), nrow = 2)
-```
-
-
-```{r}
-# Adding sigma without the censoring 
-mod9 <- brm(formula = bf(
-  imm_val_s1 | cens(censored) ~ 1 + sex + age + vac_conc + 
-    (1 | study) + (1 | study:center:rct_group) + time_v1_v2 + time_v2_v3 + time_vl_s1,
-  sigma ~ 0 + imm_sero_s1 + (1|gr(imm_sero_s1))
-  ),
-  data = filter(dat_long, pid %in% sample_pid), family = gaussian(link = "log"),
-  warmup = 1000, iter = args_iter, chains = 1,
-  init = 0, control = list(adapt_delta = 0.95),
-  save_all_pars = TRUE)
-
-# Adding sigma without the censoring 
-mod10 <- brm(formula = bf(
-  imm_val_s1 ~ 1 + sex + age + vac_conc + 
-    (1 | study) + (1 | study:center:rct_group) + time_v1_v2 + time_v2_v3 + time_vl_s1 + ar(gr = imm_sero_s1, cov = TRUE),
-  sigma ~ 0 + imm_sero_s1),
-  data = filter(dat_long, pid %in% sample_pid), family = gaussian(link = "log"),
-  warmup = 1000, iter = args_iter, chains = 1,
-  init = 0, control = list(adapt_delta = 0.95),
-  save_all_pars = TRUE)
-
-
-# Adding sigma without the censoring 
-mod10 <- brm(formula = bf(
-  imm_val_s1 ~ 1 + sex + age + vac_conc + 
-    (1 | study) + (1 | study:center:rct_group) + time_v1_v2 + time_v2_v3 + time_vl_s1 + ar(gr = imm_sero_s1, cov = TRUE),
-  sigma ~ 0 + imm_sero_s1),
-  data = filter(dat_long, pid %in% sample_pid), family = gaussian(link = "log"),
-  warmup = 1000, iter = args_iter, chains = 1,
-  init = 0, control = list(adapt_delta = 0.95),
-  save_all_pars = TRUE)
-
-as.data.frame(VarCorr(mod0)$residual__$cor) %>%
-      select(starts_with("Estimate"))
-
-mod11 <- brm(formula = bf(
-  imm_val_s1 ~ 1 + sex + age + vac_conc + 
-    (1 | study) + (1 | study:center:rct_group) + time_v1_v2 + time_v2_v3 + time_vl_s1 + ar(gr = imm_sero_s1, cov = TRUE),
-  sigma ~ 0 + imm_sero_s1),
-  data = dat_long, family = gaussian(link = "log"),
-  warmup = 1000, iter = args_iter, chains = 1,
-  init = 0, control = list(adapt_delta = 0.95),
-  save_all_pars = TRUE)
-```
-
-
-
-```{r}
-mod0
-```
-https://discourse.mc-stan.org/t/residual-covariance-brms-mutlivariate-model-in-long-format/17381/9
 

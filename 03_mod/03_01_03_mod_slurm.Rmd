@@ -1,47 +1,73 @@
 ---
-title: "BRMS: Slurm.sh files"
+title: "BRMS: Create slurm.sh files"
 author: "Laura Andrea Barrrero Guevara"
 date: "2023-02-23"
 output: html_document
 ---
 
 ####################################################################################################
-Purpose of script: Create slurm.sh files to run models in the cluster
+Purpose of script: This script generates SLURM shell script files (slurm.sh) for running R model 
+fitting jobs in the cluster.
+
+Functions Used:
+- `fun_write_slurmsh.R`: Function to generate SLURM shell script to execute an R model fitting job.
+
+Outputs: 
+For each unipathogen, multi-unipathogen and multi-multipathogen (46), in the folder 
+outputs/slurm_sh:
+- run_{pat}_brms_bm{doses}_{data}_{mod}.sh
 ####################################################################################################
 
-# Set up
+# Load packages, themes, directories, and functions
 ```{r}
 rm(list = ls())
 source("../00_pck.R")
 source("fun_write_slurmsh.R")
 
-pat_l <- c("rota", "vzv", "measl", "mumps", "rubel", "hav", "men", "strep", "hib",
-           "ipv", "ipv2", "ipv3", "opv", "dtpa", "dtpw", "tetan", "pertu", "pertufha", "pertuprn", 
-           "hbv", "multi_ipv", "multi_pertu", "multi_men", "multi_opv", "multi_strep",
-           "multi_dtpa", "multi_dtpw", "multi_hib-men", "multi_mmr", "multi_mmr-vzv")
-#pat_l <- c("multi_ipv_long", "multi_pertu_long", "multi_men_long", "multi_opv_long", "multi_strep_long")
+# Define the list of pathogens for which the scripts will be created
+pat_l <- c("rota", "hav", "hbv", "dipht", "tetan", "pertuwpt", "multi_dtpw", "pertuapt",
+           "multi_pertua", "multi_dtpa", "ipv1", "multi_ipv", "opv1", "multi_opv", "hib", "menc",
+           "multi_men", "multi_hib-men", "strep04", "multi_strep", "measl", "mumps", "rubel", 
+           "multi_mmr", "vzv", "multi_mmr-vzv")
+
+# pat_l <- c("pertuafha", "pertuaprn", "ipv2", "ipv3", "opv2", "opv3", "mena", "meny", "strep01",
+#            "strep03", "strep05", "strep06a", "strep06b", "strep07f", "strep09v", "strep14",
+#            "strep18c", "strep19a", "strep19f", "strep23f")
+
+# pat_l <- c("rota", "hav", "hbv", "dipht", "tetan", "pertuwpt", "multi_dtpw", "pertuapt", 
+#            "pertuafha", "pertuaprn", "multi_pertua", "multi_dtpa", "ipv1", "ipv2", "ipv3", 
+#            "multi_ipv", "opv1", "opv2", "opv3", "multi_opv", "hib", "mena", "menc", "meny", 
+#            "multi_men", "multi_hib-men", "strep01", "strep03", "strep04", "strep05", "strep06a", 
+#            "strep06b", "strep07f", "strep09v", "strep14", "strep18c", "strep19a", "strep19f", 
+#            "strep23f", "multi_strep", "measl", "mumps", "rubel", "multi_mmr", "vzv", "multi_mmr-vzv")
 ```
 
-# Loop it s08 sub kgc 
+# Loop over each pathogen in the defined list
 ```{r}
 for (pathogen in pat_l) {
-  # Read formulas 
+  ## Read the list of formulas specific to the current pathogen
   l_formula <- readRDS(glue("{dirs$modfit}/formula_brms_{pathogen}_l.rds"))
+  ## Identify model scripts that have already been executed
+  ## List the files in the "runned" directory 
   already_runned <- str_remove(str_remove(list.files(glue("{dirs$outputs}/slurm_sh/runned")), ".sh"), 
                                glue("run_{pathogen}_brms_"))
+  ## Filter out any formulas that have already been processed to avoid duplicate runs
   l_formula <- l_formula[!(names(l_formula) %in% already_runned)]
   
-  # Loop over each model name
+  ## For each remaining model in the formula list, generate the corresponding SLURM script
   walk(names(l_formula), function(args_fo) {
-    # Determine the vaccine dose and data frame 
+    # Determine the vaccine dose and data based on the model name
     vac <- case_when(str_detect(args_fo, "bmvl") ~ "vl",
                      str_detect(args_fo, "bmv1") ~ "v1")
     dfk <- case_when(str_detect(args_fo, "dfkgc1") ~ "_kgc_1",
                      str_detect(args_fo, "dfkgc2") ~ "_kgc_2",
                      str_detect(args_fo, "dfkgc3") ~ "_kgc_3",
                      TRUE ~ "")
+    # Set the number of iterations for the SLURM job:
+    # For 'multi_strep', use 5000 iterations; for all others, default to 10000 iterations.
     args_iter <- case_when(pathogen == "multi_strep" ~ 5000, .default = 10000)
-    # Write SLURM script
+    
+    # Generate the SLURM shell script file 
     fun_write_slurmsh(args_fo = args_fo, args_iter = args_iter,
                        dat_name = glue("data_brms_{pathogen}_{vac}_s08{dfk}.rds"), 
                        pathogen = pathogen, time = "24:00:00")
@@ -49,8 +75,9 @@ for (pathogen in pat_l) {
 }  
 ```
 
-# Get lines to run in the cluster
+# List cluster run commands
 ```{r}
+# For each generated SLURM script, print the sbatch command needed to submit the job
 for (i in list.files(glue("{dirs$outputs}/slurm_sh"))) {
  print(glue("sbatch ~/projects/_seas_imm/{i}"))
 }

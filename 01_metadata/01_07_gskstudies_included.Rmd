@@ -325,6 +325,7 @@ left_join(fun_dgsk_readdfs(study = stu_l["105553"], cdi = FALSE)$pid %>%
 # Create studies included df and save it  
 ```{r}
 stu_included <- mutate(stu_req, included = !(study %in% bind_rows(exclusions)$study))
+filter(stu_included, included == TRUE)
 saveRDS(stu_included, file = glue("{dirs$processed}/stu_included.rds"))
 ```
 

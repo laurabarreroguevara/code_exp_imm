@@ -49,24 +49,29 @@ dirs$pomp <- ""
 # List of pathogen names
 pat_tidy_names <- data.frame(
   pat = c(
-    "rota", "hav", "hbv", "dipht", "dtpa", 
-    "dtpw", "tetan", "pertu", "pertufha", "pertuprn", 
-    "multi_pertu", "multi_dtp", 
-    "multi_dtpa", "multi_dtpw", "polio", "multi_polio", 
-    "ipv", "ipv2", "ipv3",
-    "multi_ipv", "opv", "multi_opv", 
-    "hib", "men", "multi_men", "multi_hib-men", 
-    "strep", "multi_strep", "measl", "mumps", "rubel", "multi_mmr", "vzv", "multi_mmr-vzv"),
+    "rota", "hav", "hbv", "dipht", "tetan", 
+    "pertuwpt", "multi_dtpw", 
+    "pertuapt", "pertuafha", "pertuaprn", "multi_pertua", "multi_dtpa",
+    "ipv1", "ipv2", "ipv3", "multi_ipv",
+    "opv1", "opv2", "opv3", "multi_opv", 
+    "hib", "mena", "menc", "meny", 
+    "multi_men", "multi_hib-men", 
+    "strep01", "strep03", "strep04", "strep05", "strep06a", 
+    "strep06b", "strep07f", "strep09v", "strep14", "strep18c", 
+    "strep19a", "strep19f", "strep23f", "multi_strep", 
+    "measl", "mumps", "rubel", "multi_mmr", "vzv", "multi_mmr-vzv"),
   pat_tidy = c(
-    "Rotavirus", "Hepatitis A virus", "Hepatitis B virus", "Diphteria", "Diphteria (Acellular)", 
-    "Diphteria (Whole-cell)", "Tetanus", "Pertussis PT", "Pertussis FHA", "Pertussis PRN", 
-    "Pertussis multi", "DTP multi", 
-    "DTP (Acellular) multi", "DTP (Whole-cell) multi", "Polio", "Polio multi", 
-    "Polio 1 (inactivated)", "Polio 2 (inactivated)", "Polio 3 (inactivated)", 
-    "Polio (inactivated) multi", "Polio (oral)", "Polio (oral) multi", 
-    "H. influenzae Type B", "N. meningitidis (c)", "N. meningitidis (c and a) multi", "Men-Hib", 
-    "S. pneumoniae", "S. pneumoniae multi","Measles", "Mumps", "Rubella", "MMR multi", "Varicella",
-    "MMRV multi")) %>%
+    "Rotavirus", "Hepatitis A virus", "Hepatitis B virus", "Diphteria", "Tetanus", 
+    "Pertussis (W) PT", "DTP (W) multi",
+    "Pertussis (A) PT", "Pertussis (A) FHA", "Pertussis (A) PRN", "Pertussis (A) multi", "DTP (A) multi", 
+    "Polio (I) 1", "Polio (I) 2", "Polio (I) 3", "Polio (I) multi", 
+    "Polio (O) 1", "Polio (O) 2", "Polio (O) 3", "Polio (O) multi", 
+    "H. influenzae Type B", "N. meningitidis A", "N. meningitidis C", "N. meningitidis Y", 
+    "N. meningitidis multi", "Men-Hib", 
+    "S. pneumoniae 01", "S. pneumoniae 03", "S. pneumoniae 04", "S. pneumoniae 05", "S. pneumoniae 06a", 
+    "S. pneumoniae 06b", "S. pneumoniae 07f", "S. pneumoniae 09v", "S. pneumoniae 14", "S. pneumoniae 18c", 
+    "S. pneumoniae 19a", "S. pneumoniae 19f", "S. pneumoniae 23f", "S. pneumoniae multi",
+    "Measles", "Mumps", "Rubella", "MMR multi", "Varicella", "MMRV multi")) %>%
   mutate(pat_tidy = factor(pat_tidy, levels = pat_tidy))
 
 ####################################################################################################

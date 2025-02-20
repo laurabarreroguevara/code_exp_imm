@@ -64,6 +64,7 @@ fun_dgsk_modpat <- function(dat = stu_ppat[[pat]], method = "elisa", seroname = 
              ends_with("v1"),
              ends_with("v2"),
              ends_with("v3"), 
+             # Leaving these in case we use more information on other doses:
              ends_with("v4"), 
              ends_with("v5"), 
              imm_met_s1, imm_sero_s1, imm_cutoff_s1, 

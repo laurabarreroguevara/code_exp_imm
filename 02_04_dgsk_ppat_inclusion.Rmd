@@ -109,7 +109,7 @@ exclusions_perpat$pri <- stu_meta_pro %>%
   mutate(inclusion_criteria = case_when(pat == "hbv birth" ~ "birth", .default = "excluded"),
          pat = case_when(pat == "hbv birth" ~ "hbv", .default = pat)) 
 
-# Exclude studies based on inclusion criteria
+# Exclude studies based on previous routine vaccination criteria
 stu_perpat_included <- stu_perpat_included %>%
   left_join(exclusions_perpat$pri, by = join_by(study, pat)) %>%
   mutate(inclusion_criteria = replace_na(inclusion_criteria, "included"))

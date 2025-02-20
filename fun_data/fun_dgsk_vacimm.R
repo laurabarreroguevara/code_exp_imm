@@ -70,6 +70,8 @@ fun_dgsk_vacimm <- function(dat) {
     left_join(bind_rows(df_imm_l), by = join_by(study, pid), relationship = "many-to-many") %>%
     # Calculate days between baseline immunogenicity and first vaccination 
     mutate(time_s0_v1 = as.numeric(vac_date_v1 - imm_date_s0),
+           # Here replace NAs to 0, as the model will always include this information, is not a NA,
+           # it just means 0 days between baseline and vaccination. 
            time_s0_v1 = replace_na(time_s0_v1, 0)) %>%
     # Calculate the age at first vaccination
     mutate(age = as.numeric((age_ref + (vac_date_v1 - age_ref_date))/7),
