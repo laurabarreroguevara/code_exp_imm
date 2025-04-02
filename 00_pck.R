@@ -39,6 +39,7 @@ dirs$coef             <- paste0(dirs$seas_imm_server, "/outputs/modres_coef")
 dirs$ceffects         <- paste0(dirs$seas_imm_server, "/outputs/modres_ceffects")
 dirs$cespa            <- paste0(dirs$seas_imm_server, "/outputs/modres_cespa")
 dirs$pred             <- paste0(dirs$seas_imm_server, "/outputs/modres_pred")
+dirs$samples          <- paste0(dirs$seas_imm_server, "/outputs/modres_samples")
 
 # To local
 dirs$figures <- "figures"

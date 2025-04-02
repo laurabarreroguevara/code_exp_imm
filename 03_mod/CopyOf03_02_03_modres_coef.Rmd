@@ -1,0 +1,236 @@
+---
+title: "BRMS coefficients results"
+author: "Laura Andrea Barrrero Guevara"
+date: "2023-02-23"
+output: html_document
+---
+
+####################################################################################################
+Purpose of script: To check the coefficients of the models 
+####################################################################################################
+
+```{r}
+rm(list = ls())
+source("../00_pck.R")
+library(colorspace)
+theme_set(theme_classic() + theme(strip.background = element_blank()))
+```
+
+# Read the coefficients
+```{r}
+rhats <- readRDS(glue("{dirs$rhats}/all_rhats.rds"))
+waic_df <- readRDS(glue("{dirs$waic}/all_waic.rds")) %>%
+  filter(mod_out == "imm") %>%
+  group_by(pat) %>%
+  mutate(minwaic = min(waic) == waic)
+
+coef_df <- bind_rows(lapply(str_subset(list.files(glue("{dirs$rhats}"), full.names = TRUE), 
+                            "all|archiv|spos", negate = TRUE), readRDS)) %>%
+  left_join(rhats, by = join_by(mod)) %>%
+  left_join(select(waic_df, mod, pat, pat_tidy, mod_name, vac, minwaic), by = join_by(mod)) %>%
+  rename(estimate = Estimate, se = Est.Error, ci95_l = 'l-95% CI' , ci95_u = 'u-95% CI') %>%
+  filter(Rhat_cond) %>%
+  select(-c(Rhat, Bulk_ESS, Tail_ESS, Rhat_cond)) %>%
+  mutate(
+    imm_name = str_extract(coefficient, "(?<=immvals1anti)[^_]+"),
+    coefficient = case_when(
+      !is.na(imm_name) ~ str_remove_all(str_remove_all(coefficient, imm_name), 
+                                        "immvals1anti_|\\.\\.\\.[0-9]+$|_immvals1anti"),
+      .default = coefficient),
+    reg = case_when(str_detect(mod_name, "reg") ~ str_remove_all(mod_name, "csi_")),
+    clu = case_when(
+      str_detect(coefficient, "reg") ~ str_remove_all(
+        coefficient, "reg_[0-9]|:cospi_vac_week_v1|:sinpi_vac_week_v1")),
+    coefficient = case_when(
+      str_detect(coefficient, "cospi") ~ "cos",
+      str_detect(coefficient, "sinpi") ~ "sin",
+      str_detect(coefficient, "reg") ~ reg,
+      .default = coefficient), 
+    clu = case_when(
+      coefficient %in% c("cos", "sin") & is.na(clu) & str_detect(reg, "reg_2") ~ "1_North",
+      coefficient %in% c("cos", "sin") & is.na(clu) & str_detect(reg, "reg_3|reg_4|reg_6") ~ "1_Temperate",
+      .default = clu)) %>%
+  select(mod, imm_name, reg, clu, everything())
+```
+
+# Cosinor only 
+```{r}
+pat_sel <- c("rota", "hav", "hbv", "dipht", "tetan", "pertuapt", "pertuwpt", "ipv1", "hib", "menc", 
+             "strep04", "measl", "mumps", "rubel", "vzv")
+
+coef_df %>%
+  filter(coefficient %in% c("cos", "sin"))
+
+# Plot it 
+coef_df %>%
+  filter(pat %in% pat_sel) %>%
+  filter(coefficient %in% c("cos", "sin")) %>%
+  #filter(reg == "reg_4") %>%
+  filter(minwaic == TRUE) %>%
+  mutate(sig = !(ci95_l <= 0 & ci95_u >= 0)) %>%
+  group_by(pat, reg, clu) %>%
+  mutate(sig_tot = any(sig == TRUE)) %>%
+  ggplot(aes(y = clu, x = estimate, color = sig_tot)) + 
+  geom_point() +
+  geom_linerange(aes(xmin = ci95_l, xmax = ci95_u)) +
+  geom_vline(aes(xintercept = 0)) +
+  facet_wrap(pat*imm_name~., scales = "free", ncol = 3) +
+  scale_color_manual(values = c("grey", "forestgreen")) + 
+  theme(strip.text.y = element_text(angle = 0))
+
+# Estimate amplitude and phase
+coef_cosin_df <- coef_df %>%
+  filter(coefficient %in% c("cos", "sin")) %>%
+  select(-c(se, ci95_l, ci95_u)) %>%
+  pivot_wider(names_from = coefficient, values_from = c(estimate), names_prefix = "p_") %>%
+  mutate(
+    amp = sqrt((p_cos^2) + (p_sin^2)),
+    # Periodic phi in radians
+    periodic_phi = case_when(
+      p_cos > 0 ~ atan((-1*p_sin)/(p_cos)),
+      p_cos < 0 ~ atan((-1*p_sin)/(p_cos)) - pi),
+    # Periodic phi in weeks
+    periodic_phi_week = 52*(periodic_phi*-1)/(2*pi)) %>%
+  # Estimate phi 
+  mutate(
+    phi = case_when(
+      periodic_phi_week < 0 ~ periodic_phi_week + 52,
+      periodic_phi_week > 0 ~ periodic_phi_week,
+      periodic_phi_week == 0 ~ 0),
+    phi = case_when(phi > 0 & phi < 1 ~ 52, .default = phi)) %>%
+  select(-c(periodic_phi, periodic_phi_week))
+```
+
+# Random effects
+```{r}
+bind_rows(coefdf_l, .id = "countryre") %>%
+  filter(coefficient %in% c("center_sd(Intercept)", "center:rct_group_sd(Intercept)", 
+                            "study_sd(Intercept)", "study:center:rct_group_sd(Intercept)",
+                            "country_sd(Intercept)", "country:center:rct_group_sd(Intercept)",
+                            "study:country:center:rct_group_sd(Intercept)")) %>%
+  mutate(coefficient = case_when(
+    coefficient %in% c("study:center:rct_group_sd(Intercept)", "center:rct_group_sd(Intercept)", 
+                       "study:country:center:rct_group_sd(Intercept)", 
+                       "country:center:rct_group_sd(Intercept)") ~ 
+      "study:center:rct_group or center:rct_group",
+    coefficient %in% c("study_sd(Intercept)", "center_sd(Intercept)","country_sd(Intercept)") ~ 
+      "study or center")) %>%
+  filter(coefficient == "study:center:rct_group or center:rct_group") %>%
+  ggplot(aes(x = estimate, y = mod_name, color = countryre)) + 
+  geom_point() + 
+  facet_wrap(pat~.)
+
+coefdf_l$nocon %>%
+  filter(pat == "hav")
+
+log(mean(data_brms_rota_vl_s08$imm_val_s1))
+log(mean(data_brms_hav_v1_s08$imm_val_s1))
+```
+
+
+
+```{r}
+b1 = 0
+b2 = 0.11
+data.frame(week = seq(0, 2*pi, length.out = 52)) %>%
+  mutate(cosine = b1*cos(week) + b2*sin(week)) %>%
+  ggplot(aes(x = week, y = cosine)) +
+  geom_line()
+```
+
+
+
+
+
+# Extract coefficients for the cosinor =============================================================  
+```{r}
+# Extract coefficients for the cosinor and obtain amplitude and phase
+coef_cosine_l <- lapply(coef_l, function(x) rownames_to_column(x$fixed, var = "parameter")) %>%
+  bind_rows(.id = "mod") %>%
+  # Coefficients of the cosinor only 
+  filter(str_detect(parameter, "cos|sin")) %>%
+  mutate(param = case_when(str_detect(parameter, "cos") ~ "p_cos",
+                           str_detect(parameter, "sin") ~ "p_sin")) %>%
+  # Attach pathogen and reg 
+  left_join(select(df_converged, -Rhat), by = join_by(mod)) %>%
+  # Extract the imm_name and clu from the parameter name
+  mutate(
+    imm_name = str_extract(parameter, "(?<=immvals1anti)[^_]+"),
+    clu = str_remove_all(parameter, "reg|_2|_3|_4|_6|cospi_vac_week_v1|sinpi_vac_week_v1|:|immvals1anti|_gauss"),
+    clu = case_when(!is.na(imm_name) ~ str_remove_all(clu, imm_name), .default = clu),
+    clu = sub("^_", "", clu),
+    clu = case_when(
+      str_detect(reg, "reg_2") & clu == "" ~ "1_North",
+      str_detect(reg, "reg_3|reg_4|reg_6") & clu == "" ~ "1_Temperate",
+      !is.na(reg) & clu != "" ~ clu)) %>%
+  select(pathogen, mod, param, reg, clu, imm_name, Estimate) %>%
+  pivot_wider(names_from = param, values_from = Estimate) %>%
+  # Estimate amplitude and phase
+  mutate(
+    amp = sqrt((p_cos^2) + (p_sin^2)),
+    # Periodic phi in radians
+    periodic_phi = case_when(
+      p_cos > 0 ~ atan((-1*p_sin)/(p_cos)),
+      p_cos < 0 ~ atan((-1*p_sin)/(p_cos)) - pi),
+    # Periodic phi in weeks
+    periodic_phi_week = 52*(periodic_phi*-1)/(2*pi)) %>%
+  # Estimate phi empirically 
+  rowwise() %>%
+  mutate(phi_emp = which(p_cos*cos(2*pi*(1:52)/52) + p_sin*sin(2*pi*(1:52)/52) == 
+                           max(p_cos*cos(2*pi*(1:52)/52) + p_sin*sin(2*pi*(1:52)/52)))) %>%
+  ungroup() %>%
+  # Estimate phi 
+  mutate(
+    phi = case_when(
+      periodic_phi_week < 0 ~ periodic_phi_week + 52,
+      periodic_phi_week > 0 ~ periodic_phi_week,
+      periodic_phi_week == 0 ~ 0),
+    phi = case_when(phi > 0 & phi < 1 ~ 52, .default = phi)) %>%
+  # Create column for waic over baseline model or not
+  mutate(minwaic = !(pathogen %in% df_minwaic[str_detect(df_minwaic$mod, "base"),]$pathogen))
+
+saveRDS(coef_cosine_l, glue("{dirs$outputs}/modres_coef_cosine.rds"))
+```
+
+# Plot conditional effects 
+```{r}
+clu_name <- "reg_6"
+
+dat_plot <- ce_dat_l[str_subset(names(ce_dat_l), clu_name)] %>%
+  bind_rows(.id = "mod") %>%
+  left_join(df_converged) %>%
+  mutate(pathogen_imm = glue("{pathogen}_{imm_name}")) %>%
+  group_by(pathogen, pathogen_imm, clu) %>%
+  filter(clu_checkgaps == FALSE) %>%
+  mutate(clu = str_remove_all(clu, " ")) %>%
+  left_join(filter(coef_cosine_l, str_detect(reg, clu_name))) %>%
+  ungroup() %>%
+  mutate(phase_group = case_when(
+    phi >= 6 & phi < 20 ~ "2spring",
+    phi >= 20 & phi < 33 ~ "3summer",
+    phi >= 33 & phi < 46 ~ "4autumn",
+    phi < 6 | phi >= 46 ~ "1winter"))
+
+#for(i in unique(dat_plot$clu)) {
+pl <- dat_plot %>%
+  filter(pathogen %in% c("multi_dtpa", "hav", "hbv", "hib", "ipv", "multi_mmr", "men",
+                         "rota", "vzv")) %>%
+  filter(clu == "1_Temperate") %>%
+   ggplot(aes(x = vac_week_v1, y = log(estimate__), color = phase_group, fill = phase_group)) + 
+    geom_ribbon(aes(ymin = log(lower__), ymax = log(upper__)), alpha = 0.2, color = "white") + 
+    geom_line() + 
+    scale_y_continuous("Conditional effect\non ab titers (log)") + 
+    scale_x_continuous("Week", breaks = c(1, 18, 35, 52), limits = c(1,52)) + 
+    facet_wrap(reorder(pathogen_imm, as.numeric(factor(phase_group)))~., scales = "free", nrow = 3, dir = "v") + 
+  ggtitle("1_Temperate")
+print(pl)
+#}
+```
+
+
+
+
+
+
+
+

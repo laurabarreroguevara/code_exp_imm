@@ -14,7 +14,8 @@ fun_formulas <- function(pathogen = "rota",
                          varname2 = "", 
                          others = "", 
                          multi = NULL, 
-                         cens = TRUE) {
+                         cens = TRUE,
+                         outseropos = FALSE) {
   
   # Arguments:
   # - pathogen: (string) Identifier for the pathogen (e.g., "rota").
@@ -30,6 +31,7 @@ fun_formulas <- function(pathogen = "rota",
   # - multi:    (logical or identifier) If provided, indicates a multivariate model and adjusts the 
   #             response variable accordingly.
   # - cens:     (logical) Specifies whether the model should include censoring.
+  # - outseropos: (logical) Specifies wheter the model should use seropositivitiy as outcome. 
   
   # Output:
   # - form_mod: A named list containing the constructed BRMS model formula.
@@ -84,18 +86,29 @@ fun_formulas <- function(pathogen = "rota",
   # The response variable is modified based on:
   # - Whether the model is multivariate (indicated by 'multi').
   # - Whether censoring is considered (indicated by 'cens').
-  if (!is.null(multi)) {
-    response_mod <- if(cens) { glue("imm_val_s1_{multi} | cens(censored_{multi})")
-    } else { glue("imm_val_s1_{multi}") }
+  if (outseropos) {
+    out_prefix <- "spos_"
+    if (!is.null(multi)) {
+      response_mod <- glue("imm_spos_s1_{multi}")
+    } else {
+      response_mod <- "imm_spos_s1"
+    }
   } else {
-    response_mod <- if(cens) { "imm_val_s1 | cens(censored)"
-    } else { glue("imm_val_s1") }
+    out_prefix <- ""
+    if (!is.null(multi)) {
+      response_mod <- if(cens) { glue("imm_val_s1_{multi} | cens(censored_{multi})")
+      } else { glue("imm_val_s1_{multi}") }
+    } else {
+      response_mod <- if(cens) { "imm_val_s1 | cens(censored)"
+      } else { glue("imm_val_s1") }
+    }
   }
-  
   # 5. Build the Model Formula ---------------------------------------------------------------------
   # Use the reformulate function to combine the response and predictor variables.
   # The intercept is included by default.
   form_mod <- list(reformulate(termlabels = covars_mod, response = response_mod, intercept = TRUE))
+  
+  if (outseropos) form_mod[[1]] <- bf(form_mod[[1]]) + bernoulli(link = "logit")
   
   # 6. Create a Descriptive Model Name -------------------------------------------------------------
   # The model name is constructed from:
@@ -108,7 +121,7 @@ fun_formulas <- function(pathogen = "rota",
                             model_nm %in% c("cci", "csni", "csi") ~ glue("_{varname}"),
                             .default = "")
   
-  names(form_mod) <- glue("bm{doses_nm}_{data}_{pathogen}_{model_nm}{model_suffix}")
+  names(form_mod) <- glue("bm{doses_nm}_{data}_{out_prefix}{pathogen}_{model_nm}{model_suffix}")
   
   # Return the named list containing the model formula.
   return(form_mod)
@@ -128,7 +141,8 @@ fun_formulas_multipathogen <- function(pathogen = "multi_men",
                                        varname2 = "",
                                        others = "", 
                                        multi_pat = "",
-                                       cens = FALSE) {
+                                       cens = FALSE,
+                                       outseropos = FALSE) {
   # Arguments:
   # See fun_formulas
   
@@ -140,7 +154,8 @@ fun_formulas_multipathogen <- function(pathogen = "multi_men",
   # The pathogen name is augmented with the current response using glue().
   bf_formula <- flatten(lapply(multi_pat, function(x) {
     fun_formulas(pathogen = glue("{pathogen}_{x}"), data = data, doses = doses, model_nm = model_nm, 
-                 varname = varname, varname2 = varname2, others = others, multi = x, cens = cens)
+                 varname = varname, varname2 = varname2, others = others, multi = x, cens = cens,
+                 outseropos = outseropos)
   }))
   
   # 2. Combine the Individual Formulas and Set the Family Distribution -----------------------------

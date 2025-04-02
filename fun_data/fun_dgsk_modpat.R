@@ -50,7 +50,9 @@ fun_dgsk_modpat <- function(dat = stu_ppat[[pat]], method = "elisa", seroname = 
       vac_conc = c(scale(vac_conc)),
       pi_vac_week_v1 = vac_week_v1 * (2*pi/52),
       across(starts_with("vac_name_v"), ~ replace_na(.x, "No_dose")),
-      across(starts_with("vac_name_conco"), ~ replace_na(.x, "No_conco"))) %>%
+      across(starts_with("vac_name_conco"), ~ replace_na(.x, "No_conco")),
+      imm_spos_s1 = case_when(censored == 1 ~ 0, .default = 1) 
+      ) %>%
     select(-c(pat, age_unit, time_s0_v1, imm_val_cutoff_s0, imm_val_s0_all)) %>%
     mutate(
       across(c(all_of(c(
@@ -68,32 +70,34 @@ fun_dgsk_modpat <- function(dat = stu_ppat[[pat]], method = "elisa", seroname = 
              ends_with("v4"), 
              ends_with("v5"), 
              imm_met_s1, imm_sero_s1, imm_cutoff_s1, 
-             imm_date_s1, time_vl_s1, imm_val_s1, censored,
+             imm_date_s1, time_vl_s1, imm_val_s1, censored, imm_spos_s1,
              lon_med, lat_med, starts_with("kgc"), starts_with("reg"))                   # Im1 data  
   
   # Handle multi-unipathogen case (multiple serology markers for a single pathogen)
   if(length(seroname) > 1 & length(method) == 1 & multi_pat == FALSE) {
     dat <- dat %>%
-      pivot_wider(names_from = imm_sero_s1, values_from = c(censored, imm_val_s1, imm_cutoff_s1)) %>%
+      pivot_wider(names_from = imm_sero_s1, values_from = c(censored, imm_spos_s1, imm_val_s1, imm_cutoff_s1)) %>%
       filter(if_all(starts_with("imm_val_s1"), ~ !is.na(.x))) %>%
       relocate(study, country, center, rct_group, eligibility, pid, sex, age, age_ref, age_ref_date, 
                birth_date, birth_week, doses, vac_conc, vac_conc_n, vac_conc_unit, ends_with("v1"),
                ends_with("v2"), ends_with("v3"),  ends_with("v4"), ends_with("v5"), imm_met_s1, 
                starts_with("imm_cutoff_s1"), imm_date_s1, time_vl_s1, starts_with("imm_val_s1"), 
-               starts_with("censored"), lon_med, lat_med, starts_with("kgc"), starts_with("reg"))
+               starts_with("censored"), starts_with("imm_spos_s1"), lon_med, lat_med, 
+               starts_with("kgc"), starts_with("reg"))
   }
   
   # Handle multi-multipathogen case (multiple serology markers for multiple pathogens)
   if(length(seroname) > 1 & multi_pat == TRUE) {
     dat <- dat %>%
       select(-c(starts_with("vac_name_conco"), vac_conc, vac_conc_n)) %>%
-      pivot_wider(names_from = imm_sero_s1, values_from = c(censored, imm_val_s1, imm_met_s1, imm_cutoff_s1)) %>%
+      pivot_wider(names_from = imm_sero_s1, values_from = c(censored, imm_spos_s1, imm_val_s1, imm_met_s1, imm_cutoff_s1)) %>%
       filter(if_all(starts_with("imm_val_s1"), ~ !is.na(.x))) %>%
       relocate(study, country, center, rct_group, eligibility, pid, sex, age, age_ref, age_ref_date, 
                birth_date, birth_week, doses, vac_conc_unit, ends_with("v1"),
                ends_with("v2"), ends_with("v3"),  ends_with("v4"), ends_with("v5"), 
                starts_with("imm_cutoff_s1"), imm_date_s1, time_vl_s1, starts_with("imm_val_s1"), 
-               starts_with("censored"), lon_med, lat_med, starts_with("kgc"), starts_with("reg"))
+               starts_with("censored"), starts_with("imm_spos_s1"), lon_med, lat_med, 
+               starts_with("kgc"), starts_with("reg"))
   }
   
   return(dat)

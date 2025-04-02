@@ -25,14 +25,20 @@ source("../00_pck.R")
 source("fun_write_slurmsh.R")
 
 # Define the list of pathogens for which the scripts will be created
-pat_l <- c("rota", "hav", "hbv", "dipht", "tetan", "pertuwpt", "multi_dtpw", "pertuapt",
-           "multi_pertua", "multi_dtpa", "ipv1", "multi_ipv", "opv1", "multi_opv", "hib", "menc",
-           "multi_men", "multi_hib-men", "strep04", "multi_strep", "measl", "mumps", "rubel", 
-           "multi_mmr", "vzv", "multi_mmr-vzv")
+# pat_l <- c("rota", "hav", "hbv", "dipht", "tetan", "pertuwpt", "multi_dtpw", "pertuapt",
+#            "multi_pertua", "multi_dtpa", "ipv1", "multi_ipv", "opv1", "multi_opv", "hib", "menc",
+#            "multi_men", "multi_hib-men", "strep04", "multi_strep", "measl", "mumps", "rubel", 
+#            "multi_mmr", "vzv", "multi_mmr-vzv")
 
-# pat_l <- c("pertuafha", "pertuaprn", "ipv2", "ipv3", "opv2", "opv3", "mena", "meny", "strep01",
-#            "strep03", "strep05", "strep06a", "strep06b", "strep07f", "strep09v", "strep14",
-#            "strep18c", "strep19a", "strep19f", "strep23f")
+# pat_l <- c("pertuafha", "pertuaprn", "ipv2", "ipv3", "opv2", "opv3", "mena", "meny", 
+#            "strep01", "strep03", "strep05", "strep06a", "strep06b", "strep07f", 
+#            "strep09v", "strep14", "strep18c", "strep19a", "strep19f", "strep23f")
+# 
+# pat_l <- c("multi_dtpw", "multi_pertua", "multi_dtpa", "multi_opv", "multi_hib-men", "multi_strep")
+
+# pat_l <- c("pertuwpt", "pertuapt", "pertuafha", "pertuaprn", "hbv",
+#            "strep01", "strep03", "strep05", "strep06a", "strep06b", "strep07f",
+#            "strep09v", "strep14", "strep18c", "strep19a", "strep19f", "strep23f")
 
 # pat_l <- c("rota", "hav", "hbv", "dipht", "tetan", "pertuwpt", "multi_dtpw", "pertuapt", 
 #            "pertuafha", "pertuaprn", "multi_pertua", "multi_dtpa", "ipv1", "ipv2", "ipv3", 
@@ -40,13 +46,24 @@ pat_l <- c("rota", "hav", "hbv", "dipht", "tetan", "pertuwpt", "multi_dtpw", "pe
 #            "multi_men", "multi_hib-men", "strep01", "strep03", "strep04", "strep05", "strep06a", 
 #            "strep06b", "strep07f", "strep09v", "strep14", "strep18c", "strep19a", "strep19f", 
 #            "strep23f", "multi_strep", "measl", "mumps", "rubel", "multi_mmr", "vzv", "multi_mmr-vzv")
+
+# pat_l <- c("multi_dtpw", "multi_dtpa", "multi_hib-men","multi_pertua", "multi_strep",  "multi_opv")
+# 
+# pat_l <- c("rota", "hav", "hbv", "dipht", "tetan", "pertuwpt", "pertuapt", "ipv1", "opv1", "hib",
+#            "menc", "strep04", "measl", "mumps", "rubel", "vzv")
+
+pat_l <- c("mumps", "vzv", "dipht", "mena", "menc", "meny", 
+           "strep01", "strep03", "strep04", "strep05", "strep06a", "strep06b", "strep07f", 
+           "strep09v", "strep14", "strep18c", "strep19a", "strep19f", "strep23f")
 ```
 
 # Loop over each pathogen in the defined list
 ```{r}
+sens <- "semeth"
 for (pathogen in pat_l) {
   ## Read the list of formulas specific to the current pathogen
   l_formula <- readRDS(glue("{dirs$modfit}/formula_brms_{pathogen}_l.rds"))
+
   ## Identify model scripts that have already been executed
   ## List the files in the "runned" directory 
   already_runned <- str_remove(str_remove(list.files(glue("{dirs$outputs}/slurm_sh/runned")), ".sh"), 
@@ -65,12 +82,17 @@ for (pathogen in pat_l) {
                      TRUE ~ "")
     # Set the number of iterations for the SLURM job:
     # For 'multi_strep', use 5000 iterations; for all others, default to 10000 iterations.
-    args_iter <- case_when(pathogen == "multi_strep" ~ 5000, .default = 10000)
+    args_iter <- case_when(pathogen == "multi_strep" ~ 5000, 
+                           pathogen == "multi_pertua" ~ 7000, 
+                           .default = 10000)
+    dat_name <- case_when(
+      sens == "seonlytemp" ~ glue("dataseonlytemp_brms_{pathogen}_{vac}_s08{dfk}.rds"), 
+      sens == "semeth" ~ glue("datasemeth_brms_{pathogen}_{vac}_s08{dfk}.rds"),
+      .default = glue("data_brms_{pathogen}_{vac}_s08{dfk}.rds"))
     
     # Generate the SLURM shell script file 
-    fun_write_slurmsh(args_fo = args_fo, args_iter = args_iter,
-                       dat_name = glue("data_brms_{pathogen}_{vac}_s08{dfk}.rds"), 
-                       pathogen = pathogen, time = "24:00:00")
+    fun_write_slurmsh(args_fo = args_fo, args_iter = args_iter, dat_name = dat_name, 
+                      pathogen = pathogen, time = "24:00:00")
   })
 }  
 ```

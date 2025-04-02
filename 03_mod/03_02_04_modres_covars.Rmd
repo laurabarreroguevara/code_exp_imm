@@ -5,245 +5,171 @@ date: "2023-02-23"
 output: html_document
 ---
 
-################################################################################
+####################################################################################################
 Purpose of script: To check the model results and plot it 
-################################################################################
+####################################################################################################
 
 ```{r}
 rm(list = ls())
 source("../00_pck.R")
+source("fun_checkgaps.R")
+source("fun_condeffects.R")
 library(colorspace)
+library(viridis)
 theme_set(theme_classic() + theme(strip.background = element_blank()))
-#dirs <- lapply(dirs, function(x) paste0("/Volumes/public-dom/barrero-guevara/_seas_imm_server/", x))
 ```
 
 # Raw data 
 ```{r}
-# Read in the data 
-dat_l <- lapply(str_subset(list.files(glue("{dirs$modfit}"), full.names = TRUE), "s08.rds"), readRDS)
-names(dat_l) <- sub(".*brms_(.*?)_(vl|v1)_s08.*", "\\1", 
-                    str_subset(list.files(glue("{dirs$modfit}")), "s08.rds"))
-
-# Read in the waic 
-waic_df <- readRDS(glue("{dirs$waic}/all_waic.rds"))
-# Read in the convergence
-rhats <- readRDS(glue("{dirs$rhats}/all_rhats.rds")) %>%
-  left_join(select(waic_df, mod, pat), by = join_by(mod))
-# Select min waic
-minwaic_df <- group_by(waic_df, pat) %>%
-  filter(waic == min(waic))
+# Read in the waic (only models that converged)
+waic_df <- readRDS(glue("{dirs$outputs}/all_waic.rds"))
+# Read in min waic
+waic_minbest <- readRDS(glue("{dirs$outputs}/all_waic_minbest.rds"))
 ```
 
-# Function to check gaps 
+# Define main analyses 
 ```{r}
-fun_checkgaps <- function(x) {
-  # Sort the vector
-  sorted_x <- sort(x)
-  # Compute the differences between consecutive elements
-  gaps <- diff(sorted_x)
-  # Check the gap between the last element and the first element, considering the circularity (52 back to 1)
-  circular_gap <- (52 - max(sorted_x)) + (min(sorted_x) - 1)
-  # Check if any gap is larger than 25, including the circular gap
-  any(gaps > 25) || circular_gap > 25
-}
-
-# Read in the conditional effects
-# ceffects_l <- lapply(str_subset(list.files(glue("{dirs$ceffects}"), full.names = TRUE),
-#                                 "archiv", negate = TRUE), readRDS)
-# names(ceffects_l) <- sub(".*brms_(.*?)_(vl|v1)_s08.*", "\\1", 
-#                          str_subset(list.files(glue("{dirs$ceffects}")), "archiv", negate = TRUE))
+pat_sel <- c("rota", "hav", "hbv", "dipht", "tetan", "pertuwpt", "ipv1", 
+             "hib", "menc", "strep04", "measl", "mumps", "rubel", "vzv")
 ```
 
-# Function to read conditional effects 
-```{r}
-fun_condeffects <- function(ce_effects = ceffects_l[[1]], clu_name = NA, multi = FALSE, pat = "rota") {
-  
-  # Take out gauss if necessary
-  clu_name <- str_remove(clu_name, "_gauss")
-  
-  # Prepare data 
-  dat <- mutate(dat_l[[pat]], pi_vac_week_v1 = round(pi_vac_week_v1, digits = 11)) %>%
-    distinct(vac_week_v1, pi_vac_week_v1)
-  pref_clu_name <- if(!is.na(clu_name)) paste0(":", clu_name) else ""
-  # Create group vector 
-  var_vector <- c()
-  
-  # Prepare clusters if necessary
-  if(!is.na(clu_name)) {
-    # Create cluster variable 
-    ce_effects <- ce_effects %>%
-      rename(clu = all_of(clu_name)) %>%
-      mutate(clu = as.character(clu))
-    # Create df of total values per week
-    dat_tot <- dat_l[[pat]] %>%
-      rename(clu = all_of(clu_name)) %>%
-      mutate(clu = as.character(clu)) %>%
-      mutate(pi_vac_week_v1 = round(pi_vac_week_v1, digits = 11)) %>%
-      group_by(pi_vac_week_v1, vac_week_v1, clu) %>%
-      summarise(tot = n(), .groups = "drop") %>%
-      group_by(clu) %>%
-      mutate(clu_checkgaps = fun_checkgaps(vac_week_v1)) %>%
-      ungroup()
-    
-    # Attach cluster to group vector 
-    var_vector <- c(var_vector, "clu")
-  } else {
-    # Create df of total values per week
-    dat_tot <- dat_l[[pat]] %>%
-      mutate(pi_vac_week_v1 = round(pi_vac_week_v1, digits = 11)) %>%
-      group_by(pi_vac_week_v1, vac_week_v1) %>%
-      summarise(tot = n(), .groups = "drop")
-  }
-  
-  if(multi) var_vector <- c(var_vector, "imm_name")
-  
-  # Obtain estimates 
-  ce_effects <- ce_effects %>%
-    mutate(pi_vac_week_v1 = round(pi_vac_week_v1, digits = 11)) %>%
-    select(pi_vac_week_v1, estimate__, lower__, upper__, all_of(var_vector)) %>%
-    left_join(dat, by = join_by(pi_vac_week_v1)) %>%
-    left_join(dat_tot) %>%
-    mutate(estimate_tot = case_when(is.na(tot) ~ NA, .default = estimate__),
-           lower_tot = case_when(is.na(tot) ~ NA, .default = lower__),
-           upper_tot = case_when(is.na(tot) ~ NA, .default = upper__))
-  
-  return(ce_effects)
-}
-```
-
-# Read conditional effects ======================================================
+# Read conditional effects =========================================================================
 ```{r}
 # Select only models base, cs or csi that converged 
-df_converged <- filter(rhats, Rhat_cond == TRUE, str_detect(mod, "_cs\\.|_csi_|base")) %>%
-  mutate(reg = case_when(str_detect(mod, "reg") ~ sub(".*(reg.*)\\.rds.*", "\\1", mod),
-                         str_detect(mod, "base") ~ sub(".*(base.*)\\.rds.*", "\\1", mod))) %>%
-  filter(!(reg %in% c("base","base_gauss")) | is.na(reg)) %>%
-  mutate(multi = grepl("multi", mod))
-  
-# Read in the conditional effects
-ce_effectsraw_l <- sapply(df_converged$mod, function(x) {
-  readRDS(glue("{dirs$ceffects}/ce_{x}"))
-}, simplify = FALSE)
+df_converged <- filter(waic_df, dat == "s08", mod_out == "imm", str_detect(mod_name, "cs")) %>%
+  # The function needs arguments reg (NA for cs and "reg_x" for csi) and multi (multi pat)
+  mutate(reg = case_when(str_detect(mod_name, "csi") ~ str_remove_all(mod_name, "csi_")), 
+         multi = str_detect(pat, "multi")) %>%
+  filter(!(mod %in% c("bmv1_s08_multi_mmr_cs_gauss.rds", "bmv1_s08_multi_mmr-vzv_cs_gauss.rds",
+                      "bmvl_s08_multi_dtpa_cs_gauss.rds", "bmvl_s08_multi_dtpw_cs_gauss.rds",
+                      "bmvl_s08_multi_hib-men_cs_gauss.rds", "bmvl_s08_multi_ipv_cs_gauss.rds",
+                      "bmvl_s08_multi_men_cs_gauss.rds", "bmvl_s08_multi_opv_cs_gauss.rds",
+                      "bmvl_s08_multi_pertua_cs_gauss.rds")))
 
-# Add data 
-ce_effects_l <- lapply(seq_len(length(ce_effectsraw_l)), function(x) {
-  df_converged_row <- filter(df_converged, mod == names(ce_effectsraw_l)[[x]])
-  fun_condeffects(
-    ce_effects = ce_effectsraw_l[[x]],
-    clu_name = df_converged_row$reg,
-    multi = df_converged_row$multi,
-    pat = df_converged_row$pat
-  )
+# Read in conditional effects with data 
+ce_effects_l <- pomp::bake(file = glue("{dirs$outputs}/all_ceffects.rds"), dir = "", {
+  sapply(df_converged$mod, function(x) {
+  fun_condeffects(mod = x,
+                  clu_name = filter(df_converged, mod == x)$reg[[1]],
+                  multi = filter(df_converged, mod == x)$multi[[1]],
+                  pat = filter(df_converged, mod == x)$pat[[1]],
+                  vac = filter(df_converged, mod == x)$vac[[1]])
+  }, simplify = FALSE)
 })
-names(ce_effects_l) <- names(ce_effectsraw_l)
 ```
 
-# Plot one
+# Explorative plot: Conditional effects
 ```{r}
-mod <- "bmvl_s08_rota_csi_reg_6.rds"
+plceffects_l <- sapply(str_subset(str_subset(waic_minbest$mod, "csi"), "opv", negate = TRUE), function(mod) {
+  ce_effects_l[[mod]] %>%
+    filter(clu_checkgaps == FALSE) %>%
+    ggplot(aes(x = vac_week_v1, y = log(estimate__))) + 
+      geom_ribbon(aes(ymin = log(lower__), ymax = log(upper__)), alpha = 0.2, color = "white") + 
+      geom_line() + 
+      geom_point(data = filter(ce_effects_l[[mod]], !is.na(tot), clu_checkgaps == FALSE),
+                 aes(y = -Inf), alpha = 0.4, shape = "|", size = 6) +
+      scale_y_continuous("Conditional effect\non ab titers (log)") + 
+      scale_x_continuous("Week", breaks = c(1, 18, 35, 52), limits = c(1,52)) + 
+      facet_wrap(.~clu, scales = "free", nrow = 1) + 
+      ggtitle(mod)
+}, simplify = FALSE)
 
-# Plot conditional effects 
-ce_effects_l[[mod]] %>%
-  ggplot(aes(x = vac_week_v1, y = log(estimate__))) + 
-    geom_ribbon(aes(ymin = log(lower__), ymax = log(upper__)), 
-                alpha = 0.2, color = "white") + 
-    geom_line() + 
-    geom_point(data = filter(ce_effects_l[[mod]], !is.na(tot)),
-               aes(y = -Inf), alpha = 0.4, shape = "|", size = 6) +
-    scale_y_continuous("Conditional effect\non ab titers (log)") + 
-    scale_x_continuous("Week", breaks = c(1, 18, 35, 52), limits = c(1,52)) + 
-    facet_wrap(.~clu, scales = "free", nrow = 1)
+# Plot for only main pathogens
+pat_sel <- c("rota", "hav", "hbv", "dipht", "tetan", "pertuwpt", "ipv1", 
+             "hib", "menc", "strep04", "measl", "mumps", "rubel", "vzv")
+
+plceffects_l[str_subset(str_subset(names(plceffects_l), paste(pat_sel, collapse = "|")), "multi",
+                        negate = TRUE)]
 ```
 
 # Extract coefficients for the cosinor =============================================================  
 ```{r}
-coef_l <- sapply(df_converged$mod, function(x) {
-  readRDS(glue("{dirs$coef}/coef_{x}"))
-}, simplify = FALSE)
-
-# Extract coefficients for the cosinor and obtain amplitude and phase
-coef_cosine_l <- lapply(coef_l, function(x) rownames_to_column(x$fixed, var = "parameter")) %>%
-  bind_rows(.id = "mod") %>%
-  # Coefficients of the cosinor only 
-  filter(str_detect(parameter, "cos|sin")) %>%
-  mutate(param = case_when(str_detect(parameter, "cos") ~ "p_cos",
-                           str_detect(parameter, "sin") ~ "p_sin")) %>%
-  # Attach pathogen and reg 
-  left_join(select(df_converged, -Rhat_cond), by = join_by(mod)) %>%
-  # Extract the imm_name and clu from the parameter name
-  mutate(
-    imm_name = str_extract(parameter, "(?<=immvals1anti)[^_]+"),
-    clu = str_remove_all(parameter, "reg|_2|_3|_4|_6|cospi_vac_week_v1|sinpi_vac_week_v1|:|immvals1anti|_gauss"),
-    clu = case_when(!is.na(imm_name) ~ str_remove_all(clu, imm_name), .default = clu),
-    clu = sub("^_", "", clu),
-    clu = case_when(
-      str_detect(reg, "reg_2") & clu == "" ~ "1_North",
-      str_detect(reg, "reg_3|reg_4|reg_6") & clu == "" ~ "1_Temperate",
-      !is.na(reg) & clu != "" ~ clu)) %>%
-  select(pat, mod, param, reg, clu, imm_name, Estimate) %>%
-  pivot_wider(names_from = param, values_from = Estimate) %>%
-  # Estimate amplitude and phase
-  mutate(
-    amp = sqrt((p_cos^2) + (p_sin^2)),
-    # Periodic phi in radians
-    periodic_phi = case_when(
-      p_cos > 0 ~ atan((-1*p_sin)/(p_cos)),
-      p_cos < 0 ~ atan((-1*p_sin)/(p_cos)) - pi),
-    # Periodic phi in weeks
-    periodic_phi_week = 52*(periodic_phi*-1)/(2*pi)) %>%
-  # Estimate phi empirically 
-  rowwise() %>%
-  mutate(phi_emp = which(p_cos*cos(2*pi*(1:52)/52) + p_sin*sin(2*pi*(1:52)/52) == 
-                           max(p_cos*cos(2*pi*(1:52)/52) + p_sin*sin(2*pi*(1:52)/52)))) %>%
-  ungroup() %>%
-  # Estimate phi 
-  mutate(
-    phi = case_when(
-      periodic_phi_week < 0 ~ periodic_phi_week + 52,
-      periodic_phi_week > 0 ~ periodic_phi_week,
-      periodic_phi_week == 0 ~ 0),
-    phi = case_when(phi > 0 & phi < 1 ~ 52, .default = phi)) %>%
-  # Create column for waic over baseline model or not
-  mutate(minwaic = !(pat %in% minwaic_df[str_detect(minwaic_df$mod, "base"),]$pat))
-
-saveRDS(coef_cosine_l, glue("{dirs$outputs}/modres_coef_cosine.rds"))
+all_coefcosine <- pomp::bake(file = glue("{dirs$outputs}/all_coefcosine.rds"), dir = "", {
+  # Read in the coeficients 
+  sapply(df_converged$mod, function(x) {
+    readRDS(glue("{dirs$coef}/coef_{x}"))$fixed %>%
+      rownames_to_column(var = "parameter")
+  }, simplify = FALSE) %>%
+    bind_rows(.id = "mod") %>%
+    # Coefficients of the cosinor only 
+    filter(str_detect(parameter, "cos|sin")) %>%
+    # From mod to variables (pat, mod_out, mod_name, dat, vac, gauss, pat_tidy, reg, multi)
+    left_join(df_converged, by = join_by(mod)) %>%
+    # From param to variables (param, imm_name, clu) -------------------------------------------------
+    mutate(
+      parameter = str_remove_all(parameter, "pi_vac_week_v1|:"),
+      regtemp = replace_na(reg, "regtemp"),
+      parameter = str_remove_all(parameter, regtemp),
+      param = str_extract(parameter, "cos|sin"),
+      parameter = str_remove_all(parameter, param),
+      param = paste0("p_", param),
+      imm_name = str_extract(parameter, "(?<=immvals1anti)[^_]+"),
+      parameter = str_remove_all(parameter, paste0("immvals1anti", imm_name, "_")),
+      clu = case_when(str_detect(reg, "reg_2") & parameter == "" ~ "1_North",
+                      str_detect(reg, "reg_3|reg_4|reg_6") & parameter == "" ~ "1_Temperate",
+                      !is.na(reg) & parameter != "" ~ parameter)) %>%
+    select(pat, mod, param, mod_name, reg, clu, imm_name, Estimate, mod_out, dat, vac, gauss, 
+           pat_tidy, multi) %>%
+    # Estimate amplitude and phase -------------------------------------------------------------------
+    pivot_wider(names_from = param, values_from = Estimate) %>%
+    # Estimate amplitude
+    mutate(amp = sqrt((p_cos^2) + (p_sin^2))) %>%
+    # Estimate phi 
+    mutate(
+      # Periodic phi in radians
+      perphi_rad = case_when(
+        p_cos > 0 ~ atan((-1*p_sin)/(p_cos)),
+        p_cos < 0 ~ atan((-1*p_sin)/(p_cos)) - pi),
+      # Periodic phi in weeks
+      perphi_week = 52*(perphi_rad*-1)/(2*pi),
+      # Phi within 1:52 weeks
+      phi = case_when(
+        perphi_week < 0 ~ perphi_week + 52,
+        perphi_week > 0 ~ perphi_week,
+        perphi_week == 0 ~ 0),
+      phi = case_when(phi > 0 & phi < 1 ~ 52, .default = phi)) %>%
+    # Estimate phi empirically 
+    rowwise() %>%
+    mutate(phi_emp = which(p_cos*cos(2*pi*(1:52)/52) + p_sin*sin(2*pi*(1:52)/52) == 
+                             max(p_cos*cos(2*pi*(1:52)/52) + p_sin*sin(2*pi*(1:52)/52)))) %>%
+    ungroup()
+  })
 ```
 
-
-# Plot conditional effects 
+# Explorative plot: Conditional effects with phase
 ```{r}
 clu_name <- "reg_6"
 
+# Bring ce_effects_l and all_coefcosine together
 dat_plot <- ce_effects_l[str_subset(names(ce_effects_l), clu_name)] %>%
   bind_rows(.id = "mod") %>%
-  left_join(df_converged) %>%
-  mutate(pat_imm = glue("{pat}_{imm_name}")) %>%
-  group_by(pat, pat_imm, clu) %>%
   filter(clu_checkgaps == FALSE) %>%
   mutate(clu = str_remove_all(clu, " ")) %>%
-  left_join(filter(coef_cosine_l, str_detect(reg, clu_name))) %>%
-  ungroup() %>%
-  mutate(phase_group = case_when(
-    phi >= 6 & phi < 20 ~ "2spring",
-    phi >= 20 & phi < 33 ~ "3summer",
-    phi >= 33 & phi < 46 ~ "4autumn",
-    phi < 6 | phi >= 46 ~ "1winter"))
+  left_join(filter(all_coefcosine, str_detect(reg, clu_name)), by = join_by(mod, clu, imm_name)) %>%
+  mutate(pat_imm = glue("{pat}_{imm_name}")) %>%
+  ungroup()
 
-#for(i in unique(dat_plot$clu)) {
-pl <- dat_plot %>%
-  filter(pat %in% c("multi_dtpa", "hav", "hbv", "hib", "ipv", "multi_mmr", "men",
-                         "rota", "vzv")) %>%
-  filter(clu == "1_Temperate") %>%
-   ggplot(aes(x = vac_week_v1, y = log(estimate__), color = phase_group, fill = phase_group)) + 
-    geom_ribbon(aes(ymin = log(lower__), ymax = log(upper__)), alpha = 0.2, color = "white") + 
-    geom_line() + 
-    scale_y_continuous("Conditional effect\non ab titers (log)") + 
-    scale_x_continuous("Week", breaks = c(1, 18, 35, 52), limits = c(1,52)) + 
-    facet_wrap(reorder(pat_imm, as.numeric(factor(phase_group)))~., scales = "free", nrow = 3, dir = "v") + 
-  ggtitle("1_Temperate")
-print(pl)
-#}
+pl <- list()
+for(i in sort(unique(filter(dat_plot, pat %in% pat_sel)$clu))) {
+  pl[[i]] <- dat_plot %>%
+    filter(pat %in% pat_sel, clu == i) %>%
+     ggplot(aes(x = vac_week_v1, y = log(estimate__), color = phi, fill = phi)) + 
+      geom_ribbon(aes(ymin = log(lower__), ymax = log(upper__)), alpha = 0.2, color = "white") + 
+      geom_line() + 
+      geom_point(data = filter(dat_plot, !is.na(tot), clu == i, pat %in% pat_sel),
+                     aes(y = -Inf), alpha = 0.4, shape = "|", size = 2) +
+      scale_y_continuous("Conditional effect\non ab titers (log)") + 
+      scale_x_continuous("Week", breaks = c(1, 18, 35, 52), limits = c(1,52)) + 
+      scale_color_gradientn("Peak timing", colors = c(viridis(6, begin = 0, option = "D"),
+                                                 rev(viridis(7, begin = 0, option = "D"))),
+                            aesthetics = c("color", "fill")) +
+      facet_wrap(reorder(pat_tidy, as.numeric(factor(phi)))~., scales = "free", dir = "v") + 
+    ggtitle(i)
+}
 ```
+
+
+
 
 # Extract spaghetti conditional effects ============================================================
 ```{r}
@@ -918,170 +844,3 @@ mod_f <-"tes"
 
 
 
-
-
-
-
-
-```{r}
-# # Select only models cs or csi that converged 
-# df_converged_sel <- filter(rhats, Rhat_cond == TRUE, str_detect(mod, "_cs\\.|_csi_")) %>%
-#   mutate(reg = case_when(str_detect(mod, "reg") ~ sub(".*(reg.*)\\.rds.*", "\\1", mod))) %>%
-#   filter(str_detect(mod, clu_name))
-# 
-# # Obtain the conditional effects with spaguetti 
-# spa_dat_l <- sapply(1:length(df_converged_sel[[1]]), function(x) {
-#   pat <- df_converged_sel[x, 'pathogen']
-#   name_reg <- if(is.na(df_converged_sel[x, "reg"])) "cs" else paste0("csi_", df_converged_sel[x, "reg"])
-#   pomp::bake(file = glue(
-#     "{dirs$outputs}/modres_condeffects/ce_dat_spa_{pat}_{name_reg}.rds"), {
-#     # Read model
-#     pref_clu_name <- if(!is.na(clu_name)) paste0(":", clu_name) else ""
-#     mod <- readRDS(glue("{dirs$outputs}/perpathogen/{pat}/bm{vac_l[[pat]]}_s08_{pat}_{name_reg}.rds"))
-#     # Obtain spaghetti conditional effects
-#     ce_dat_spa <- conditional_effects(mod, resolution = 52, effects = glue("pi_vac_week_v1{pref_clu_name}"), 
-#                                       spaghetti = TRUE, ndraws = 100, re_formula = NULL)
-#     spa_dat <- sapply(ce_dat_spa, function(subx) {
-#         attr(subx, "spaghetti") %>%
-#           group_by(all_of(clu_name), sample__) %>%
-#           mutate(estimate_norm = (estimate__/mean(estimate__, na.rm = TRUE)))
-#       }, simplify = FALSE) %>%
-#       bind_rows(.id = "imm_name")
-#     
-#     return(spa_dat)
-#   }) 
-# }, simplify = FALSE)
-# names(spa_dat_l) <- df_converged_sel$mod
-# 
-# 
-# test <- brms::conditional_effects(bmvl_s08_multi_dtpa_csi_reg_4_gauss, resolution = 52, effects = glue("pi_vac_week_v1:reg_4"), 
-#                             spaghetti = TRUE, ndraws = 10, re_formula = NULL)
-# 
-# test$`immvals1antipertupt.immvals1antipertupt_pi_vac_week_v1:reg_4`
-# 
-# spa_dat <- sapply(test, function(subx) {
-#         attr(subx, "spaghetti") %>%
-#           group_by(all_of(clu_name), sample__) %>%
-#           mutate(estimate_norm = (estimate__/mean(estimate__, na.rm = TRUE)))
-#       }, simplify = FALSE) %>%
-#       bind_rows(.id = "imm_name")
-# 
-# test$`immvals1antipertupt.immvals1antipertupt_pi_vac_week_v1:reg_4`$
-```
-
-# Tidy names for plots 
-```{r}
-# # pat_tidy_names <- c("Rotavirus", "Varicella zoster virus", "Measles virus", "Mumps virus", 
-# #               "Rubella virus", "C. diphtheriae", "C. tetani", "B. pertussis", 
-# #               "S. pneumoniae", "H. influenzae Type B", 
-# #               "N. meningitidis \n (serotypes c and a)", "Hepatitis B virus",
-# #               "Polio virus \n (serotypes 1, 2 and 3)")
-# # names(pat_tidy_names) <- c("rota", "vzv", "measles", "mumps", "rubella", "dipht", "tetan", 
-# #                      "pertupt", "pn", "hib", "multi_men", "hbv","multi_ipv")
-# 
-# pat_tidy_names <- c("Rotavirus", "Varicella zoster virus", "Measles virus", "Mumps virus", 
-#               "Rubella virus", "C. diphtheriae", "C. tetani", "B. pertussis", 
-#               "H. influenzae Type B", 
-#               "N. meningitidis \n (serotype c)", "Hepatitis B virus", "Hepatitis A virus",
-#               "Polio virus \n (serotype 1)")
-# 
-# names(pat_tidy_names) <- c("rota", "vzv", "measl", "mumps", "rubel", "dipht", "tetan", 
-#                      "pertupt", "hib", "men", "hbv", "hav", "ipv")
-# 
-# pat_l <- list.files("../outputs/perpathogen")
-# pat_tidy_names <- c(
-#   "rota" = "Rotavirus", 
-#   
-#   "hav" = "Hepatitis A virus",
-#   "hbv" = "Hepatitis B virus", 
-#   
-#   "dipht" = "Diphteria", 
-#   "dtpa" = "Diphteria (Acellular)", 
-#   "dtpw" = "Diphteria (Whole-cell)", 
-#   "tetan" = "Tetanus", 
-#   "pertu" = "Pertussis", 
-#   "multi_pertu" = "Pertussis multi", 
-#   "multi_dtp" = "DTP multi", 
-#   "multi_dtpa" = "DTP (Acellular) multi", 
-#   "multi_dtpw" = "DTP (Whole-cell) multi", 
-#   
-#   "polio" = "Polio", 
-#   "multi_polio" = "Polio multi", 
-#   "ipv" = "Polio (inactivated)", 
-#   "multi_ipv" = "Polio (inactivated) multi", 
-#   "opv" = "Polio (oral)",
-#   "multi_opv" = "Polio (oral) multi", 
-#   
-#   "hib" = "H. influenzae Type B", 
-#   "men" = "N. meningitidis (c)",
-#   "multi_men" = "N. meningitidis (c and a) multi",
-#   "multi_hib-men" = "Men-Hib", 
-#   
-#   "strep" = "S. pneumoniae", 
-#   "multi_strep" = "S. pneumoniae multi", 
-#   
-#   "measl" = "Measles", 
-#   "mumps" = "Mumps", 
-#   "rubel" = "Rubella", 
-#   "multi_mmr" = "MMR multi", 
-#   "vzv" = "Varicella",
-#   "multi_mmr-vzv" = "MMRV multi")
-# 
-# pat_tidy_df <- (data.frame(pat_tidy_names) %>%
-#   rename(pat_tidy_name = 1) %>%
-#   rownames_to_column("pathogen") %>%
-#   mutate(pat_tidy_name = factor(pat_tidy_name, levels = pat_tidy_names)))
-```
-
-## Data for the plot 
-```{r}
-# dat_pl1 <- bind_rows(spa_dat_l, .id = "mod") %>%
-#   ungroup() %>%
-#   rename(clu = all_of(clu_name)) %>%
-#   mutate(clu = str_remove_all(clu, " ")) %>%
-#   left_join(df_converged_sel, by = join_by(mod)) %>%
-#   mutate(imm_name = str_extract(imm_name, "(?<=immvals1anti).+?(?=\\.)"),
-#          pi_vac_week_v1 = round(pi_vac_week_v1, digits = 11)) %>%
-#   select(pathogen, imm_name, pi_vac_week_v1, clu, estimate__, sample__, estimate_norm) %>%
-#   left_join(rename(dat_plot, estimate_mean = estimate__), by = join_by(pathogen, imm_name, pi_vac_week_v1, clu)) %>%
-#   group_by(pathogen, imm_name, clu) %>%
-#   mutate(estimate_mean_norm = estimate_mean/mean(estimate_mean, na.rm = TRUE)) %>%
-#   ungroup() %>%
-#   #filter(minwaic) %>%
-#   # filter(pathogen %in% c("multi_dtpa", "hav", "hbv", "hib", "ipv", "multi_mmr", "men",
-#   #                        "rota", "vzv")) %>%
-#   filter(pathogen %in% c("rota", "measl", "mumps", "rubel", "vzv", "multi_dtpa", "hav", "hib", 
-#                          "multi_ipv", "men", "hbv", "strep", "dtpw", "multi_opv")) %>%
-#   mutate(imm_name = replace_na(imm_name, ""), 
-#          sam_imm = paste0(sample__, "_", pathogen, imm_name), 
-#          pat_tidy = case_when(pathogen %in% c("multi_mmr", "multi_dtpa") ~ imm_name,
-#                               .default = pathogen),
-#          #pat_tidy = factor(pat_tidy,  levels = names(pat_tidy_names), labels = pat_tidy_names),
-#          imm_tidy = case_when(pathogen %in% c("multi_men", "multi_ipv", "multi_opv") ~ imm_name,
-#                               .default = NA)) %>%
-#   left_join(pat_tidy_df) %>%
-#   filter(!is.na(mod))
-
-# dat_pl1 <- bind_rows(spa_dat_l, .id = "mod") %>%
-#   ungroup() %>%
-#   rename(clu = all_of(clu_name)) %>%
-#   mutate(clu = str_remove_all(clu, " ")) %>%
-#   left_join(df_converged_sel, by = join_by(mod)) %>%
-#   mutate(imm_name = str_extract(imm_name, "(?<=immvals1anti).+?(?=\\.)"),
-#          pi_vac_week_v1 = round(pi_vac_week_v1, digits = 11)) %>%
-#   select(pathogen, imm_name, pi_vac_week_v1, clu, estimate__, sample__, estimate_norm) %>%
-#   left_join(rename(dat_plot, estimate_mean = estimate__), by = join_by(pathogen, imm_name, pi_vac_week_v1, clu)) %>%
-#   group_by(pathogen, imm_name, clu) %>%
-#   mutate(estimate_mean_norm = estimate_mean/mean(estimate_mean, na.rm = TRUE)) %>%
-#   ungroup() %>%
-#   filter(pathogen %in% c("rota", "measl", "mumps", "rubel", "vzv", "multi_dtpa", "hav", "hib", 
-#                          "multi_ipv", "men", "hbv", "strep", "dtpw")) %>%
-#   mutate(imm_name = replace_na(imm_name, ""), 
-#          sam_imm = paste0(sample__, "_", pathogen, imm_name), 
-#          pat_tidy = case_when(pathogen %in% c("multi_mmr", "multi_dtpa") ~ imm_name,
-#                               .default = ""),
-#          imm_tidy = case_when(pathogen %in% c("multi_men", "multi_ipv") ~ imm_name,
-#                               .default = NA)) %>%
-#   left_join(pat_tidy_df) %>%
-#   filter(!is.na(mod))
-```

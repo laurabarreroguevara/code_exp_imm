@@ -1,0 +1,131 @@
+---
+title: "Descriptive plots"
+author: "Laura Andrea Barrrero Guevara"
+date: "2023-02-23"
+output: html_document
+---
+
+####################################################################################################
+Purpose of script: This script produces descriptive statistics and various plots (maps, histograms, 
+density plots) based on the final data sets (s08). It creates visual summaries of study 
+participants, study locations, vaccination dates, immunogenicity measurements, and additional maps 
+for selected pathogens.
+####################################################################################################
+
+# Load packages, themes, directories, and functions
+```{r}
+rm(list = ls())
+source("00_pck.R")
+library(nasapower)
+library(tidygeocoder)
+theme_set(theme_classic())
+```
+
+# Read in the data (only s08 data)
+```{r}
+dat_l <- lapply(str_subset(str_subset(list.files(glue("{dirs$modfit}"), full.names = TRUE), "s08.rds"),
+                           "datase", negate = TRUE), readRDS)
+names(dat_l) <- sub(".*brms_(.*?)_(vl|v1)_s08.*", "\\1", 
+                    str_subset(str_subset(list.files(glue("{dirs$modfit}")), "s08.rds"),
+                           "datase", negate = TRUE))
+
+# Define selected pathogens for the manuscript figure
+pat_sel <- c("rota", "hav", "hbv", "dipht", "tetan", "pertuapt", "ipv1",
+             "hib", "menc", "strep04", "measl", "mumps", "rubel", "vzv")
+```
+
+# Prepare data for the plot 
+```{r}
+# Combine data for selected pathogens and standardize country names
+datsel_l <- bind_rows(dat_l[pat_sel], .id = "pat") %>%
+  left_join(pat_tidy_names, by = join_by(pat))
+```
+
+# Check countries for each pathogen
+```{r}
+loc_geo <- datsel_l %>%
+  group_by(study, country, lon_med, lat_med, kgc_3, reg_6) %>%
+  summarise(tot = n()) %>%
+  ungroup()
+```
+
+# Extract climate
+```{r}
+clim_l <- list()
+for(stu in unique(loc_geo$study)) {
+  clim_l[[stu]] <- pomp::bake(file = glue("{dirs$processed}/05_stu_nasapower/stu_nasapower_{stu}.rds"), dir = "", {
+    datstu <- filter(loc_geo, study == stu)
+    datnasa <- lapply(1:length(datstu$study), function(x) {
+      nasapower::get_power(
+        community = "ag",
+        lonlat = c(datstu$lon_med[x], datstu$lat_med[x]),
+        pars = c("RH2M","T2M","T2MDEW","PS","QV2M","TQV", "PRECTOTCORR", "CLOUD_AMT", "EVPTRNS"),
+        dates = c("2013-01-01", "2023-12-31"),
+        temporal_api = "daily") %>%
+      as.data.frame() %>% 
+      mutate(
+        study = datstu$study[x],
+        tot = datstu$tot[x],
+        country = datstu$country[x], 
+        lon_med = datstu$lon_med[x], 
+        lat_med = datstu$lat_med[x], 
+        reg_6 = datstu$reg_6[x], 
+        kgc_3 = datstu$kgc_3[x])
+    }) %>%
+      bind_rows()
+    return(datnasa)
+  })
+}
+```
+
+
+
+
+# Extract climate
+```{r}
+clim_l <- list()
+for(i in 1:nrow(loc_geo)){
+  clim_l[[i]] <- pomp::bake(file = glue("{dirs$processed}/05_stu_nasa_power/"), dir = "", {
+    nasapower::get_power(
+    community = "ag",
+    lonlat = c(loc_geo$lon_med[i], loc_geo$lat_med[i]),
+    pars = c("RH2M","T2M","T2MDEW","PS","QV2M","TQV", "PRECTOTCORR", "CLOUD_AMT", "EVPTRNS"),
+    dates = c("2013-01-01", "2023-12-31"),
+    temporal_api = "daily") %>%
+      as.data.frame() %>% 
+      mutate(
+        pat = loc_geo$pat[i],
+        tot = loc_geo$tot[i],
+        country = loc_geo$country[i], 
+        kgc_3 = loc_geo$kgc_3[i])
+  })
+}
+
+clim_df <- do.call(rbind, clim) %>%
+  rename_with(tolower) %>%
+  rename(lon_med = lon, lat_med = lat)
+  
+```
+
+```{r}
+clim_df %>%
+  ggplot(aes(y = RH2M, x = YYYYMMDD, color = country)) +
+  geom_line() +
+  facet_grid(country~.) + 
+  scale_x_date(date_breaks = "1 year") + 
+  theme(panel.grid.major.x = element_line(),
+        legend.position = "none") + 
+clim_df %>%
+  ggplot(aes(y = T2M, x = YYYYMMDD, color = country)) +
+  geom_line() +
+  facet_grid(country~.) + 
+  scale_x_date(date_breaks = "1 year") + 
+  theme(panel.grid.major.x = element_line(),
+        legend.position = "none") 
+``` 
+
+
+
+####################################################################################################
+# END
+####################################################################################################

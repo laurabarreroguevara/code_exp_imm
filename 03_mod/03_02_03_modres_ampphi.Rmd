@@ -1,0 +1,355 @@
+---
+title: "BRMS plot results"
+author: "Laura Andrea Barrrero Guevara"
+date: "2023-02-23"
+output: html_document
+---
+
+####################################################################################################
+Purpose of script: To check the model results and plot it 
+####################################################################################################
+
+```{r}
+rm(list = ls())
+source("../00_pck.R")
+source("fun_checkgaps.R")
+source("fun_condeffects.R")
+source("fun_ampphi.R")
+library(colorspace)
+library(viridis)
+library(ggridges)
+
+theme_set(theme_classic() + theme(strip.background = element_blank()))
+
+imm_tidy_names <- data.frame(
+  imm_name = c("measl", "mumps", "rubel", "vzv", 
+               "pertupt", "pertufha", "pertuprn", "dipht", "tetan", 
+               "polio1", "polio2", "polio3", "mena", "menc", "meny"),
+  imm_name_tidy = c("Measles", "Mumps", "Rubella", "Varicella", 
+                    "Diphteria", "Tetanus", "Pertussis PT", "Pertussis FHA", "Pertussis PRN",
+                    "Polio 1", "Polio 2", "Polio 3", 
+                    "N. meningitidis A", "N. meningitidis C", "N. meningitidis Y"))
+```
+
+# Raw data 
+```{r}
+# Read in the waic (only models that converged)
+waic_df <- readRDS(glue("{dirs$outputs}/all_waic.rds"))
+# Read in min waic
+waic_minbest <- readRDS(glue("{dirs$outputs}/all_waic_minbest.rds"))
+# Read in data gaps
+all_datagaps <- readRDS(glue("{dirs$outputs}/all_datagaps.rds"))
+# Read in conditional effects 
+all_ceffects <- readRDS(glue("{dirs$outputs}/all_ceffects.rds"))
+# Read in coefcosine
+all_coefcosine <- readRDS(glue("{dirs$outputs}/all_coefcosine.rds"))
+
+df_converged <- filter(waic_df, dat == "s08", mod_out == "imm", str_detect(mod_name, "cs")) %>%
+  # The function needs arguments reg (NA for cs and "reg_x" for csi) and multi (multi pat)
+  mutate(reg = case_when(str_detect(mod_name, "csi") ~ str_remove_all(mod_name, "csi_")), 
+         multi = str_detect(pat, "multi"))
+```
+
+# Define main analyses 
+```{r}
+pat_sel <- c("rota", "hav", "hbv", "dipht", "tetan", "pertuwpt", "ipv1", 
+             "hib", "menc", "strep04", "measl", "mumps", "rubel", "vzv")
+```
+
+# Samples amplitude and phase ======================================================================
+```{r}
+all_samplescosine <- pomp::bake(file = glue("{dirs$outputs}/all_samples.rds"), dir = "", {
+  # Read in the coeficients 
+  sapply(df_converged$mod, function(x) {
+    readRDS(glue("{dirs$samples}/samples_{x}")) %>%
+      mutate(sam_no = row_number()) %>%
+      pivot_longer(-sam_no, names_to = "parameter", values_to = "Estimate") %>%
+      # Coefficients of the cosinor only 
+      filter(str_detect(parameter, "cos|sin"))
+  }, simplify = FALSE) %>%
+    bind_rows(.id = "mod") %>%
+    # From mod to variables (pat, mod_out, mod_name, dat, vac, gauss, pat_tidy, reg, multi)
+    left_join(df_converged, by = join_by(mod)) %>%
+    # From param to variables (param, imm_name, clu) -----------------------------------------------
+    mutate(
+      parameter = str_remove_all(parameter, "b_|pi_vac_week_v1|:"),
+      regtemp = replace_na(reg, "regtemp"),
+      parameter = str_remove_all(parameter, regtemp),
+      param = str_extract(parameter, "cos|sin"),
+      parameter = str_remove_all(parameter, param),
+      param = paste0("p_", param),
+      imm_name = str_extract(parameter, "(?<=immvals1anti)[^_]+"),
+      parameter = str_remove_all(parameter, paste0("immvals1anti", imm_name, "_")),
+      clu = case_when(str_detect(reg, "reg_2") & parameter == "" ~ "1_North",
+                      str_detect(reg, "reg_3|reg_4|reg_6") & parameter == "" ~ "1_Temperate",
+                      !is.na(reg) & parameter != "" ~ parameter)) %>%
+    select(sam_no, pat, mod, param, mod_name, reg, clu, imm_name, Estimate, mod_out, dat, vac, gauss, 
+           pat_tidy, multi) %>%
+    # Estimate amplitude and phase -----------------------------------------------------------------
+    pivot_wider(names_from = param, values_from = Estimate) %>%
+    mutate(sam_amp = fun_amp(p_cos = p_cos, p_sin = p_sin),
+           sam_phi = fun_phi(p_cos = p_cos, p_sin = p_sin)) %>%
+    # Add mean estimates ---------------------------------------------------------------------------
+    left_join(distinct(all_coefcosine, mod, clu, imm_name, p_cos_mean, p_sin_mean, amp_mean, 
+                       phi_mean, checkgaps_all), by = join_by(mod, clu, imm_name)) %>%
+    # Add imm_name tidy names ----------------------------------------------------------------------
+    left_join(imm_tidy_names, by = join_by(imm_name))
+  })
+```
+
+# Check the meaning of the confidence intervals with the samples
+```{r}
+all_samplescosine %>%
+  filter(mod == "bmvl_s08_rota_cs.rds") %>%
+  ggplot(aes(x = sam_phi)) +
+    geom_histogram(bins = 52) +
+    geom_vline(aes(xintercept = phi_mean), color = "blue") +
+    geom_vline(aes(xintercept = median(sam_phi)), color = "grey") +
+    geom_vline(aes(xintercept = quantile(sam_phi, 0.975)), color = "grey") + 
+    geom_vline(aes(xintercept = quantile(sam_phi, 0.025)), color = "grey") + 
+all_samplescosine %>%
+  filter(mod == "bmv1_s08_hav_cs.rds") %>%
+  ggplot(aes(x = exp(sam_amp))) +
+    geom_histogram(bins = 52) +
+    geom_vline(aes(xintercept = 1), color = "red", linetype = "dotted") + 
+    geom_vline(aes(xintercept = exp(amp_mean)), color = "blue") +
+    geom_vline(aes(xintercept = median(exp(sam_amp))), color = "grey") +
+    geom_vline(aes(xintercept = quantile(exp(sam_amp), 0.975)), color = "grey") + 
+    geom_vline(aes(xintercept = quantile(exp(sam_amp), 0.025)), color = "grey") 
+```
+
+# Plot of the phase 
+```{r}
+datpl_l <- sapply(sort(unique(filter(all_samplescosine, reg == "reg_6", pat %in% pat_sel)$clu)),
+                  function(x) {
+  all_samplescosine %>%
+    filter(reg == "reg_6", pat %in% pat_sel, checkgaps_all == FALSE) %>%
+    mutate(clu_tidy = factor(clu, labels = c("Temperate", "Subtropical", "Tropical", "Tropical south", 
+                             "Subtropical south"))) %>%
+    filter(clu == x) %>%
+    distinct(mod, pat, clu, clu_tidy, imm_name, mod_out, mod_name, dat, vac, gauss, pat_tidy, 
+             sam_phi, sam_amp, phi_mean, amp_mean, imm_name_tidy, sam_no) %>%
+    group_by(pat, clu, clu_tidy) %>%
+    mutate(phi_group = case_when((phi_mean >= 51 | phi_mean < 11.25) ~ "1st Quarter",
+                                 (phi_mean >= 11.25 & phi_mean < 24.5) ~ "2nd Quarter",
+                                 (phi_mean >= 24.5 & phi_mean < 37.75) ~ "3th Quarter",
+                                 (phi_mean >= 37.75 & phi_mean < 51) ~ "4th Quarter"),
+           phi_group = factor(phi_group, levels = c("1st Quarter", "2nd Quarter", "3th Quarter", "4th Quarter")),
+           sam_phi = round(sam_phi))
+}, simplify = FALSE)
+
+datpl_l
+```
+
+
+```{r}
+pl <- lapply(datpl_l, function(datpl) {
+  # Obtain proportions per phi
+  datpl <- datpl %>%
+    group_by(pat, clu, clu_tidy, pat_tidy, phi_group, phi_mean, sam_phi) %>%
+    summarise(tot = n(), .groups = "drop") %>%
+    group_by(pat, clu) %>%
+    mutate(tot = tot/sum(tot)) %>%
+    ungroup()
+  # Plot it
+  datpl %>%
+    distinct(pat, clu, clu_tidy, pat_tidy, phi_mean, phi_group) %>%
+    crossing(sam_phi = 1:52) %>%
+    left_join(datpl, by = join_by(pat, clu, clu_tidy, pat_tidy, phi_mean, phi_group, sam_phi)) %>%
+    ggplot(aes(x = sam_phi, y = reorder(pat_tidy, -as.numeric(phi_group)), fill = phi_mean)) +
+      geom_tile(aes(alpha = tot), color = "grey") + 
+      scale_alpha_continuous("Proportion of phases", na.value = 0, range = c(0.01, 1)) +
+      scale_fill_gradientn("Peak timing", breaks = c(1,18,35,52), limits = c(1,52),
+                           colours = c(viridis(100, begin = 0, option = "C"),
+                                       rev(viridis(100, begin = 0, option = "C")))) +
+      facet_grid(.~clu_tidy, space = "free", scales = "free") + 
+      scale_x_continuous("Phase", expand = c(0,0)) +
+      scale_y_discrete("") + 
+      theme(strip.text.y = element_text(angle = 0),
+            legend.position = "none",
+            strip.text.x = element_text(hjust = 0))
+})
+
+pl_leg <- ggpubr::get_legend(pl[[3]] + theme(legend.position = "top"))
+
+pl_phi <- pl[[1]] + pl[[2]] + pl[[3]] + pl[[4]] + pl[[5]] + 
+  plot_layout(ncol = 1, heights = c(14,5,13,1,4))
+
+pl_phi
+```
+
+
+```{r}
+test <- bind_rows(datpl_l) %>%
+    group_by(pat, clu, clu_tidy, pat_tidy, phi_group, phi_mean, sam_phi) %>%
+    summarise(tot = n(), .groups = "drop") %>%
+    group_by(pat, clu) %>%
+    mutate(tot = tot/sum(tot)) %>%
+    ungroup()
+# Plot it
+pl <- test %>%
+    distinct(pat, clu, clu_tidy, pat_tidy, phi_mean, phi_group) %>%
+    crossing(sam_phi = 1:52) %>%
+    left_join(test, by = join_by(pat, clu, clu_tidy, pat_tidy, phi_mean, phi_group, sam_phi)) %>%
+    ggplot(aes(x = sam_phi, y = reorder(pat_tidy, -as.numeric(phi_group)), fill = phi_mean)) +
+      geom_tile(aes(alpha = tot), color = "grey") + 
+      scale_alpha_continuous("Proportion of phases", na.value = 0, range = c(0.01, 1),
+                             breaks = c(0.01, 0.1, 0.2, 0.3)) +
+      scale_fill_gradientn("Peak timing", breaks = c(1,18,35,52), limits = c(1,52),
+                           colours = c(viridis(100, begin = 0, option = "C"),
+                                       rev(viridis(100, begin = 0, option = "C")))) +
+      facet_grid(clu_tidy~., space = "free", scales = "free") + 
+      scale_x_continuous("Peak timing", breaks = c(1,18,35,52), limits = c(1,52), expand = c(0,0)) +
+      scale_y_discrete("") + 
+      guides(alpha = guide_legend(order = 1), fill = guide_colorbar(
+        order = 2, theme = theme(
+  legend.key.width  = unit(0.72, "npc"),
+  legend.key.height = unit(0.015, "npc")))) + 
+      theme(strip.text.y = element_text(angle = 0),
+            strip.text.x = element_text(hjust = 0),
+            legend.position = "top",
+            legend.justification = "right",
+            legend.box = "vertical")
+ggsave(pl, file = "../figures/test.pdf", width = 10, height = 8)
+  
+```
+
+
+# Plot of the amplitude
+```{r}
+col_amp <- viridis(14)
+names(col_amp) <- (filter(all_samplescosine, checkgaps == FALSE, reg == "reg_6", pat %in% pat_sel, 
+                          clu == "1_Temperate") %>%
+  distinct(pat_tidy, amp_mean) %>%
+  arrange(amp_mean))$pat_tidy
+
+pl <- list()
+for(i in sort(unique(filter(all_samplescosine, checkgaps == FALSE, reg == "reg_6", pat %in% pat_sel)$clu))) {
+  pl[[i]] <- all_samplescosine %>%
+    filter(checkgaps == FALSE, reg == "reg_6", pat %in% pat_sel) %>%
+    mutate(clu_tidy = factor(clu, labels = c("Temperate", "Subtropical", "Tropical", "Tropical south", 
+                            "Subtropical south"))) %>%
+    filter(clu == i) %>%
+    distinct(mod, pat, clu, clu_tidy, imm_name, mod_out, mod_name, dat, vac, gauss, pat_tidy, phi_mean, 
+             amp_mean, pat_imm, persample_amp_emp, persample_phi_emp, imm_name_tidy, sam_mod) %>%
+    group_by(pat, clu, clu_tidy) %>%
+    mutate(phi_group = case_when((phi >= 51 | phi < 11.25) ~ "1st Quarter",
+                                 (phi >= 11.25 & phi < 24.5) ~ "3nd Quarter",
+                                 (phi >= 24.5 & phi < 37.75) ~ "4th Quarter",
+                                 (phi >= 37.75 & phi < 51) ~ "2nd Quarter")) %>%
+    ggplot(aes(x = persample_amp_emp, y = reorder(pat_tidy, amp), 
+               color = reorder(pat_tidy, amp), fill = reorder(pat_tidy, amp))) +
+    geom_vline(aes(xintercept = 1), color = "grey", linetype = "dotted") + 
+    stat_density_ridges(quantile_lines = TRUE, quantiles = c(0.025, 0.5, 0.975), alpha = 0.7) + 
+    scale_color_manual(values = col_amp, aesthetics = c("color", "fill")) + 
+    facet_grid(.~clu_tidy, space = "free", scales = "free") + 
+    scale_y_discrete("") + 
+    scale_x_continuous("Amplitude") + 
+    theme(legend.position = "none",
+          strip.text.x = element_text(hjust = 0))
+}
+
+pl_amp <- pl[[1]] + pl[[2]] + pl[[3]] + pl[[4]] + pl[[5]] + 
+  plot_layout(ncol = 1, heights = c(14,5,13,1,4))
+```
+
+# Plot of amplitude and phase
+```{r}
+pl_phiamp <- (ggpubr::as_ggplot(pl_leg) / (pl_phi | pl_amp)) + plot_layout(heights = c(1,40))
+
+i = "1_Temperate"
+
+all_cespa %>%
+  filter(checkgaps == FALSE, reg == "reg_6", pat %in% pat_sel) %>%
+  mutate(clu_tidy = factor(clu, labels = c("Temperate", "Subtropical", "Tropical", "Tropical south", 
+                          "Subtropical south"))) %>%
+  distinct(mod, pat, clu, clu_tidy, imm_name, mod_out, mod_name, dat, vac, gauss, pat_tidy, phi, amp,
+           pat_imm, persample_amp_emp, persample_phi_emp, imm_name_tidy, sam_mod) %>%
+  group_by(pat, clu, clu_tidy) %>%
+  mutate(phi_group = case_when((persample_phi_emp >= 51 | persample_phi_emp < 11.25) ~ "1st Quarter",
+                               (persample_phi_emp >= 11.25 & persample_phi_emp < 24.5) ~ "3nd Quarter",
+                               (persample_phi_emp >= 24.5 & persample_phi_emp < 37.75) ~ "4th Quarter",
+                               (persample_phi_emp >= 37.75 & persample_phi_emp < 51) ~ "2nd Quarter")) %>%
+  ggplot(aes(y = persample_amp_emp, x = persample_phi_emp, 
+             color = phi_group, fill = phi_group)) +
+  geom_point(alpha = 0.5) + 
+  scale_color_viridis_d() + 
+  scale_y_continuous(trans = "log") + 
+  facet_grid(~clu_tidy)
+```
+
+
+
+
+# Figure 3 =========================================================================================
+```{r}
+
+unique(dat_plspa_all$clu)
+#1_Temperate        2_Subtropical      3_Tropical         5_Subtropicalsouth 6_Temperatesouth   4_Tropicalsouth 
+
+fig_3a <- all_cespa %>% 
+  filter(clu == "4_Tropicalsouth") %>%
+  ggplot(aes(y = reorder(pat_tidy, median_phi_week), x = median_phi_week, color = as.numeric(median_phi))) + 
+  geom_point(size = 2, alpha = 1) + 
+  geom_linerange(aes(xmin = phi_max_week, xmax = phi_min_week), alpha = 0.75) + 
+  scale_y_discrete("") + 
+  scale_x_date("Peak timing", date_breaks = "1 month", date_labels = "%B") + 
+    scale_color_gradientn("Peak timing",
+                          breaks = c(1,18,35,52), limits = c(1,52),
+                          colours = c(viridis(100, begin = 0, option = "C"),
+                                    rev(viridis(100, begin = 0, option = "C"))),
+                          guide = guide_colorbar(title.position = "top",
+                                                 title.hjust = 0.5,
+                                                 barheight = 0.8)) +
+  coord_radial(inner.radius = 0.3, r_axis_inside = TRUE, start = 0, end = 1.65*pi) + 
+  theme_minimal() + 
+  theme(panel.grid.minor = element_blank(),
+        legend.position = "none") + 
+  
+  all_cespa %>% 
+  filter(clu == "4_Tropicalsouth") %>%
+  ggplot(aes(y = reorder(pat_tidy, median_amp), x = median_amp, color = as.numeric(median_phi))) + 
+  geom_point(size = 2, alpha = 1) + 
+  geom_linerange(aes(xmin = amp_min, xmax = amp_max), alpha = 0.75) + 
+  scale_y_discrete("") + 
+  scale_x_continuous("Peak amplitude") + 
+  scale_color_gradientn("Peak timing", breaks = c(1,18,35,52), limits = c(1,52),
+                        colours = c(viridis(100, begin = 0, option = "C"),
+                                    rev(viridis(100, begin = 0, option = "C")))) +
+  facet_grid(~clu) +
+  theme(legend.position = "none",
+        panel.grid.minor = element_blank())
+  
+
+fig_3b <- dat_plspa %>%
+  filter(reg == "reg_6") %>%
+  filter(!(pat %in% c("hbv", "opv", "dtpw", "multi_dtpw", "ipv3", "ipv2", "pertuprn", "pertufha"))) %>%
+  filter(clu == "4_Tropicalsouth") %>%
+  group_by(pat, pat_tidy, clu) %>%
+  mutate(median_phi = median(phi_emp)) %>%
+  ggplot(aes(x = vac_week_v1, y = est_norm - 1, group = sam_imm, color = median_phi)) + 
+    #geom_point(shape = ".", size = 4, alpha = 0.2) + 
+    geom_line(alpha = 0.2) + 
+    geom_line(aes(y = estimate_mean_norm - 1, group = imm_tidy), size = 1) +
+    scale_x_continuous("Week of vaccination", breaks = c(1,18,35,52), limits = c(1,52)) + 
+    scale_y_continuous("Conditional effect") + 
+    scale_color_gradientn("Peak timing",
+                          breaks = c(1,18,35,52), limits = c(1,52),
+                          colours = c(viridis(100, begin = 0, option = "C"),
+                                    rev(viridis(100, begin = 0, option = "C"))),
+                          guide = guide_colorbar(title.position = "top",
+                                                 title.hjust = 0.5,
+                                                 barheight = 0.8)) +
+  geom_point(aes(y = -Inf), shape = "|", size = 3) +
+  facet_wrap(reorder(pat_tidy_name, phi)~., scales = "free", ncol = 5) + 
+  theme(legend.position = "inside", 
+        legend.direction = "horizontal", 
+        legend.position.inside = c(0.80,0.20))
+
+fig_3 <- ((fig_3a + plot_layout(widths = c(3,1))) / fig_3b) + plot_layout(heights = c(1,1))
+
+ggsave(fig_3, file = "../figures/ce_reg_6_4_Tropicalsouth.pdf", width = 10, height = 12)
+#10*12
+```
+
+

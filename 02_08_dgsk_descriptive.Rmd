@@ -43,9 +43,11 @@ theme_set(theme_classic())
 
 # Read in the data (only s08 data)
 ```{r}
-dat_l <- lapply(str_subset(list.files(glue("{dirs$modfit}"), full.names = TRUE), "s08.rds"), readRDS)
+dat_l <- lapply(str_subset(str_subset(list.files(glue("{dirs$modfit}"), full.names = TRUE), "s08.rds"),
+                           "datase", negate = TRUE), readRDS)
 names(dat_l) <- sub(".*brms_(.*?)_(vl|v1)_s08.*", "\\1", 
-                    str_subset(list.files(glue("{dirs$modfit}")), "s08.rds"))
+                    str_subset(str_subset(list.files(glue("{dirs$modfit}")), "s08.rds"),
+                           "datase", negate = TRUE))
 ```
 
 # Summary Statistics: Basic checks on participants, studies, and countries
@@ -91,7 +93,7 @@ pl1.1 <- ggplot(df_pl1, aes(y = fct_rev(pat_tidy), group = study, fill = mod)) +
         panel.grid.major.y = element_line())
 
 ## Plot 1.2: Age at Vaccination (Histogram and Density)
-pl1.2 <- ggplot(df_pl1, aes(x = age/4, y = fct_rev(pat_tidy), color = mod)) +
+pl1.2 <- ggplot(df_pl1, aes(x = (age*7)/30.437, y = fct_rev(pat_tidy), color = mod)) +
   geom_point(shape = "|", size = 4, alpha = 0.1) +
   scale_x_continuous("Age at first vaccination (months)", 
                      breaks = c(0, 2, 4, 6, 12, 18, 24, 36, 48, 60, 72, 84), expand = c(0,0)) +
@@ -143,7 +145,7 @@ df_pl2 <- bind_rows(lapply(dat_l[str_subset(names(dat_l), "multi", negate = TRUE
   mutate(country = case_when(country == "United States" ~ "USA", .default = country))
 
 # Plot it ------------------------------------------------------------------------------------------
-pl2 <-ggplot() +
+pl2 <- ggplot() +
   # Add latitude lines and polygons (dark for countries included in the study)
   geom_hline(aes(yintercept = c(-35, -23.5, 0, 23.5, 35)), linewidth = 0.5, color = "grey85") + 
   geom_polygon(data = world, aes(x = long, y = lat, group = group), fill = "grey90") +
@@ -151,9 +153,6 @@ pl2 <-ggplot() +
                aes(x = long, y = lat, group = group), fill = "grey75") + 
   # Add points of the locations 
   geom_point(data = df_pl2, aes(x = lon_med, y = lat_med, color = pat_tidy, size = tot), alpha = 0.8) + 
-  ggrepel::geom_text_repel(data = df_pl2, aes(x = lon_med, y = lat_med, 
-                                              color = pat_tidy, label = pat_tidy),
-                           alpha = 0.8, max.overlaps = 15) + 
   scale_y_continuous("Latitude (°)", 
                      breaks = c(-35, -23.5, 0, 23.5, 35), limits = c(-60,80), expand = c(0,0)) +
   scale_x_continuous("Longitude (°)", expand = c(0,0)) + 
@@ -239,7 +238,7 @@ ggsave(pl4, file = glue("{dirs$figures}/data_raw_immunogenicity_time.pdf"), widt
 df_pl5 <- sapply(filter(pat_tidy_names, pat %in% names(dat_l))$pat, function(x) {
   ## If not multi, just distinct 
   if(str_detect(x, "multi") == FALSE) { 
-    distinct(dat_l[[x]], study, pid, imm_val_s1, imm_sero_s1, imm_met_s1, imm_cutoff_s1, age)
+    distinct(dat_l[[x]], study, pid, imm_val_s1, imm_sero_s1, imm_met_s1, imm_cutoff_s1, age, censored)
   ## If multi, select and pivot 
   } else { 
     select(dat_l[[x]], study, pid, age, 
@@ -284,6 +283,24 @@ pl5 <- wrap_plots(pl5_l) + plot_layout(ncol = 3)
 
 # Save the plot 
 ggsave(pl5, file = glue("{dirs$figures}/data_raw_immunogenicity.pdf"), width = 16, height = 40)
+```
+
+# Seropositive
+```{r}
+pl5.2 <- bind_rows(dat_l, .id = "pat") %>%
+  filter(str_detect(pat, "multi", negate = TRUE)) %>%
+  group_by(pat, reg_6, imm_spos_s1) %>%
+  summarise(count_spos = n(), .groups = "drop") %>%
+  group_by(pat, reg_6) %>%
+  mutate(count_tot = sum(count_spos)) %>%
+  ggplot(aes(x = count_spos/count_tot, y = reg_6, fill = as.character(imm_spos_s1))) + 
+  geom_bar(stat = "identity") +
+  scale_fill_discrete_sequential(name = "Seropositive", palette = "BluGrn") + 
+  facet_wrap(~pat) + 
+  theme(strip.background = element_blank())
+
+# Save the plot 
+ggsave(pl5.2, file = glue("{dirs$figures}/data_raw_seropositive.pdf"), width = 8, height = 8)
 ```
 
 # Figure 1 =========================================================================================
@@ -475,7 +492,10 @@ fig1b.3.1 <- bind_rows(lapply(unique(df_fig1b1$pat), function(x) {
   geom_polygon() +
   geom_point(data = filter(df_ple, pathogen %in% df_fig1b1$pat),
              aes(x = lon_med, y = lat_med, color = reg_4, size = tot, group = 1, fill = NA), 
-             alpha = 0.8) +
+             alpha = 0.4) + 
+  geom_point(data = filter(df_ple, pathogen %in% df_fig1b1$pat),
+             aes(x = lon_med, y = lat_med, color = reg_4, size = tot, group = 1, fill = NA), 
+             shape = 1) +
   scale_x_continuous("Longitude (°)", expand = c(0,0)) + 
   scale_y_continuous("Latitude (°)", 
                      breaks = c(-23.5, 0,23.5), limits = c(-60,80), expand = c(0,0)) +
@@ -505,7 +525,10 @@ fig1b.3.2 <- bind_rows(lapply(unique(df_fig1b2$pat), function(x) {
   geom_polygon() +
   geom_point(data = filter(df_ple, pathogen %in% df_fig1b2$pat),
              aes(x = lon_med, y = lat_med, color = reg_4, size = tot, group = 1, fill = NA), 
-             alpha = 0.8) +
+             alpha = 0.4) + 
+  geom_point(data = filter(df_ple, pathogen %in% df_fig1b2$pat),
+             aes(x = lon_med, y = lat_med, color = reg_4, size = tot, group = 1, fill = NA), 
+             shape = 1) +
   scale_x_continuous("Longitude (°)", expand = c(0,0)) + 
   scale_y_continuous("Latitude (°)", 
                      breaks = c(-23.5, 0,23.5), limits = c(-60,80), expand = c(0,0)) +
@@ -539,6 +562,32 @@ fig1 <- free(fig1a) + fig1b + plot_layout(nrow = 2, heights  = c(1,2))
 ggsave(glue("{dirs$figures}/fig1.pdf"), width = 12, height = 10)
 ```
 
+# Supplementar figure 1: Week of vaccination =======================================================
+```{r}
+source("03_mod/fun_checkgaps.R")
+
+df_figsup1 <- bind_rows(lapply(dat_l[pat_sel], distinct, study, pid, vac_week_v1, reg_6), .id = "pat") %>%
+  # Add tidy names for the pathogens 
+  left_join(pat_tidy_names, by = join_by(pat)) %>%
+  group_by(pat, reg_6) %>%
+  mutate(checkgaps = fun_checkgaps(vac_week_v1, lim = 25))
+
+figsup1 <- df_figsup1 %>%
+  #filter(checkgaps == FALSE) %>%
+  ggplot(aes(x = vac_week_v1, fill = reg_6)) +
+  geom_histogram(bins = 52) +
+  scale_fill_viridis_d(option = "mako", begin = 0.2, end = 0.8) +
+  facet_wrap(pat_tidy+reg_6~., scales = "free_y", ncol = 6) +
+  scale_y_continuous("Total individuals vaccinated", expand = c(0,0), breaks = fun_breaks,
+                     limits = fun_limits) + 
+  scale_x_continuous("Week", breaks = c(1,18,35,52), expand = c(0,0)) + 
+  theme(legend.position = "none",
+        strip.background = element_blank())
+
+# Save the plot 
+ggsave(plot = figsup1, glue("{dirs$figures}/figsup1.pdf"), width = 10, height = 10)
+```
+
 # Per-Pathogen Maps: Create individual maps for each selected pathogen =============================
 
 # Prepare data for the plot 
@@ -548,6 +597,15 @@ df_figmaps <- bind_rows(dat_l[pat_sel], .id = "pat") %>%
   left_join(pat_tidy_names, by = join_by(pat)) %>%
   mutate(country = case_when(country == "United States" ~ "USA", .default = country))
 ```
+
+# Check countries for each pathogen
+```{r}
+df_figmaps %>%
+  group_by(pat, reg_6, country, lon_med, lat_med) %>%
+  filter(reg_6 == "3_Tropical") %>%
+  summarise(tot = n())
+```
+
 
 # Generate and Save a Map for Each Pathogen
 ```{r}
@@ -587,21 +645,10 @@ pl_l[[i]] <- mutate(world,
   coord_quickmap()
 
   # Save each pathogen-specific map to file
-  ggsave(pl_l[[i]], file = glue("{dirs$figures}/map_reg_6_{i}.pdf"), width = 10, height = 5)
+  ggsave(pl_l[[i]], file = glue("{dirs$figures}/map_perpat/map_reg_6_{i}.pdf"), width = 10, height = 5)
 }
 ```
 
 ####################################################################################################
 # END
 ####################################################################################################
-
-
-
-
-
-
-
-
-
-
-

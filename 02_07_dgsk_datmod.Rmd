@@ -62,7 +62,14 @@ dat_comb_uni$unipat_mono <- lapply(stu_ppat, function(x) {
   bind_rows(.id = "pat_dat") %>%
   group_by(pat_dat, imm_sero_s1) %>%
   # Only under primary vaccination
-  filter(doses < 4) %>%
+  filter(doses < 4) 
+
+# Check for alternative methods
+group_by(dat_comb_uni$unipat_mono, pat_dat, imm_met_s1, imm_sero_s1) %>%
+  summarise(sum(pid_n))
+
+# Continue selection
+dat_comb_uni$unipat_mono <- dat_comb_uni$unipat_mono %>%
   # Select the combination with the highest number of individuals
   filter(max(pid_n) == pid_n) %>%
   slice_head(n = 1) %>%
@@ -194,6 +201,12 @@ pat_df_l <- sapply(dat_select$name_df, function(x) {
   pat_dat <- if(dat_select[dat_select$name_df == x, "multi"][[1]] == "multipat_multi") { 
     stu_mpat 
   } else { stu_ppat }
+  
+  # TEST STREP ONLY ONE VACCINE
+  if(str_detect(x, "multi_strep")) { 
+    pat_dat[[dat_select[dat_select$name_df == x, "pat_dat"][[1]]]] <- filter(
+      pat_dat[[dat_select[dat_select$name_df == x, "pat_dat"][[1]]]], vac_name_v1 == "strep10") 
+  }
   
   # Function to create data frame for mono/multi-pathogen and mono/multivariate models.
   fun_dgsk_modpat(
