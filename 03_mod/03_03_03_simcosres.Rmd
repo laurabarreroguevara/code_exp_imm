@@ -1,0 +1,300 @@
+---
+title: "BRMS"
+author: "Laura Andrea Barrrero Guevara"
+date: "2023-02-23"
+output: html_document
+---
+
+################################################################################ 
+
+Purpose of script: To fit brms models to all the studies \################################################################################
+
+# Set up
+
+```{r}
+rm(list = ls())
+source("../00_pck.R")
+source("fun_ampphi.R")
+library(ggridges)
+library(tidybayes)
+theme_set(theme_classic() + theme(strip.background = element_blank()))
+dirs$figures <- "../figures"
+```
+
+# Read in data
+
+```{r}
+# Read best waic
+waic_best <- readRDS(glue("{dirs$modres}/all_waicbest.rds"))
+
+# Read simulations data of the bests models
+sim_dat <- pomp::bake(glue("{dirs$simcosres}/simcos_dat.rds"), dir = "", {
+  sapply(
+  list.files(glue("{dirs$simcosfit}")), 
+  function(x) as.data.frame(readRDS(glue("{dirs$simcosfit}/{x}"))[,1]),
+  simplify = FALSE) %>%
+  bind_rows() 
+}) %>%
+  filter(mod %in% waic_best$mod_best)
+# Read the gaps
+all_datagaps <- readRDS(glue("{dirs$modres}/all_datagaps.rds")) %>%
+  filter(mod %in% waic_best$mod_best)
+all_samplescosine <- readRDS(glue("{dirs$modres}/all_samplescosine.rds")) %>%
+  filter(mod %in% waic_best$mod_best)
+```
+
+# Check convergence (Rhats) of the models ==========================================================
+
+```{r}
+# Check that Rhats == 1
+sim_rhats <- pomp::bake(glue("{dirs$simcosres}/simcos_rhats.rds"), dir = "", {
+  bind_rows(lapply(list.files(glue("{dirs$simcos_rhats}"), full.names = TRUE), readRDS)) %>%
+  group_by(mod) %>%
+  filter(Rhat == max(Rhat)) %>%
+  mutate(Rhat = round(Rhat, digits = 1),
+         Rhat_cond = Rhat == 1) %>%
+  select(mod, Rhat_cond)
+})
+filter(sim_rhats, Rhat_cond == FALSE)
+```
+
+# Read the coefficients and obtain amp and phi =====================================================
+
+```{r}
+# Select only converging models 
+df_converged <- filter(sim_rhats, Rhat_cond == TRUE)
+
+# Read in the coefficients
+sim_coef <- pomp::bake(glue("{dirs$simcosres}/simcos_coef.rds"), dir = "", {
+  sapply(df_converged$mod, function(x) {
+    # Read in the coeficients 
+    coef <- readRDS(glue("{dirs$simcos_coef}/coef_{x}"))
+    # Obtain fixed coefficients
+    fe <- coef$fixed[ , "Estimate"] 
+    names(fe) <- row.names(coef$fixed)
+    # Define region 
+    reg <- str_extract(x, "reg_2|reg_3|reg_4|reg_6")
+    clu_ref <- ifelse(reg == "reg_2", "1_North", "1_Temperate")
+    clu <- c(clu_ref, str_subset(names(fe), "clu") %>%
+               str_extract(str_c(tidy_names_clu$clu[!is.na(tidy_names_clu$clu)], collapse = "|")) %>%
+               unique())
+    # Reassemble intercept, cos, sin, and shape for every region and cluster
+    region_coefs <- data.frame(
+      reg = reg, 
+      clu = clu,
+      shape = coef$spec_pars["shape","Estimate"]) %>%
+      rowwise() %>%
+      mutate(
+        int = fe["Intercept"] + 
+          ifelse((is.na(clu) | str_detect(clu, "1_")), 0, fe[paste0("clu", clu)]),
+        p_cos = fe["cospi_vac_week_v1"] + 
+          ifelse((is.na(clu) | str_detect(clu, "1_")), 0, fe[paste0("clu", clu, ":cospi_vac_week_v1")]),
+        p_sin = fe["sinpi_vac_week_v1"] + 
+          ifelse((is.na(clu) | str_detect(clu, "1_")), 0, fe[paste0("sinpi_vac_week_v1:clu", clu)])
+      ) %>%
+      ungroup() %>%
+      # Obtain amplitude and phase
+      mutate(
+        amp_ls = fun_amp_ls(p_cos = p_cos, p_sin = p_sin, mu = int),
+        phi = fun_phi(p_cos = p_cos, p_sin = p_sin, phi_type = "week"),
+        amp = fun_amp_emp(p_cos = p_cos, p_sin = p_sin, mu = int, val_return = "amp_ns"),
+        mu_ns = fun_amp_emp(p_cos = p_cos, p_sin = p_sin, mu = int, val_return = "mu_ns")) 
+  }, simplify = FALSE) %>%
+    bind_rows(.id = "mod") %>%
+    mutate(pat = str_extract(mod, "(?<=s08_).*?(?=_cs)"),
+           sim = str_extract(mod, "(?<=simcos_).*?(?=_bmv)"),
+           type = "sim") %>%
+    select(sim, pat, clu, mod, everything())
+})
+```
+
+# Combine data and simulations coefficients ========================================================
+
+```{r}
+# Read in all the samples
+tog_coef <- all_samplescosine %>%
+  mutate(type = "true", sim = "true") %>%
+  select(sim, type,  pat, clu, mod, reg, int_mean, p_cos_mean, p_sin_mean, amp_ls_mean, phi_mean, amp_mean, mu_ns_mean,
+         ends_with("ci95up"), ends_with("ci95lo")) %>%
+  # Get only means and CI
+  distinct() %>%
+  rename_with(~gsub("_mean", "", .x)) %>%
+  rename_with(~gsub("sam_", "", .x)) %>%
+  bind_rows(select(sim_coef, -shape)) %>%
+  mutate(mod = sub("^modsimcos_\\d+_", "", mod))
+```
+
+# Check model fit ==================================================================================
+```{r}
+plfit_l <- sapply(unique(sim_dat$mod), function(x) {
+  # Plot the simulation
+  pl <- filter(sim_dat, mod == x) %>%
+    distinct(mod, pat, clu, imm_name, vac_week_v1, pi_vac_week_v1, funcos) %>%
+    left_join(filter(tog_coef, sim %in% c("true", as.character(1:40))),
+              relationship = "many-to-many", by = join_by(mod, pat, clu)) %>%
+    mutate(modcos = int + (p_cos*cos(pi_vac_week_v1)) + (p_sin*sin(pi_vac_week_v1))) %>%
+    ggplot(aes(x = vac_week_v1, y = funcos, group = sim)) +
+      geom_line(aes(y = exp(modcos)), color = "black", alpha = 0.2) + 
+      geom_point(color = "blue") +
+      facet_wrap(pat~clu, scales = "free_y")
+  # Save plot
+  ggsave(pl, width = 6, height = 4,
+         file = paste0("../figures/simres/fit_", x, ".pdf"))
+  return(pl)
+}, simplify = FALSE)
+plfit_l
+```
+
+# Check bias =======================================================================================
+
+# Plot simulations vs true value 
+```{r}
+tog_coef %>%
+  left_join(distinct(waic_best %>% rename(mod = mod_best), mod, dat), by = join_by(mod)) %>%
+  select(sim, type, pat, clu, mod, dat, reg, phi, amp, amp_ci95lo, amp_ci95up, phi_ci95lo, phi_ci95up) %>%
+  mutate(phi_ci95lo1 = phi_ci95lo,
+         phi_ci95up1 = case_when(phi_ci95lo >= phi_ci95up ~ 52, .default = phi_ci95up),
+         phi_ci95lo2 = case_when(phi_ci95lo >= phi_ci95up ~ 0),
+         phi_ci95up2 = case_when(phi_ci95lo >= phi_ci95up ~ phi_ci95up)) %>%
+  mutate(phi_ci95up1 = case_when(phi_ci95lo >= phi_ci95up ~ 52.5, .default = phi_ci95up),
+         phi_ci95lo2 = case_when(phi_ci95lo >= phi_ci95up ~ -0.5)) %>%
+  group_split(dat) %>%
+  lapply(function(x) {
+    filter(x, type == "sim") %>%
+      ggplot(aes(x = amp, y = pat)) +
+      geom_point(alpha = 0.2, color = "grey20") +
+      geom_point(data = filter(x, type == "true"), color = "orange") + 
+      geom_segment(data = filter(x, type == "true"), 
+                   aes(x = amp_ci95lo, xend = amp_ci95up), color = "orange") + 
+      facet_grid(reg+clu~., scales = "free", space = "free") + 
+      scale_x_continuous("Amplitude") + 
+      scale_y_discrete("") + 
+      theme(strip.text = element_blank()) + 
+      ggtitle(paste(x$dat[[1]])) + 
+    filter(x, type == "sim") %>%
+      ggplot(aes(x = phi, y = pat)) +
+      geom_segment(data = filter(x, type == "true"), 
+                   aes(x = phi_ci95lo1, xend = phi_ci95up1), color = "orange") + 
+      geom_segment(data = filter(x, type == "true"), 
+                   aes(x = phi_ci95lo2, xend = phi_ci95up2), color = "orange") + 
+      geom_point(alpha = 0.2, color = "grey20") +
+      geom_point(data = filter(x, type == "true"), color = "orange") + 
+      facet_nested(reg+clu~., scales = "free", space = "free", nest_line = TRUE, solo_line = TRUE) +
+      scale_x_continuous("Peak timing") + 
+      scale_y_discrete("") + 
+      theme(strip.text.y = element_text(angle = 0)) 
+  })
+```
+
+## Calculate bias
+```{r}
+bias_df <- tog_coef %>%
+  left_join(distinct(waic_best %>% rename(mod = mod_best), mod, dat), by = join_by(mod)) %>%
+  select(sim, type, pat, clu, mod, dat, reg, phi, amp) %>%
+  group_by(pat, clu, mod, reg) %>%
+  # Obtain true values
+  mutate(
+    phi_true = phi[sim == "true"],
+    amp_true = amp[sim == "true"]) %>%
+  filter(type == "sim") %>%
+  rowwise() %>%
+  # Obtain absolute bias
+  mutate(
+    amp_bias = abs(amp - amp_true),
+    phi_bias = case_when(
+      phi >= phi_true ~ min(abs(phi_true - phi), abs((52-phi) + phi_true)),
+      phi < phi_true ~ min(abs(phi_true - phi), abs((52-phi_true) + phi)))) %>%
+  ungroup() %>%
+  group_by(pat, clu, mod, reg) %>%
+  # Obtain mean absolute bias
+  mutate(
+    mean_amp_bias = mean(amp_bias),
+    mean_phi_bias = mean(phi_bias),
+    mean_amp_bias_75lo = quantile(amp_bias, 0.125),
+    mean_amp_bias_75up = quantile(amp_bias, 0.875),
+    mean_phi_bias_75lo = quantile(phi_bias, 0.125),
+    mean_phi_bias_75up = quantile(phi_bias, 0.875),
+    ) %>%
+  ungroup()
+```
+
+# Plot the bias from the true values
+```{r}
+bias_df %>%
+  left_join(tidy_names_clu) %>%
+  group_split(dat) %>%
+  lapply(function(x) {
+    ggplot(x, aes(x = amp_bias, y = pat)) +
+      geom_point(alpha = 0.2, color = "grey20") +
+      geom_point(aes(x = mean_amp_bias), color = "orange") + 
+      geom_segment(aes(x = mean_amp_bias_75lo, xend = mean_amp_bias_75up), color = "orange") +
+      facet_grid(reg+clu_tidy~., scales = "free", space = "free") + 
+      scale_x_continuous("Amplitude absolute bias") + 
+      scale_y_discrete("") + 
+      theme(strip.text = element_blank()) + 
+      ggtitle(paste(x$dat[[1]])) + 
+    ggplot(x, aes(x = phi_bias, y = pat)) +
+      geom_point(alpha = 0.2, color = "grey20") +
+      geom_point(aes(x = mean_phi_bias), color = "orange") + 
+      geom_segment(aes(x = mean_phi_bias_75lo, xend = mean_phi_bias_75up), color = "orange") +
+      facet_nested(reg+clu_tidy~., scales = "free", space = "free", nest_line = TRUE, solo_line = TRUE) + 
+      scale_x_continuous("Peak timing absolute bias") + 
+      scale_y_discrete("") + 
+      theme(strip.text.y = element_text(angle = 0)) 
+  })
+```
+
+# Define selection criteria ========================================================================
+```{r}
+biassumm_df <- bias_df %>%
+  distinct(type, pat, clu, mod, dat, reg, mean_amp_bias, mean_phi_bias, mean_amp_bias_75lo, mean_amp_bias_75up,
+           mean_phi_bias_75lo, mean_phi_bias_75up) %>%
+  left_join(distinct(all_datagaps, mod, clu, checkgaps_all), by = join_by(clu, mod)) %>%
+  mutate(included = !(mean_amp_bias > 0.2 | mean_phi_bias > 7))
+```
+
+# Save selection criteria 
+```{r}
+all_datagapssim <- biassumm_df %>%
+  distinct(pat, clu, mod, dat, reg, included)
+
+saveRDS(all_datagapssim, glue("{dirs$modres}/all_datagapssim.rds"))
+```
+
+# Supplementary figure XX ==========================================================================
+```{r}
+library(ggrepel)
+
+pldf_bias <- biassumm_df %>%
+  left_join(tidy_names_pat, by = join_by(pat)) %>%
+  left_join(tidy_names_clu, by = join_by(clu)) %>%
+  mutate(
+    included_tidy = if_else(included, "Included", "Excluded"),
+    dat = case_when(dat == "s08" ~ "Main analyses",
+                    dat == "semeth_s08" ~ "Sensitivity analyses: \nSerological methods",
+                    dat == "seallsero_s08" ~ "Sensitivity analyses: \nAll serological data rotavirus"))
+
+supfig4 <- filter(pldf_bias, included_tidy == "Included") %>%
+  ggplot(aes(x = mean_phi_bias, y = mean_amp_bias)) + 
+  geom_hline(aes(yintercept = 0.2), color = "grey") + 
+  geom_vline(aes(xintercept = 7), color = "grey") + 
+  geom_point(aes(x = mean_phi_bias, y = mean_amp_bias), color = "orange") + 
+  geom_point(data = filter(pldf_bias, included_tidy == "Excluded"), color = "grey20") + 
+  geom_label_repel(data = filter(pldf_bias, included_tidy == "Excluded"),
+                   aes(label = paste0(pat_tidy, ": ", clu_tidy)), max.overlaps = Inf, nudge_x = 2, 
+                   nudge_y = 0.1, size = 3, label.size = 0.2,
+                   direction = "y", hjust = "left", key_glyph="point") + 
+  scale_x_continuous("Peak timing mean absolute bias", limits = c(0,20)) + 
+  scale_y_continuous("Amplitude mean absolute bias", limits = c(0,1)) + 
+  guides(label = "none") + 
+  facet_wrap(~dat, ncol = 2, scales = "free")
+
+supfig4
+
+# Save the plot
+ggsave(glue("{dirs$figures}/figsup4.pdf"), supfig4, width = 9, height = 9)
+```
+
+####################################################################################################
+# END 
+####################################################################################################

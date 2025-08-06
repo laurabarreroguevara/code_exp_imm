@@ -45,14 +45,14 @@ theme_set(theme_classic())
 ```{r}
 dat_l <- lapply(str_subset(str_subset(list.files(glue("{dirs$modfit}"), full.names = TRUE), "s08.rds"),
                            "datase", negate = TRUE), readRDS)
-names(dat_l) <- sub(".*brms_(.*?)_(vl|v1)_s08.*", "\\1", 
+names(dat_l) <- sub(".*brms_(.*?)_(vl|v1|v3)_s08.*", "\\1", 
                     str_subset(str_subset(list.files(glue("{dirs$modfit}")), "s08.rds"),
                            "datase", negate = TRUE))
 ```
 
 # Summary Statistics: Basic checks on participants, studies, and countries
 ```{r}
-# Check 96 studies and 48599 participants
+# Check 96 studies and 46512 participants
 length(unique(bind_rows(dat_l, .id = "pat")$pid))
 length(unique(bind_rows(dat_l, .id = "pat")$study))
 # Number of countries
@@ -68,7 +68,7 @@ select(bind_rows(dat_l, .id = "pat"), country, age, vac_date_v1, lat_med, lon_me
 # Extract participants information and merge all data sets. 
 df_pl1 <- bind_rows(lapply(dat_l, distinct, study, pid, sex, age), .id = "pat") %>%
   # Add tidy names for the pathogens 
-  left_join(pat_tidy_names, by = join_by(pat)) %>%
+  left_join(tidy_names_pat, by = join_by(pat)) %>%
   # Create a new variable ('mod') categorizing the pathogens.
   mutate(mod = case_when(str_detect(pat, "multi", negate = TRUE) ~ "UVN unipathogen",
                          pat %in% c("multi_ipv", "multi_men", "multi_opv", "multi_pertua",
@@ -140,7 +140,7 @@ df_pl2 <- bind_rows(lapply(dat_l[str_subset(names(dat_l), "multi", negate = TRUE
     summarise(tot = n(), .groups = "drop")
   }), .id = "pat") %>%
   # Add tidy names for the pathogens 
-  left_join(pat_tidy_names, by = join_by(pat)) %>%
+  left_join(tidy_names_pat, by = join_by(pat)) %>%
   # Rename countries to match world map
   mutate(country = case_when(country == "United States" ~ "USA", .default = country))
 
@@ -178,7 +178,7 @@ ggsave(pl2, file = glue("{dirs$figures}/data_raw_map.pdf"), width = 15, height =
 # Prepare data for the plot 
 df_pl3 <- bind_rows(lapply(dat_l, distinct, study, pid, vac_week_v1, age, reg_6), .id = "pat") %>%
   # Add tidy names for the pathogens 
-  left_join(pat_tidy_names, by = join_by(pat)) %>%
+  left_join(tidy_names_pat, by = join_by(pat)) %>%
   # Change names of the models 
   mutate(reg_6 = as.character(reg_6))
 
@@ -219,7 +219,7 @@ ggsave(pl3, file = glue("{dirs$figures}/data_raw_vaccinations.pdf"), width = 10,
 # Prepare data for the plot 
 df_pl4 <- bind_rows(lapply(dat_l, distinct, study, pid, time_vl_s1, age), .id = "pat") %>%
   # Add tidy names for the pathogens 
-  left_join(pat_tidy_names, by = join_by(pat))
+  left_join(tidy_names_pat, by = join_by(pat))
 
 # Plot it ------------------------------------------------------------------------------------------
 pl4 <- ggplot(data = df_pl4, aes(x = time_vl_s1/7, y = pat_tidy)) +
@@ -235,7 +235,7 @@ ggsave(pl4, file = glue("{dirs$figures}/data_raw_immunogenicity_time.pdf"), widt
 ```{r}
 # Prepare data for the plot 
 ## Multi pathogen or multi immunogenicity to long format 
-df_pl5 <- sapply(filter(pat_tidy_names, pat %in% names(dat_l))$pat, function(x) {
+df_pl5 <- sapply(filter(tidy_names_pat, pat %in% names(dat_l))$pat, function(x) {
   ## If not multi, just distinct 
   if(str_detect(x, "multi") == FALSE) { 
     distinct(dat_l[[x]], study, pid, imm_val_s1, imm_sero_s1, imm_met_s1, imm_cutoff_s1, age, censored)
@@ -255,11 +255,11 @@ df_pl5 <- sapply(names(df_pl5), function(x) {
            imm_met_s1 = case_when(!is.na(imm_val_s1) ~ unique(dat_l[[x]]$imm_met_s1)),
            pathogen = x) %>%
       # Add tidy names for the pathogens 
-      left_join(pat_tidy_names, join_by(pathogen == pat))
+      left_join(tidy_names_pat, join_by(pathogen == pat))
   } else {
     mutate(df_pl5[[x]], pathogen = x) %>%
       # Add tidy names for the pathogens 
-      left_join(pat_tidy_names, join_by(pathogen == pat))
+      left_join(tidy_names_pat, join_by(pathogen == pat))
   }  
 }, simplify = FALSE)
 
@@ -303,6 +303,22 @@ pl5.2 <- bind_rows(dat_l, .id = "pat") %>%
 ggsave(pl5.2, file = glue("{dirs$figures}/data_raw_seropositive.pdf"), width = 8, height = 8)
 ```
 
+# Time frames per pathogen
+```{r}
+bind_rows(dat_l, .id = "pat") %>%
+  filter(str_detect(pat, "multi|opv", negate = TRUE)) %>%
+  group_by(pat) %>%
+  summarise(year_min = min(year(vac_date_v1)),
+            year_max = max(year(vac_date_v1))) %>%
+  ggplot(aes(y = pat, x = year_min)) +
+  geom_vline(xintercept = c(1998, 2018), color = "grey") + 
+  geom_point() + 
+  geom_point(aes(x = year_max)) + 
+  geom_segment(aes(x = year_min, xend = year_max)) +
+  scale_x_continuous(breaks = 1998:2018)
+```
+
+
 # Figure 1 =========================================================================================
 
 # Figure 1a ----------------------------------------------------------------------------------------
@@ -317,7 +333,7 @@ pat_sel <- c("rota", "hav", "hbv", "dipht", "tetan", "pertuapt", "ipv1",
 # merge with tidy pathogen names.
 df_fig1a <- bind_rows(lapply(dat_l[pat_sel], distinct, study, pid, sex, age), .id = "pat") %>%
   # Add tidy names for the pathogens 
-  left_join(pat_tidy_names, by = join_by(pat))
+  left_join(tidy_names_pat, by = join_by(pat))
 ```
 
 # Figure 1a Plots: Participants, Age, and Sex Ratio
@@ -345,10 +361,13 @@ fig1a.1 <- df_fig1a %>%
   theme(legend.position = "none",
         panel.grid.major.y = element_line())
 
+# Age
+(min(df_fig1a$age)*7)/30
+(max(df_fig1a$age)*7)/30
 ## Figure 1a.2: Plot showing age at first vaccination (in months) by pathogen
 fig1a.2 <- df_fig1a %>%
   # Obtain age in weeks 
-  mutate(age = round(age/4, digits = 0)) %>%
+  mutate(age = round((age*7)/30, digits = 0)) %>%
   # Obtain number of individuals per age  
   group_by(pat_tidy, pat, age) %>%
   summarise(tot = n(), .groups = "drop") %>%
@@ -392,10 +411,10 @@ world <- map_data("world")
 ## Prepare data for two groups of selected pathogens, merging tidy names and 
 ## standardizing country names (e.g., "United States" to "USA")
 df_fig1b1 <- bind_rows(dat_l[pat_sel[1:7]], .id = "pat") %>%
-  left_join(pat_tidy_names, by = join_by(pat)) %>%
+  left_join(tidy_names_pat, by = join_by(pat)) %>%
   mutate(country = case_when(country == "United States" ~ "USA", .default = country))
 df_fig1b2 <- bind_rows(dat_l[pat_sel[8:14]], .id = "pat") %>%
-  left_join(pat_tidy_names, by = join_by(pat)) %>%
+  left_join(tidy_names_pat, by = join_by(pat)) %>%
   mutate(country = case_when(country == "United States" ~ "USA", .default = country))
 
 ## Aggregate location data across all selected pathogens for mapping purposes
@@ -408,7 +427,7 @@ df_ple <- bind_rows(lapply(dat_l[pat_sel], function(x) {
               .groups = "drop")
   }), .id = "pathogen") %>%
   # Add tidy names for the pathogens 
-  left_join(pat_tidy_names, join_by(pathogen == pat)) %>%
+  left_join(tidy_names_pat, join_by(pathogen == pat)) %>%
   # Rename countries to match world map
   mutate(country = case_when(country == "United States" ~ "USA", .default = country))
 ```
@@ -430,9 +449,12 @@ fig1b.1.1 <- df_fig1b1 %>%
   scale_x_continuous("Week of vaccination", breaks = c(1, 18, 35, 52), expand = c(0,0)) +
   scale_y_continuous("Count", breaks = fun_breaks, limits = fun_limits, expand = c(0,0)) +
   scale_color_viridis_d(option = "mako", begin = 0.2, end = 0.8) +
+  ggtitle("Count") +
   theme(strip.background = element_blank(),
         strip.text = element_text(hjust = 0),
-        legend.position = "none") 
+        legend.position = "none",
+        plot.title = element_text(size = 11),
+        axis.title.y = element_blank())
 fig1b.1.2 <- df_fig1b2 %>%
   # Obtain total participants per week and region
   group_by(pat, pat_tidy, vac_week_v1, reg_4) %>%
@@ -446,9 +468,12 @@ fig1b.1.2 <- df_fig1b2 %>%
   scale_x_continuous("Week of vaccination", breaks = c(1, 18, 35, 52), expand = c(0,0)) +
   scale_y_continuous("Count", breaks = fun_breaks, limits = fun_limits, expand = c(0,0)) +
   scale_color_viridis_d(option = "mako", begin = 0.2, end = 0.8) +
+  ggtitle("Count") +
   theme(strip.background = element_blank(),
         strip.text = element_text(hjust = 0),
-        legend.position = "none") 
+        legend.position = "none",
+        plot.title = element_text(size = 11),
+        axis.title.y = element_blank())
 ```
 
 # Figure 1b.2: Density plots of immunogenicity results per region
@@ -461,9 +486,12 @@ fig1b.2.1 <- df_fig1b1 %>%
   scale_y_continuous("Density", expand = c(0,0), breaks = fun_breaks, limits = fun_limits) + 
   scale_color_viridis_d(option = "mako", begin = 0.2, end = 0.8) +
   scale_fill_viridis_d(option = "mako", begin = 0.2, end = 0.8) +
+  ggtitle("Density") +
   theme(strip.background = element_blank(),
         strip.text = element_text(color = "transparent"),
-        legend.position = "none") 
+        legend.position = "none",
+        plot.title = element_text(size = 11),
+        axis.title.y = element_blank()) 
 fig1b.2.2 <- df_fig1b2 %>%
   ggplot(aes(x = imm_val_s1, fill = reg_4, color = reg_4)) +
   geom_density(alpha = 0.1, stat = "ecdf") + 
@@ -472,9 +500,12 @@ fig1b.2.2 <- df_fig1b2 %>%
   scale_y_continuous("Density", expand = c(0,0), breaks = fun_breaks, limits = fun_limits) + 
   scale_color_viridis_d(option = "mako", begin = 0.2, end = 0.8) +
   scale_fill_viridis_d(option = "mako", begin = 0.2, end = 0.8) +
+  ggtitle("Density") +
   theme(strip.background = element_blank(),
         strip.text = element_text(color = "transparent"),
-        legend.position = "none") 
+        legend.position = "none",
+        plot.title = element_text(size = 11),
+        axis.title.y = element_blank()) 
 ```
 
 # Figure 1b.3: Maps of study locations for each subgroup of pathogens
@@ -485,7 +516,7 @@ fig1b.3.1 <- bind_rows(lapply(unique(df_fig1b1$pat), function(x) {
          dat = case_when(region %in% (filter(df_fig1b1, pat == x))$country ~ TRUE, .default = FALSE)
          )})) %>%
   # Add tidy names for the pathogens 
-  left_join(pat_tidy_names, by = join_by(pat)) %>%
+  left_join(tidy_names_pat, by = join_by(pat)) %>%
   # Plot 
   ggplot(aes(x = long, y = lat, group = group, fill = dat)) +
   facet_grid(pat_tidy~.) +
@@ -506,10 +537,13 @@ fig1b.3.1 <- bind_rows(lapply(unique(df_fig1b1$pat), function(x) {
   guides(size = guide_legend(title.position = "top", nrow = 3, byrow = T),
          color = guide_legend(title.position = "top", nrow = 3, byrow = T),
          shape = "none") +
+  ggtitle("Latitude (°)") +
   theme(legend.position = "none",
         strip.background = element_blank(),
         strip.text = element_blank(),
-        panel.grid = element_blank()) + 
+        panel.grid = element_blank(),
+        plot.title = element_text(size = 11),
+        axis.title.y = element_blank()) + 
   coord_quickmap()
   
 fig1b.3.2 <- bind_rows(lapply(unique(df_fig1b2$pat), function(x) {
@@ -518,7 +552,7 @@ fig1b.3.2 <- bind_rows(lapply(unique(df_fig1b2$pat), function(x) {
          dat = case_when(region %in% (filter(df_fig1b2, pat == x))$country ~ TRUE, .default = FALSE)
          )})) %>%
   # Add tidy names for the pathogens 
-  left_join(pat_tidy_names, by = join_by(pat)) %>%
+  left_join(tidy_names_pat, by = join_by(pat)) %>%
   # Plot 
   ggplot(aes(x = long, y = lat, group = group, fill = dat)) +
   facet_grid(pat_tidy~.) +
@@ -539,10 +573,13 @@ fig1b.3.2 <- bind_rows(lapply(unique(df_fig1b2$pat), function(x) {
   guides(size = guide_legend(title.position = "top", nrow = 3, byrow = T),
          color = guide_legend(title.position = "top", nrow = 3, byrow = T),
          shape = "none") +
+  ggtitle("Latitude (°)") +
   theme(legend.position = "none",
         strip.background = element_blank(),
         strip.text = element_blank(),
-        panel.grid = element_blank()) + 
+        panel.grid = element_blank(),
+        plot.title = element_text(size = 11),
+        axis.title.y = element_blank()) + 
   coord_quickmap()
 ```
 
@@ -559,7 +596,7 @@ fig1b <- fig1b.1.1 + fig1b.2.1 + fig1b.3.1 + fig1b.1.2 + fig1b.2.2 + fig1b.3.2 +
 fig1 <- free(fig1a) + fig1b + plot_layout(nrow = 2, heights  = c(1,2))
 
 # Save the plot 
-ggsave(glue("{dirs$figures}/fig1.pdf"), width = 12, height = 10)
+ggsave(glue("{dirs$figures}/fig1.pdf"), width = 12, height = 12)
 ```
 
 # Supplementar figure 1: Week of vaccination =======================================================
@@ -568,7 +605,7 @@ source("03_mod/fun_checkgaps.R")
 
 df_figsup1 <- bind_rows(lapply(dat_l[pat_sel], distinct, study, pid, vac_week_v1, reg_6), .id = "pat") %>%
   # Add tidy names for the pathogens 
-  left_join(pat_tidy_names, by = join_by(pat)) %>%
+  left_join(tidy_names_pat, by = join_by(pat)) %>%
   group_by(pat, reg_6) %>%
   mutate(checkgaps = fun_checkgaps(vac_week_v1, lim = 25))
 
@@ -588,13 +625,39 @@ figsup1 <- df_figsup1 %>%
 ggsave(plot = figsup1, glue("{dirs$figures}/figsup1.pdf"), width = 10, height = 10)
 ```
 
+# Supplementar figure 1: Week of vaccination =======================================================
+```{r}
+source("03_mod/fun_checkgaps.R")
+
+df_figsup1b <- bind_rows(lapply(dat_l[pat_sel], distinct, study, pid, birth_week, reg_6), .id = "pat") %>%
+  # Add tidy names for the pathogens 
+  left_join(tidy_names_pat, by = join_by(pat)) %>%
+  group_by(pat, reg_6) %>%
+  mutate(checkgaps = fun_checkgaps(birth_week, lim = 25))
+
+figsup1b <- df_figsup1b %>%
+  #filter(checkgaps == FALSE) %>%
+  ggplot(aes(x = birth_week, fill = reg_6)) +
+  geom_histogram(bins = 52) +
+  scale_fill_viridis_d(option = "mako", begin = 0.2, end = 0.8) +
+  facet_wrap(pat_tidy+reg_6~., scales = "free_y", ncol = 6) +
+  scale_y_continuous("Total individuals vaccinated", expand = c(0,0), breaks = fun_breaks,
+                     limits = fun_limits) + 
+  scale_x_continuous("Week", breaks = c(1,18,35,52), expand = c(0,0)) + 
+  theme(legend.position = "none",
+        strip.background = element_blank())
+
+# Save the plot 
+ggsave(plot = figsup1b, glue("{dirs$figures}/figsup1b.pdf"), width = 10, height = 10)
+```
+
 # Per-Pathogen Maps: Create individual maps for each selected pathogen =============================
 
 # Prepare data for the plot 
 ```{r}
 # Combine data for selected pathogens and standardize country names
 df_figmaps <- bind_rows(dat_l[pat_sel], .id = "pat") %>%
-  left_join(pat_tidy_names, by = join_by(pat)) %>%
+  left_join(tidy_names_pat, by = join_by(pat)) %>%
   mutate(country = case_when(country == "United States" ~ "USA", .default = country))
 ```
 
@@ -621,7 +684,7 @@ pl_l[[i]] <- mutate(world,
          dat = case_when(region %in% (filter(df_figmaps, pat == i))$country ~ TRUE, .default = FALSE)
          ) %>%
   # Add tidy names for the pathogens 
-  left_join(pat_tidy_names, by = join_by(pat)) %>%
+  left_join(tidy_names_pat, by = join_by(pat)) %>%
   # Plot 
   ggplot(aes(x = long, y = lat, group = group, fill = dat)) +
   facet_wrap(pat_tidy~., ncol = 4) +

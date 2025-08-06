@@ -757,6 +757,17 @@ fun_dgsk_exceptions <- function(stu_dfs, study_id = "10555") {
       filter(!(v_id %in% c("444.006", "445.006", "446.006")))
   }
   
+  ## 113808 ----------------------------------------------------------------------------------------
+  if(study_id == "113808") {
+    # Unclear method (changing according to distribution)
+    stu_dfs$sero <- stu_dfs$sero %>%
+      # Missing method (adding from protocol)
+      mutate(method = case_when(
+        method == "ELI" & seroname %in% c("Anti-Tetanus", "Anti-Diphtheria", 
+                                          "Anti-PT", "Anti-PRN", "Anti-FHA") ~ "elisa_ch",
+        .default = method))
+  }
+  
   ## 113994 ----------------------------------------------------------------------------------------
   if(study_id == "113994") {
     # Surplus method (eliminate opaplex)

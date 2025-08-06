@@ -1,0 +1,334 @@
+---
+title: "BRMS plot results"
+author: "Laura Andrea Barrrero Guevara"
+date: "2023-02-23"
+output: html_document
+---
+
+####################################################################################################
+Purpose of script: To check the model results and plot it 
+####################################################################################################
+
+```{r}
+rm(list = ls())
+source("../00_pck.R")
+source("fun_ampphi.R")
+theme_set(theme_classic() + theme(strip.background = element_blank()))
+```
+
+# Read in the data of the models 
+```{r}
+# Read in the waic (only models that converged)
+waic_df <- readRDS(glue("{dirs$modres}/all_waic.rds"))
+waic_best <- readRDS(glue("{dirs$modres}/all_waicbest.rds"))
+# Define models converging that have a sine function 
+df_converged <- filter(waic_df, dat %in% c("s08", "semeth_s08", "seallsero_s08"), 
+                       mod_out == "imm", str_detect(mod_name, "cs"))
+```
+
+# Extract mean cos and sin coefficients of the sine wave ===========================================
+```{r}
+all_coefcosine <- pomp::bake(file = glue("{dirs$modres}/all_coefcosine.rds"), dir = "", {
+  # Read in the coeficients 
+  sapply(df_converged$mod, function(x) {
+    readRDS(glue("{dirs$coef}/coef_{x}"))$fixed %>%
+      rownames_to_column(var = "parameter") %>%
+      # Coefficients of the intercepts, cos and sin
+      filter(str_detect(parameter, "Int|reg|cos|sin")) %>%
+      filter(str_detect(parameter, "sd_", negate = TRUE))
+  }, simplify = FALSE) %>%
+    bind_rows(.id = "mod") %>%
+    # From mod to variables (pat, mod_out, mod_name, dat, vac, gauss, pat_tidy, reg, multi)
+    left_join(df_converged, by = join_by(mod)) %>%
+    # From param to variables (param, imm_name, clu) -----------------------------------------------
+    mutate(
+      # Remove strings pi_vac_week_v1 and :
+      parameter = str_remove_all(parameter, "pi_vac_week_v1|:"),
+      # Define parameter type (int, p_cos, p_sin)
+      param = case_when(str_detect(parameter, "cos") ~ "p_cos",
+                        str_detect(parameter, "sin") ~ "p_sin",
+                        .default = "int"),
+      # Remove strings parameter type 
+      parameter = str_remove_all(parameter, "Intercept|cos|sin"),
+      # Define immunogenicity name between immvals1anti and _
+      imm_name = str_extract(parameter, "(?<=immvals1anti)[^_]+"), 
+      # Remove strings immunogenicity name
+      parameter = str_remove_all(parameter, paste0("immvals1anti", imm_name, "_")),
+      # Remove strings reg 
+      parameter = str_remove_all(parameter, reg), 
+      # Define cluster name and reference value 
+      clu = case_when(str_detect(reg, "reg_2") & parameter == "" ~ "1_North",
+                      str_detect(reg, "reg_3|reg_4|reg_6") & parameter == "" ~ "1_Temperate",
+                      !is.na(reg) & parameter != "" ~ parameter)) %>%
+    select(pat, mod, param, mod_name, reg, clu, imm_name, Estimate, mod_out, dat, vac, gauss, 
+           pat_tidy, multi) %>%
+    # Obtain cos and sin per clu -------------------------------------------------------------------
+    pivot_wider(names_from = param, values_from = Estimate) %>% 
+    group_by(mod, reg, imm_name) %>%
+    mutate(
+      inti = if_else(row_number() == 1, 0, first(int)),  
+      p_cosi = if_else(row_number() == 1, 0, first(p_cos)),  
+      p_sini = if_else(row_number() == 1, 0, first(p_sin))) %>%
+    ungroup() %>%
+    mutate(
+      int = int + inti,
+      p_cos = p_cos + p_cosi,
+      p_sin = p_sin + p_sini) %>%
+    select(-c(inti, p_cosi, p_sini)) %>%
+    # Estimate amplitude and phase -----------------------------------------------------------------
+    mutate(amp_ls = fun_amp_ls(p_cos = p_cos, p_sin = p_sin, mu = int),
+           phi = fun_phi(p_cos = p_cos, p_sin = p_sin, phi_type = "week"),
+           amp = fun_amp_emp(p_cos = p_cos, p_sin = p_sin, mu = int, val_return = "amp_ns"),
+           mu_ns = fun_amp_emp(p_cos = p_cos, p_sin = p_sin, mu = int, val_return = "mu_ns")) %>%
+    # Fix names ----------------------------------------------
+    rename_with(~paste0(.x, "_mean"), .cols = c(int, p_cos, p_sin, amp_ls, amp, phi, mu_ns))
+  })
+```
+
+# Extract covars coefficients ======================================================================
+```{r}
+all_coefcovars <- pomp::bake(file = glue("{dirs$modres}/all_coefcovars.rds"), dir = "", {
+  sapply(df_converged$mod, function(x) {
+    # Read in the coeficients 
+    readRDS(glue("{dirs$coef}/coef_{x}"))$fixed %>%
+      rownames_to_column(var = "parameter")
+  }, simplify = FALSE) %>%
+    bind_rows(.id = "mod") %>%
+    # Coefficients of the covars only 
+    filter(str_detect(parameter, "cos|sin", negate =TRUE)) %>%
+    rename_with(tolower) %>% 
+    rename(est = estimate, est_se = est.error, est_ci95lo = 'l-95% ci', est_ci95up = 'u-95% ci') %>%
+    select(mod, parameter, starts_with("est")) %>%
+    # From mod to variables (pat, mod_out, mod_name, dat, vac, gauss, pat_tidy, reg, multi) --------
+    left_join(df_converged, by = join_by(mod)) %>%
+    # From param to variables (imm_name, param, param_i) -------------------------------------------
+    mutate(
+      imm_name = str_extract(parameter, "(?<=immvals1anti)[^_]+"),
+      parameter = str_remove_all(parameter, "immvals1anti"),
+      parameter = str_remove_all(parameter, paste0(imm_name, "_")),
+      param = case_when(
+        str_detect(parameter, "reg_") ~ reg,
+        str_detect(parameter, "vac_name_v1") ~ "vac_name_v1",
+        str_detect(parameter, "sex") ~ "sex",
+        .default = parameter),
+      param_i = case_when(
+        str_detect(parameter, "sexM") ~ "M",
+        str_detect(parameter, reg) ~ str_remove_all(parameter, reg),
+        str_detect(parameter, "vac_name_v1") ~ str_remove_all(parameter, "vac_name_v1"))) %>%
+    select(-parameter) %>%
+    select(mod, param, param_i, everything())
+})
+```
+
+# Extract random effects coefficients ==============================================================
+```{r}
+all_coefre <- pomp::bake(file = glue("{dirs$modres}/all_coefre.rds"), dir = "", {
+  sapply(df_converged$mod, function(x) {
+    # Read in the coefficients 
+    coef <- readRDS(glue("{dirs$coef}/coef_{x}"))
+    coef$random$shape <- coef$spec_pars
+    # Return coefficients
+    lapply(coef$random, rownames_to_column, var = "parameter") %>%
+      bind_rows(.id = "re") 
+  }, simplify = FALSE) %>%
+    bind_rows(.id = "mod") %>%
+    rename_with(tolower) %>%
+    # Rename estimate summary
+    rename(est = estimate, est_se = est.error, est_ci95lo = 'l-95% ci', est_ci95up = 'u-95% ci') %>%
+    select(mod, parameter, re, starts_with("est")) %>%
+    # From mod to variables (pat, mod_out, mod_name, dat, vac, gauss, pat_tidy, reg, multi) ----------
+    left_join(df_converged, by = join_by(mod)) %>%
+    # From param to variables (imm_name1, imm_name2, clu) --------------------------------------------
+    mutate(imm_name = str_extract(parameter, "(?<=immvals1anti)[^_]+"),
+           parameter = str_remove_all(parameter, "immvals1anti|_"),
+           parameter = str_remove_all(parameter, replace_na(imm_name, "NA")),
+           param = if_else(str_detect(parameter, "Intercept"), "re", parameter),
+           param_i = if_else(param == "sigma", "sigma", re)) %>%
+    select(-c(parameter, re)) %>%
+    select(mod, param, param_i, everything())
+})
+```
+
+# Extract correlation matrix =======================================================================
+
+```{r}
+# all_coefrescor <- pomp::bake(file = glue("{dirs$modres}/all_coefrescor.rds"), dir = "", {
+#   test <- sapply(str_subset(df_converged$mod, "multi"), function(x) {
+#     # Read in the coefficients
+#     readRDS(glue("{dirs$coef}/coef_{x}"))$rescor_pars %>%
+#       rownames_to_column(var = "parameter")
+#   }, simplify = FALSE) %>%
+#     bind_rows(.id = "mod") %>%
+#     rename_with(tolower) %>%
+#     rename(rescor = estimate,
+#            rescor_se = est.error,
+#            rescor_ci95lo = 'l-95% ci',
+#            rescor_ci95up = 'u-95% ci') %>%
+#     select(mod, parameter, starts_with("rescor")) 
+#   
+#   test %>%
+#     # From mod to variables (pat, mod_out, mod_name, dat, vac, gauss, pat_tidy, reg, multi) ----------
+#     left_join(select(df_converged, -c(patuni, patuni_tidy, imm_name)), by = join_by(mod)) %>%
+#     # From param to variables (imm_name1, imm_name2, clu) --------------------------------------------
+#     mutate(parameter = str_remove_all(parameter, "rescor|anti|immvals1|\\(|\\)")) %>%
+#     separate(parameter, into = c("imm_name1", "imm_name2"), sep = ",") %>%
+#     # From imm_name1 to patuni names and tidy ------------------------------------------------------
+#     left_join(patmvn_uvn,  by = join_by(pat == pat, imm_name1 == imm_name)) %>%
+#     rename(patuni1 = patuni) %>%
+#     left_join(patmvn_uvn,  by = join_by(pat == pat, imm_name2 == imm_name)) %>%
+#     rename(patuni2 = patuni) %>%
+#     left_join(rename(tidy_names_pat, patuni1 = pat, patuni_tidy1 = pat_tidy), by = join_by(patuni1)) %>%
+#     left_join(rename(tidy_names_pat, patuni2 = pat, patuni_tidy2 = pat_tidy), by = join_by(patuni2))
+# })
+```
+
+
+
+
+# Extract draws from the posterior for covars coefficients factors =================================
+(to make the differences we want)
+```{r}
+all_samplescovarsfct <- pomp::bake(file = glue("{dirs$modres}/all_samplescovarsfct.rds"), dir = "", {
+  sam_diff <- map_dfr(
+    df_converged$mod, \(m)
+      readRDS(glue("{dirs$samples}/samples_{m}")) %>%
+        mutate(sam_no = row_number(), mod = m) %>%
+        pivot_longer(-c(sam_no, mod), names_to = "parameter", values_to = "estimate") %>%
+        # Coefficients of the intercepts, regions and vaccine names 
+        filter(str_detect(parameter, "Intercept|reg|vac_name_v1|sex"),
+               !str_detect(parameter, "sd_|cos|sin"))) %>%
+  # From mod to variables (pat, mod_out, mod_name, dat, vac, gauss, pat_tidy, reg, multi) --------
+    left_join(df_converged, by = join_by(mod)) %>%
+  # From param to variables (imm_name, param, param_i) -------------------------------------------
+    mutate(
+      imm_name = str_extract(parameter, "(?<=immvals1anti)[^_]+"),
+      parameter = str_remove_all(parameter, "immvals1anti|b_") %>% 
+                    str_remove_all(paste0(imm_name, "_")),
+      param = case_when(
+        str_detect(parameter, "Intercept") ~ "int",
+        str_detect(parameter, "sex") ~ "sex",
+        str_detect(parameter, "reg_") ~ reg,
+        str_detect(parameter, "vac_name_v1") ~ "vac_name_v1",
+        .default = parameter),
+      param_i = case_when(
+        str_detect(parameter, "sexM") ~ "M",
+        str_detect(parameter, reg) ~ str_remove_all(parameter, reg),
+        str_detect(parameter, "vac_name_v1") ~ str_remove_all(parameter, "vac_name_v1"))) %>%
+    select(-parameter) %>%
+    select(mod, param, param_i, everything())
+  
+  # For each factor, obtain the levels estimates, not differences from index
+  sam_mean <- list("sex","reg", "vac_name_v1") %>%
+  map_dfr(\(x)
+   group_by(sam_diff, mod) %>%
+     filter(str_detect(str_c(c(param), collapse = "|"), x)) %>%
+     ungroup() %>%
+     filter(str_detect(param, str_c(c("int", x), collapse = "|"))) %>%
+     mutate(
+       param_i = case_when(
+         x == "sex" & param == "int" ~ "F",
+         x == "reg" & param == "int" & reg %in% c("reg_3", "reg_4", "reg_6") ~ "1_Temperate",
+         x == "reg" & param == "int" & reg == "reg_2" ~ "1_North",
+         x == "vac_name_v1" & param == "int" & pat %in% c("dipht", "tetan") ~ "dtpa", 
+         x == "vac_name_v1" & param == "int" & str_detect(pat, "strep") ~ "strep10",
+         .default = param_i),
+       param_level = x) %>%
+     group_by(mod, param_level, imm_name, sam_no) %>%
+     mutate(inti = if_else(row_number() == 1, 0, first(estimate))) %>%
+     ungroup() %>%
+     mutate(estimate_level = estimate + inti) %>%
+     select(-inti)
+  )
+  return(sam_mean)
+})
+```
+
+# Extract draws from the posterior for amplitude and phase =========================================
+```{r}
+all_samplescosine <- pomp::bake(file = glue("{dirs$modres}/all_samplescosine.rds"), dir = "", {
+  # Read in the coeficients 
+  sapply(df_converged$mod, function(x) {
+    readRDS(glue("{dirs$samples}/samples_{x}")) %>%
+      mutate(sam_no = row_number()) %>%
+      pivot_longer(-sam_no, names_to = "parameter", values_to = "Estimate") %>%
+      # Coefficients of the intercepts, cos and sin
+      filter(str_detect(parameter, "Int|reg|cos|sin")) %>%
+      filter(str_detect(parameter, "sd_", negate = TRUE))
+  }, simplify = FALSE) %>%
+    bind_rows(.id = "mod") %>%
+    # From mod to variables (pat, mod_out, mod_name, dat, vac, gauss, pat_tidy, reg, multi)
+    left_join(df_converged, by = join_by(mod)) %>%
+    # From param to variables (param, imm_name, clu) -----------------------------------------------
+    mutate(
+      # Remove strings initial b_
+      parameter = sub("^b_", "", parameter),
+      # Remove strings pi_vac_week_v1 and :
+      parameter = str_remove_all(parameter, "pi_vac_week_v1|:"), 
+      # Define parameter type (int, p_cos, p_sin)
+      param = case_when(str_detect(parameter, "cos") ~ "p_cos",
+                        str_detect(parameter, "sin") ~ "p_sin",
+                        .default = "int"), 
+      # Remove strings parameter type 
+      parameter = str_remove_all(parameter, "Intercept|cos|sin"),
+      # Define immunogenicity name between immvals1anti and _
+      imm_name = str_extract(parameter, "(?<=immvals1anti)[^_]+"), 
+      # Remove strings immunogenicity name
+      parameter = str_remove_all(parameter, paste0("immvals1anti", imm_name, "_")), 
+      # Remove strings reg 
+      parameter = str_remove_all(parameter, reg), 
+      # Define cluster name and reference value 
+      clu = case_when(str_detect(reg, "reg_2") & parameter == "" ~ "1_North",
+                      str_detect(reg, "reg_3|reg_4|reg_6") & parameter == "" ~ "1_Temperate",
+                      !is.na(reg) & parameter != "" ~ parameter)) %>%
+    select(sam_no, pat, mod, param, mod_name, reg, clu, imm_name, Estimate, mod_out, dat, vac, gauss, 
+           pat_tidy, multi) %>%
+    # Obtain cos and sin per clu -------------------------------------------------------------------
+    pivot_wider(names_from = param, values_from = Estimate) %>%
+    group_by(mod, reg, imm_name, sam_no) %>%
+    mutate(
+      inti = if_else(row_number() == 1, 0, first(int)),  
+      p_cosi = if_else(row_number() == 1, 0, first(p_cos)),  
+      p_sini = if_else(row_number() == 1, 0, first(p_sin))) %>%
+    ungroup() %>%
+    mutate(
+      int = int + inti,
+      p_cos = p_cos + p_cosi,
+      p_sin = p_sin + p_sini) %>%
+    select(-c(inti, p_cosi, p_sini)) %>%
+    # Estimate amplitude and phase -----------------------------------------------------------------  
+    mutate(sam_amp_ls = fun_amp_ls(p_cos = p_cos, p_sin = p_sin, mu = int),
+           sam_phi = fun_phi(p_cos = p_cos, p_sin = p_sin, phi_type = "week"),
+           sam_amp = fun_amp_emp(p_cos = p_cos, p_sin = p_sin, mu = int, val_return = "amp_ns"),
+           mu_ns = fun_amp_emp(p_cos = p_cos, p_sin = p_sin, mu = int, val_return = "mu_ns")) %>%
+    group_by(mod, clu, imm_name) %>% 
+    mutate(across(c(
+      int, p_cos, p_sin, sam_amp_ls, mu_ns, sam_amp),
+      list(mean = mean, median = median, q25 = ~quantile(.x, 0.25), q75 = ~quantile(.x, 0.75),
+           ci95lo = ~quantile(.x, 0.025), ci95up = ~quantile(.x, 0.975), min = min, max = max),
+      .names = "sam_{.col}_{.fn}"),
+      sam_phi_mean = fun_phisummary(sam_phi, "phi_mean"),
+      sam_phi_median = fun_phisummary(sam_phi, "phi_median"),
+      sam_phi_q25 = fun_phisummary(sam_phi, "phi_q25"),
+      sam_phi_q75 = fun_phisummary(sam_phi, "phi_q75"),
+      sam_phi_ci95lo = fun_phisummary(sam_phi, "phi_ci95lo"),
+      sam_phi_ci95up = fun_phisummary(sam_phi, "phi_ci95up"),
+      sam_phi_min = fun_phisummary(sam_phi, "phi_min"),
+      sam_phi_max = fun_phisummary(sam_phi, "phi_max")) %>%
+    ungroup() %>%
+    rename_with(~str_replace_all(.x, "sam_sam_", "sam_")) %>%
+    # Add mean estimates ---------------------------------------------------------------------------
+    left_join(distinct(all_coefcosine, mod, clu, imm_name, int_mean, p_cos_mean, p_sin_mean, 
+                       amp_ls_mean, amp_mean, phi_mean, mu_ns_mean), 
+              by = join_by(mod, clu, imm_name)) %>%
+    # Add imm_name tidy names ----------------------------------------------------------------------
+    left_join(tidy_names_imm, by = join_by(imm_name)) %>%
+    # Add clu tidy names ---------------------------------------------------------------------------
+    left_join(tidy_names_clu, by = join_by(clu))
+  })
+```
+
+
+####################################################################################################
+# END
+####################################################################################################
+

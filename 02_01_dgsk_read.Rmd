@@ -158,9 +158,7 @@ for(stu_id in names(stu_l)) {
 # Combine all check results into a single data frame and save it 
 stu_che <- lapply(stu_che, function(checks) bind_rows(lapply(checks, as.data.frame), .id = "study"))
 stu_che_old <- readRDS(glue("{dirs$processed}/01_stu_tidydfs/stu_checks.rds"))
-#saveRDS(stu_che, glue("{dirs$processed}/01_stu_tidydfs/stu_checks.rds"))
-
-#stu_che$naspid$age_ref == stu_che_old$naspid$age
+if(saving == TRUE) { saveRDS(stu_che, glue("{dirs$processed}/01_stu_tidydfs/stu_checks.rds")) }
 ```
 
 # Exploring the data, checks =======================================================================
@@ -243,7 +241,7 @@ lapply(list(stu_che$naspid, stu_che$nasexpo, stu_che$nassero), function(x) {
 # This section provides a way to drill down into the details of a specific study.
 ```{r}
 # Select a specific study by its ID
-study_pat <- "104977"
+study_pat <- "113808"
 
 # Load the raw data for the selected study
 stu_dfs <- fun_dgsk_readdfs(stu_l[study_pat], cdi = F, info_files = F)

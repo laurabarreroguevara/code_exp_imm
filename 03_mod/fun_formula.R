@@ -6,16 +6,16 @@
 # censoring adjustments).
 ####################################################################################################
 
-fun_formulas <- function(pathogen = "rota", 
-                         data = "all", 
-                         doses = "d1", 
-                         model_nm = "csi", 
-                         varname = "", 
-                         varname2 = "", 
-                         others = "", 
-                         multi = NULL, 
-                         cens = TRUE,
-                         outseropos = FALSE) {
+fun_formula <- function(pathogen = "rota", 
+                        data = "all", 
+                        doses = "d1", 
+                        model_nm = "csi", 
+                        varname = "", 
+                        varname2 = "", 
+                        others = "", 
+                        multi = NULL, 
+                        cens = TRUE,
+                        outseropos = FALSE) {
   
   # Arguments:
   # - pathogen: (string) Identifier for the pathogen (e.g., "rota").
@@ -63,6 +63,10 @@ fun_formulas <- function(pathogen = "rota",
                 glue("{varname2} * cos(pi_vac_week_v1)"), glue("{varname2} * sin(pi_vac_week_v1)")),
     # Cosine and sine transformations for the vaccination week, with latitudinal region and climate.
     "cs2ni" = c("cos(pi_vac_week_v1)", "sin(pi_vac_week_v1)", varname, varname2),
+    # Birth: cosine and sine transformations for the birth week
+    "bcs"    = c("cos(pi_birth_week)", "sin(pi_birth_week)"),
+    # Birth: cosine and sine transformations for the birth week interacting with latitudinal region.
+    "bcsi"   = c(glue("{varname} * cos(pi_birth_week)"), glue("{varname} * sin(pi_birth_week)")),
     # Default: No seasonal covariates if the model type is base or unrecognized.
     NULL
   )
@@ -115,10 +119,13 @@ fun_formulas <- function(pathogen = "rota",
   # - The dose configuration ("v1" for one dose, "vl" for multiple doses).
   # - Data identifier, pathogen, and model type.
   # - Additional suffixes based on the presence of extra variables (varname, varname2).
-  doses_nm <- if (doses == "d1") "v1" else "vl"
-  model_suffix <- case_when(model_nm %in% c("base", "cs", "cc") ~ "",
+  doses_nm <- case_when(doses == "d1" ~ "v1",
+                        doses == "d2" ~ "v2",
+                        pathogen != "rota" & doses == "d3" ~ "v3",
+                        pathogen == "rota" & doses == "d3" ~ "vl")
+  model_suffix <- case_when(model_nm %in% c("base", "cs", "cc", "bcs") ~ "",
                             model_nm %in% c("cs2ni", "cs2i")    ~ glue("_{varname}_{varname2}"),
-                            model_nm %in% c("cci", "csni", "csi") ~ glue("_{varname}"),
+                            model_nm %in% c("cci", "csni", "csi", "bcsi") ~ glue("_{varname}"),
                             .default = "")
   
   names(form_mod) <- glue("bm{doses_nm}_{data}_{out_prefix}{pathogen}_{model_nm}{model_suffix}")
@@ -133,16 +140,16 @@ fun_formulas <- function(pathogen = "rota",
 # each response subtype (as specified in 'multi_pat') using the fun_formulas function, and then 
 # merging them into a joint formula suitable for use with brms.
 ####################################################################################################
-fun_formulas_multipathogen <- function(pathogen = "multi_men", 
-                                       data = "s08",
-                                       doses = "d3", 
-                                       model_nm = "base", 
-                                       varname = "", 
-                                       varname2 = "",
-                                       others = "", 
-                                       multi_pat = "",
-                                       cens = FALSE,
-                                       outseropos = FALSE) {
+fun_formula_multipathogen <- function(pathogen = "multi_men", 
+                                      data = "s08",
+                                      doses = "d3", 
+                                      model_nm = "base", 
+                                      varname = "", 
+                                      varname2 = "",
+                                      others = "", 
+                                      multi_pat = "",
+                                      cens = FALSE,
+                                      outseropos = FALSE) {
   # Arguments:
   # See fun_formulas
   
@@ -153,9 +160,9 @@ fun_formulas_multipathogen <- function(pathogen = "multi_men",
   # For each element in 'multi_pat', generate a model formula using fun_formulas.
   # The pathogen name is augmented with the current response using glue().
   bf_formula <- flatten(lapply(multi_pat, function(x) {
-    fun_formulas(pathogen = glue("{pathogen}_{x}"), data = data, doses = doses, model_nm = model_nm, 
-                 varname = varname, varname2 = varname2, others = others, multi = x, cens = cens,
-                 outseropos = outseropos)
+    fun_formula(pathogen = glue("{pathogen}_{x}"), data = data, doses = doses, model_nm = model_nm, 
+                varname = varname, varname2 = varname2, others = others, multi = x, cens = cens,
+                outseropos = outseropos)
   }))
   
   # 2. Combine the Individual Formulas and Set the Family Distribution -----------------------------

@@ -44,6 +44,8 @@ Output (for each study):
 rm(list = ls())
 source("00_pck.R")
 source("fun_data/fun_data_kgc.R")
+library(nasapower)
+library(tidygeocoder)
 dirs$processed_clim <- glue("{dirs$processed}/03_stu_climate")
 ```
 
@@ -152,6 +154,340 @@ stu_clusters <- bind_rows(stu_clusters) %>%
 saveRDS(stu_clusters, glue("{dirs$processed_clim}/stu_clusters.rds"))
 ```
 
+# Extract time series of climate with NASA Power ===================================================
+
+# Extract raw data 
+```{r}
+library(nasapower)
+library(tidygeocoder)
+library(ratelimitr)
+
+# List of locations 
+llid_df <- bind_rows(stu_spatial) %>%
+  distinct(llid, study, country, lon, lat) 
+
+# Function to extract data 
+fun_nasapower <- function(llid_name = "112157_Poland_ll001", lon = 18.0126907, lat = 53.133902) {
+  nasapower::get_power(
+    community = "ag",
+    lonlat = c(lon, lat),
+    pars = c("RH2M","T2M","T2MDEW","PS","CLOUD_AMT"),
+    dates = c("1998-01-01", "2018-12-31"),
+    temporal_api = "daily") %>%
+    # To dataframe
+    as.data.frame() %>% 
+    # Tidynames and variables
+    rename_with(~tolower(paste0("clim_",.x))) %>%
+    mutate(llid = llid_name,
+           lon = lon, 
+           lat = lat) %>%
+    select(-c(clim_lon, clim_lat))
+}
+
+# Extract raw data from list of locations (2630)
+try_np = FALSE
+if(try_np) {
+  for (i in 1:1000) {
+    try(
+      walk(llid_df$llid, limit_rate(function(x) {
+        pomp::bake(file = glue("{dirs$raw}/nasapower/nasapower_{x}.rds"), dir = "",{
+          fun_nasapower(llid_name = x, 
+                        lon = llid_df[llid_df$llid == x,"lon"][[1]],
+                        lat = llid_df[llid_df$llid == x,"lat"][[1]])
+        })
+      }, rate(n = 40, period = 60)))
+    ) 
+  }
+}
+
+llid_df
+```
+
+# Summarise data per week and save it 
+```{r}
+stu_nasapower <- pomp::bake(file = glue("{dirs$processed_clim}/stu_nasapower.rds"), dir = "",{
+  lapply(llid_df$llid, function(x) {
+    readRDS(glue("{dirs$raw}/nasapower/nasapower_{x}.rds")) %>%
+      # Obtain week
+      mutate(week = week(clim_yyyymmdd)) %>%
+      select(-c(clim_year, clim_mm, clim_dd, clim_doy, clim_yyyymmdd)) %>%
+      # Obtain mean per week
+      group_by(llid, lon, lat, week) %>%
+      summarise(across(starts_with("clim_"), mean), .groups = "drop") %>%
+      pivot_longer(starts_with("clim_"), names_to = "clim") %>%
+      # Normalized mean per week
+      group_by(llid, lon, lat, clim) %>%
+      mutate(value_norm = value - mean(value)) %>%
+      ungroup()
+  }) %>%
+    bind_rows() %>%
+    left_join(llid_df, by = join_by(llid, lon, lat)) %>%
+    select(study, country, llid, lon, lat, week, clim, value, value_norm)
+})
+```
+
 ####################################################################################################
 # END
 ####################################################################################################
+
+# Summarise data per week and save it 
+```{r}
+# stu_nasapower <- pomp::bake(
+#     file = glue("{dirs$processed}/stu_nasapower.rds"), dir = "", { 
+#         bind_rows(stu_nasapower_l) %>%
+#         # Obtain week
+#         mutate(week = week(clim_yyyymmdd)) %>%
+#         select(-c(clim_year, clim_mm, clim_dd, clim_doy, clim_yyyymmdd)) %>%
+#         # Obtain mean per week
+#         group_by(study, country, lon, lat, week) %>%
+#         summarise(across(starts_with("clim_"), mean), .groups = "drop") %>%
+#         pivot_longer(starts_with("clim_"), names_to = "clim") %>%
+#         # Normalized mean per week
+#         group_by(study, country, lon, lat, clim) %>%
+#         mutate(value_norm = value - mean(value)) %>%
+#         ungroup()
+# })
+```
+
+####################################################################################################
+# END
+####################################################################################################
+
+```{r}
+# stu_nasapower <- pomp::bake(
+#     file = glue("{dirs$processed}/stu_nasapower.rds"), dir = "", { 
+#         bind_rows(stu_nasapower_l) %>%
+#         # Obtain week
+#         mutate(week = week(clim_yyyymmdd)) %>%
+#         select(-c(clim_year, clim_mm, clim_dd, clim_doy, clim_yyyymmdd)) %>%
+#         # Obtain mean per week
+#         group_by(study, country, lon, lat, week) %>%
+#         summarise(across(starts_with("clim_"), mean), .groups = "drop") %>%
+#         pivot_longer(starts_with("clim_"), names_to = "clim") %>%
+#         # Normalized mean per week
+#         group_by(study, country, lon, lat, clim) %>%
+#         mutate(value_norm = value - mean(value)) %>%
+#         ungroup()
+# })
+```
+
+
+
+
+```{r}
+# library(nasapower)
+# library(tidygeocoder)
+# library(ratelimitr)
+# 
+# # Define sleep 
+# sleep <- 20
+#   stu_nasapower_1998_2008_l <- sapply(test_stu$study[120:121], function(stu) {
+#     pomp::bake(file = glue("{dirs$processed_clim}/stu_nasapower_{stu}_1998-2008.rds"), 
+#                dir = getOption("pomp_archive_dir", dirs$pomp), {
+#       # For each study, identify each distinct coordinate pair
+#         datstu <- stu_spatial[[stu]] %>%
+#           distinct(study, country, lon, lat)
+#         # For each coordinate pair, extract the daily climate variables for 10 years
+#         datnasa <- lapply(1:length(datstu$study), ratelimitr::limit_rate(  
+#           function(stu_loc) {
+#           nasapower::get_power(
+#             community = "ag",
+#             lonlat = c(datstu$lon[stu_loc], datstu$lat[stu_loc]),
+#             pars = c("RH2M","T2M","T2MDEW","PS","CLOUD_AMT"),
+#             dates = c("1998-01-01", "2008-12-31"),
+#             temporal_api = "daily") %>%
+#             as.data.frame() %>% 
+#             rename_with(~tolower(paste0("clim_",.x))) %>%
+#             mutate(study = datstu$study[stu_loc],
+#                    country = datstu$country[stu_loc], 
+#                    lon = datstu$lon[stu_loc], 
+#                    lat = datstu$lat[stu_loc]) 
+#           }, rate(n = 50, period = 60)
+#           )) %>%
+#           bind_rows() %>%
+#           select(-c(clim_lon, clim_lat)) %>%
+#           select(study, country, lon, lat, everything())
+#         # Bake per study
+#         return(datnasa)
+#     })}, simplify = F)
+```
+
+
+
+```{r}
+# library(nasapower)
+# library(tidygeocoder)
+# 
+# # Define sleep 
+# sleep <- 20
+# for (i in 1:20) {
+# try(
+#   stu_nasapower_1998_2008_l <- sapply(test_stu$study[120], function(stu) {
+#     pomp::bake(file = glue("{dirs$processed_clim}/stu_nasapower_{stu}_1998-2008.rds"), 
+#                dir = getOption("pomp_archive_dir", dirs$pomp), {
+#       # For each study, identify each distinct coordinate pair
+#         datstu <- stu_spatial[[stu]] %>%
+#           distinct(study, country, lon, lat)
+#         # For each coordinate pair, extract the daily climate variables for 10 years
+#         datnasa <- lapply(1:length(datstu$study), function(stu_loc) {
+#           if(stu_loc %% 20 == 0) Sys.sleep(sleep)
+#           nasapower::get_power(
+#             community = "ag",
+#             lonlat = c(datstu$lon[stu_loc], datstu$lat[stu_loc]),
+#             pars = c("RH2M","T2M","T2MDEW","PS","CLOUD_AMT"),
+#             dates = c("1998-01-01", "2008-12-31"),
+#             temporal_api = "daily") %>%
+#             as.data.frame() %>% 
+#             rename_with(~tolower(paste0("clim_",.x))) %>%
+#             mutate(study = datstu$study[stu_loc],
+#                    country = datstu$country[stu_loc], 
+#                    lon = datstu$lon[stu_loc], 
+#                    lat = datstu$lat[stu_loc]) 
+#           }) %>%
+#           bind_rows() %>%
+#           select(-c(clim_lon, clim_lat)) %>%
+#           select(study, country, lon, lat, everything())
+#         # Bake per study
+#         return(datnasa)
+#     })}, simplify = F)
+# )
+# }
+```
+
+
+
+
+
+
+
+
+# First extract years 1998-2008
+```{r}
+# library(nasapower)
+# library(tidygeocoder)
+# 
+# # Define sleep 
+# sleep <- 20
+# stu_nasapower_1998_2008_l <- sapply(test_stu$study[120], function(stu) {
+#   pomp::bake(file = glue("{dirs$processed_clim}/stu_nasapower_{stu}_1998-2008.rds"), 
+#              dir = getOption("pomp_archive_dir", dirs$pomp), {
+#     # For each study, identify each distinct coordinate pair
+#       datstu <- stu_spatial[[stu]] %>%
+#         distinct(study, country, lon, lat)
+#       # For each coordinate pair, extract the daily climate variables for 10 years
+#       datnasa <- lapply(1:length(datstu$study), function(stu_loc) {
+#         if(stu_loc %% 20 == 0) Sys.sleep(sleep)
+#         nasapower::get_power(
+#           community = "ag",
+#           lonlat = c(datstu$lon[stu_loc], datstu$lat[stu_loc]),
+#           pars = c("RH2M","T2M","T2MDEW","PS","CLOUD_AMT"),
+#           dates = c("1998-01-01", "2008-12-31"),
+#           temporal_api = "daily") %>%
+#           as.data.frame() %>% 
+#           rename_with(~tolower(paste0("clim_",.x))) %>%
+#           mutate(study = datstu$study[stu_loc],
+#                  country = datstu$country[stu_loc], 
+#                  lon = datstu$lon[stu_loc], 
+#                  lat = datstu$lat[stu_loc]) 
+#         }) %>%
+#         bind_rows() %>%
+#         select(-c(clim_lon, clim_lat)) %>%
+#         select(study, country, lon, lat, everything())
+#       # Bake per study
+#       return(datnasa)
+#   })}, simplify = F)
+```
+
+# Then extract years 2009-2018
+```{r}
+# stu_nasapower_2009_2018_l <- sapply(test_stu$study, function(stu) {
+#   pomp::bake(file = glue("{dirs$processed_clim}/stu_nasapower_{stu}_2009-2018.rds"), 
+#              dir = getOption("pomp_archive_dir", dirs$pomp), {
+#     # For each study, identify each distinct coordinate pair
+#       datstu <- stu_spatial[[stu]] %>%
+#         distinct(study, country, lon, lat)
+#       # For each coordinate pair, extract the daily climate variables for 10 years
+#       datnasa <- lapply(1:length(datstu$study), function(stu_loc) {
+#         if(stu_loc %% 20 == 0) Sys.sleep(sleep)
+#         nasapower::get_power(
+#           community = "ag",
+#           lonlat = c(datstu$lon[stu_loc], datstu$lat[stu_loc]),
+#           pars = c("RH2M","T2M","T2MDEW","PS","CLOUD_AMT"),
+#           dates = c("2009-01-01", "2018-12-31"),
+#           temporal_api = "daily") %>%
+#           as.data.frame() %>% 
+#           rename_with(~tolower(paste0("clim_",.x))) %>%
+#           mutate(study = datstu$study[stu_loc],
+#                  country = datstu$country[stu_loc], 
+#                  lon = datstu$lon[stu_loc], 
+#                  lat = datstu$lat[stu_loc]) 
+#         }) %>%
+#         bind_rows() %>%
+#         select(-c(clim_lon, clim_lat)) %>%
+#         select(study, country, lon, lat, everything())
+#       # Bake per study
+#       return(datnasa)
+#   })}, simplify = F)
+```
+
+# Summarise data per week  
+```{r}
+stu_nasapower <- pomp::bake(
+    file = glue("{dirs$processed}/stu_nasapower.rds"), dir = "", { 
+        bind_rows(stu_nasapower_l) %>%
+        # Obtain week
+        mutate(week = week(clim_yyyymmdd)) %>%
+        select(-c(clim_year, clim_mm, clim_dd, clim_doy, clim_yyyymmdd)) %>%
+        # Obtain mean per week
+        group_by(study, country, lon, lat, week) %>%
+        summarise(across(starts_with("clim_"), mean), .groups = "drop") %>%
+        pivot_longer(starts_with("clim_"), names_to = "clim") %>%
+        # Normalized mean per week
+        group_by(study, country, lon, lat, clim) %>%
+        mutate(value_norm = value - mean(value)) %>%
+        ungroup()
+})
+```
+
+####################################################################################################
+# END
+####################################################################################################
+
+
+
+```{r}
+# library(nasapower)
+# library(tidygeocoder)
+# 
+# stu_nasapower_l <- sapply(stu_included$study[1], function(stu) {
+#   pomp::bake(file = glue("{dirs$processed_clim}/stu_nasapower_{stu}.rds"), 
+#              dir = getOption("pomp_archive_dir", dirs$pomp), {
+#     # For each study, identify each distinct coordinate pair
+#       datstu <- stu_spatial[[stu]] %>%
+#         distinct(study, country, lon, lat)
+#       # For each coordinate pair, extract the daily climate variables for 10 years
+#       datnasa <- lapply(1:length(datstu$study), function(stu_loc) {
+#         nasapower::get_power(
+#           community = "ag",
+#           lonlat = c(datstu$lon[stu_loc], datstu$lat[stu_loc]),
+#           pars = c("RH2M","T2M","T2MDEW","PS","CLOUD_AMT"),
+#           dates = c("1998-01-01", "2008-12-31"),
+#           temporal_api = "daily") %>%
+#           as.data.frame() %>% 
+#           rename_with(~tolower(paste0("clim_",.x))) %>%
+#           mutate(study = datstu$study[stu_loc],
+#                  country = datstu$country[stu_loc], 
+#                  lon = datstu$lon[stu_loc], 
+#                  lat = datstu$lat[stu_loc]) 
+#         }) %>%
+#         bind_rows() %>%
+#         select(-c(clim_lon, clim_lat)) %>%
+#         select(study, country, lon, lat, everything())
+#       # Bake per study
+#       return(datnasa)
+#   })}, simplify = F)
+# 
+# stu_nasapower_l$'112157' %>%
+#   ggplot(aes(x = clim_yyyymmdd, y = clim_t2m)) + 
+#   geom_line()
+```

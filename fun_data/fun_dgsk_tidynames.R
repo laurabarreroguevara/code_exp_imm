@@ -150,6 +150,7 @@ fun_dgsk_tidynames <- function(x, study = "105555", tidynames = "country") {
       method %in% c("elisa", "el", "eli", "elisa_1_dil", "whole-cell elisa", "elisa(mep)", 
                     "elisa frash", "elisa 22f pva", "elisa 22f", "elisa_22f_pva", "elisa (ktl)", 
                     "elisa_1dil","elisa22fpva") ~ "elisa",
+      method %in% c("elisa_ch") ~ "elisa_ch",
       method %in% c("elisa_ppd") ~ "elisa_ppd",
       method %in% c("elispot") ~ "elispot",
       method %in% c("fama") ~ "fama", 

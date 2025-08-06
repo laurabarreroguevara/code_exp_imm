@@ -1,0 +1,64 @@
+---
+title: "BRMS: Create slurm.sh files"
+author: "Laura Andrea Barrrero Guevara"
+date: "2023-02-23"
+output: html_document
+---
+
+####################################################################################################
+Purpose of script: This script generates SLURM shell script files (slurm.sh) for running R model 
+fitting jobs in the cluster.
+
+Functions Used:
+- `fun_write_slurmsh.R`: Function to generate SLURM shell script to execute an R model fitting job.
+
+Outputs: 
+For each unipathogen, multi-unipathogen and multi-multipathogen (46), in the folder 
+outputs/slurm_sh:
+- run_{pat}_brms_bm{doses}_{data}_{mod}.sh
+####################################################################################################
+
+# Load packages, themes, directories, and functions
+```{r}
+rm(list = ls())
+source("../00_pck.R")
+source("fun_slurmshsimcos.R")
+
+pat_l <- list.files(glue("{dirs$outputs}/simcosfit")) %>%
+  str_extract("(?<=s08_).*?(?=_cs)") %>%
+  unique()
+pat_l
+```
+
+# Loop over each pathogen in the defined list
+```{r}
+## Read the list of models specific to the current pathogen
+l_formula <- list.files(glue("{dirs$outputs}/simcosfit")) %>%
+  str_remove_all("simcos_|.rds") %>%
+  str_subset(str_c(pat_l, collapse = "|")) 
+
+## Identify model scripts that have already been executed
+## List the files in the "runned" directory 
+already_runned <- str_remove_all(list.files(glue("{dirs$outputs}/slurmsh/runned")), 
+                                 ".sh|runsimcos_")
+# ## Filter out any formulas that have already been processed to avoid duplicate runs
+l_formula <- l_formula[!(l_formula %in% already_runned)]
+
+## For each remaining model in the formula list, generate the corresponding SLURM script
+walk(l_formula, function(args_fo) {
+  # Generate the SLURM shell script file 
+  fun_slurmshsimcos(args_fo = args_fo, time = "24:00:00", nsim = 100)
+})
+```
+
+# List cluster run commands
+```{r}
+# For each generated SLURM script, print the sbatch command needed to submit the job
+for (i in list.files(glue("{dirs$outputs}/slurmsh"))) {
+ print(glue("sbatch ~/projects/_seas_imm/runsh/{i}"))
+}
+```
+
+####################################################################################################
+# END
+####################################################################################################

@@ -1,0 +1,170 @@
+---
+title: "BRMS"
+author: "Laura Andrea Barrrero Guevara"
+date: "2023-02-23"
+output: html_document
+---
+
+################################################################################
+Purpose of script: To fit brms models to all the studies
+################################################################################
+
+# Set up
+```{r}
+rm(list = ls())
+source("../00_pck.R")
+source("fun_ampphi.R")
+source("fun_checkgaps.R")
+```
+
+```{r}
+# Read in the waic (only models that converged)
+waic_df <- readRDS(glue("{dirs$modres}/all_waic.rds")) %>%
+  filter(dat %in% c("s08", "semeth_s08", "seallsero_s08"))
+waic_best <- readRDS(glue("{dirs$modres}/all_waicbest.rds")) %>%
+  filter(dat %in% c("s08", "semeth_s08", "seallsero_s08"))
+```
+
+# Read in data and assess gaps and missing data ====================================================
+```{r}
+all_datagaps <- pomp::bake(file = glue("{dirs$modres}/all_datagaps.rds"), dir = "", {
+  # Define models converging that have a sine function 
+  df_converged <- filter(waic_df, dat %in% c("s08", "semeth_s08", "seallsero_s08"), 
+                       mod_out == "imm", str_detect(mod_name, "cs")) 
+  # Per model
+  sapply(df_converged$mod, function(x) {
+    # Select the model 
+    dat_mod <- filter(df_converged, mod == x)
+    sens <- case_when(dat_mod$dat == "semeth_s08" ~ "semeth",
+                      dat_mod$dat == "seallsero_s08" ~ "seallsero", 
+                      .default = "")
+    # Read in data
+    dat_raw <- readRDS(paste0(dirs$modfit, "/data", sens, "_brms_", dat_mod$pat[[1]], "_v", 
+                              dat_mod$vac[[1]], "_s08.rds"))
+    # Create clu in the data 
+    if(!str_detect(x, "csi")) {
+      dat_raw <- mutate(dat_raw, clu = NA) 
+      } else {
+      dat_raw <- rename(dat_raw, clu = all_of(filter(df_converged, mod == x)$reg[[1]])) %>%
+        mutate(clu = as.character(clu))
+      }
+    # Identify gaps and missing data 
+    dat_gap <- expand.grid(vac_week_v1 = 1:52,
+                           clu = unique(dat_raw$clu),
+                           imm_name = str_remove_all(str_subset(names(dat_raw), "imm_val_s1"), 
+                                                     "imm_val_s1|_anti_|_")) %>%
+      # Create df of total values per week
+      left_join(dat_raw %>%
+                  group_by(vac_week_v1, clu) %>%
+                  summarise(tot = n(), .groups = "drop") %>%
+                  group_by(clu) %>%
+                  mutate(checkgaps = fun_checkgaps(vac_week_v1)) %>%
+                  ungroup(),
+                by = join_by(vac_week_v1, clu)) %>%
+      select(clu, everything()) %>%
+      mutate(clu = str_remove_all(clu, " "),
+             imm_name = na_if(as.character(imm_name), ""),
+             pi_vac_week_v1 = round(vac_week_v1 * (2*pi/52), digits = 11)) %>%
+      group_by(clu) %>%
+      mutate(checkgaps_all = replace_na(checkgaps, TRUE),
+             checkgaps_all = all(checkgaps_all))
+  }, simplify = FALSE) %>%
+    bind_rows(.id = "mod")
+})
+```
+
+# 1. Obtain coefficients and data to give a shape to the seasonality: 
+```{r}
+# Data: Dates of vaccination and number of individuals per day
+# Coefficients: p_cos, p_sin, shape
+all_funcos <- readRDS(glue("{dirs$modres}/all_coefcosine.rds")) %>%
+  # Join the shape (only for univariate models)
+  left_join(readRDS(glue("{dirs$modres}/all_coefre.rds")) %>%
+              filter(param %in% c("shape", "sigma")) %>%
+              select(mod, imm_name, param, est) %>%
+              pivot_wider(names_from = param, values_from = est), 
+            by = join_by(mod, imm_name)) %>%
+  left_join(all_datagaps, by = join_by(mod, clu, imm_name)) %>%
+  mutate(funcos = exp(int_mean + (p_cos_mean*cos(pi_vac_week_v1)) + (p_sin_mean*sin(pi_vac_week_v1))),
+         tot = replace_na(tot, 0)) %>%
+  uncount(weights = tot, .remove = FALSE)
+
+# Read in the real data to compare 
+dat_l <- lapply(str_subset(list.files(glue("{dirs$modfit}"), full.names = TRUE), "s08.rds"), readRDS)
+names(dat_l) <- sub(".*brms_(.*?)_(vl|v1|v3)_s08.*", "\\1",
+                    str_subset(list.files(glue("{dirs$modfit}")), "s08.rds"))
+```
+
+# Function to simulate 
+```{r}
+fun_simcosine <- function(mod_i) {
+  filter(all_funcos, mod == mod_i) %>%
+    mutate(funcos_sim = if_else(
+      gauss == "gauss",
+      rlnorm(n(), meanlog = log((funcos^2) / (sqrt(sigma^2 + funcos^2))),
+             sdlog = sqrt(log(1 + (sigma^2/funcos^2)))),
+      rgamma(n(), shape = shape, rate = shape/funcos))) %>%
+    select(pat, mod, clu, imm_name, vac_week_v1, pi_vac_week_v1, funcos, funcos_sim)
+}
+```
+
+# Simulate 1 time and compare with the real data 
+```{r}
+# From the function, simulate 1 time
+# No multi, as these are rnorm models
+dat_1sim <- sapply(unique(filter(all_funcos, mod_out == "imm", dat == "s08",
+                                 mod %in% waic_best$mod_best)$mod), 
+                   fun_simcosine, simplify = FALSE)
+
+bind_rows(dat_1sim) %>%
+  filter(is.na(funcos_sim))
+
+# Plot the time series
+pl_l <- lapply(dat_1sim, function(x) {
+    ggplot(data = x, aes(x = vac_week_v1, y = funcos)) +
+      geom_point(aes(y = funcos_sim), alpha = 0.1) + 
+      geom_point(color = "blue") +
+      scale_y_continuous(trans = "log") + 
+      facet_wrap(imm_name~clu, scales = "free_y")
+})
+
+# Plot the histogram
+plhis_l <- sapply(dat_1sim, function(x) {
+  x %>%
+    mutate(data = "simulation") %>%
+    bind_rows(
+      dat_l[[unique(x$pat)]] %>%
+        select(starts_with("imm_val_s1")) %>%
+        pivot_longer(starts_with("imm_val_s1"), names_to = "imm_name", values_to = "funcos_sim") %>%
+        mutate(
+          imm_name = str_remove_all(imm_name, "imm_val_s1|_anti|_"),
+          imm_name = na_if(imm_name, ""),
+          data = "real")) %>%
+    ggplot(aes(x = funcos_sim)) +
+    geom_histogram(bins = 30) +
+    scale_x_continuous(trans = "log") +
+    facet_grid(data~imm_name, scales = "free") + 
+    ggtitle(unique(x$pat))
+}, simplify = FALSE)
+```
+
+# Simulate 100 times and save it 
+```{r}
+# Decide models to simulate
+mod_name_l <- unique((filter(all_funcos, mod_out == "imm", 
+                             dat == c("s08", "semeth_s08", "seallsero_s08"), 
+                             mod %in% waic_best$mod_best))$mod)
+
+# Save the simulations
+walk(mod_name_l, function(x) {
+  pomp::bake(glue("{dirs$outputs}/simcosfit/simcos_{x}"), dir = "", { 
+    replicate(100, fun_simcosine(x))})
+  })
+```
+
+####################################################################################################
+# End
+####################################################################################################
+
+
+

@@ -1,0 +1,114 @@
+---
+title: "Descriptive plots"
+author: "Laura Andrea Barrrero Guevara"
+date: "2023-02-23"
+output: html_document
+---
+
+####################################################################################################
+Purpose of script: This script produces descriptive statistics and various plots (maps, histograms, 
+density plots) based on the final data sets (s08). It creates visual summaries of study 
+participants, study locations, vaccination dates, immunogenicity measurements, and additional maps 
+for selected pathogens.
+####################################################################################################
+
+# Load packages, themes, directories, and functions
+```{r}
+rm(list = ls())
+source("00_pck.R")
+library(nasapower)
+library(tidygeocoder)
+theme_set(theme_classic())
+```
+
+# Read in the data (only s08 data)
+```{r}
+dat_l <- lapply(str_subset(str_subset(list.files(glue("{dirs$modfit}"), full.names = TRUE), "s08.rds"),
+                           "datase", negate = TRUE), readRDS)
+names(dat_l) <- sub(".*brms_(.*?)_(vl|v1)_s08.*", "\\1", 
+                    str_subset(str_subset(list.files(glue("{dirs$modfit}")), "s08.rds"),
+                           "datase", negate = TRUE))
+
+# Define selected pathogens for the manuscript figure
+pat_sel <- c("rota", "hav", "hbv", "dipht", "tetan", "pertuwpt", "ipv1", 
+             "hib", "menc", "strep04", "measl", "mumps", "rubel", "vzv")
+```
+
+# Combine data for selected pathogens and standardize country names
+```{r}
+datsel_l <- bind_rows(dat_l[pat_sel], .id = "pat") %>%
+  left_join(tidy_names_pat, by = join_by(pat))
+```
+
+# Obtain longitude and latitude for each study 
+```{r}
+loc_geo <- distinct(datsel_l, study, country, lon_med, lat_med)
+```
+
+# Extract climate for each study 
+```{r}
+clim_l <- list()
+for(stu in unique(loc_geo$study)) {
+  clim_l[[stu]] <- pomp::bake(
+    file = glue("{dirs$processed}/05_stu_nasapower/stu_nasapower_{stu}.rds"), dir = "", {
+      # For each study, identify each distinct coordinate pair
+      datstu <- filter(loc_geo, study == stu)
+      # For each coordinate pair, extract the daily climate variables for 10 years
+      datnasa <- lapply(1:length(datstu$study), function(x) {
+        nasapower::get_power(
+          community = "ag",
+          lonlat = c(datstu$lon_med[x], datstu$lat_med[x]),
+          pars = c("RH2M","T2M","T2MDEW","PS","QV2M","TQV", "PRECTOTCORR", "CLOUD_AMT", "EVPTRNS"),
+          dates = c("2013-01-01", "2023-12-31"),
+          temporal_api = "daily") %>%
+          as.data.frame() %>% 
+          rename_with(~tolower(paste0("clim_",.x))) %>%
+          mutate(study = datstu$study[x],
+                 country = datstu$country[x], 
+                 lon_med = datstu$lon_med[x], 
+                 lat_med = datstu$lat_med[x])
+        }) %>%
+        bind_rows() %>%
+        select(-c(clim_lon, clim_lat)) %>%
+        select(study, country, lon_med, lat_med, everything())
+      # Bake per study
+      return(datnasa)
+    })
+  }
+
+bind_rows(clim_l)
+```
+
+# Summarise data per week  
+```{r}
+all_clim <- pomp::bake(
+    file = glue("{dirs$processed}/05_stu_nasapower/all_clim.rds"), dir = "", { 
+      bind_rows(clim_l) %>%
+        # Obtain week
+        mutate(week = week(clim_yyyymmdd)) %>%
+        select(-c(clim_year, clim_mm, clim_dd, clim_doy, clim_yyyymmdd)) %>%
+        # Obtain mean per week
+        group_by(study, country, lon_med, lat_med, week) %>%
+        summarise(across(starts_with("clim_"), mean), .groups = "drop") %>%
+        pivot_longer(starts_with("clim_"), names_to = "clim") %>%
+        # Normalized mean per week
+        group_by(study, country, lon_med, lat_med, clim) %>%
+        mutate(value_norm = value - mean(value)) %>%
+        ungroup()
+})
+```
+
+# Plot it 
+```{r}
+all_clim %>%
+  filter(clim %in% c("clim_rh2m", "clim_t2m", "clim_t2mdew", "clim_cloud_amt")) %>%
+  filter(country %in% unique(all_clim$country)[10:15]) %>%
+  ggplot(aes(y = value_norm, x = week, color = country, group = paste0(country, lon_med, lat_med))) +
+  geom_line() +
+  facet_grid(clim~country, scales = "free") + 
+  theme(legend.position = "none")
+```
+
+####################################################################################################
+# END
+####################################################################################################

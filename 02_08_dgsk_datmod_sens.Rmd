@@ -9,42 +9,6 @@ Purpose of script: This script prepares the data for models, applying further ex
 spatial and climate data. The output includes three types of data frames:
 ####################################################################################################
 
-# Sensitivity analysis only temperate data =========================================================
-Check if the models are not better just because there is data of other than the temperate regions (
-which do not have enough data eg. tropical regions)
-# Load packages, themes, directories, and functions
-```{r}
-rm(list = ls())
-source("00_pck.R")
-```
-
-# Read in the data (only s08 data)
-```{r}
-dat_l <- lapply(str_subset(list.files(glue("{dirs$modfit}"), full.names = TRUE), "s08.rds"), readRDS)
-names(dat_l) <- sub(".*brms_(.*?)_(vl|v1)_s08.*", "\\1", 
-                    str_subset(list.files(glue("{dirs$modfit}")), "s08.rds"))
-
-```
-
-# Try sensitivity analysis, only temperate data 
-# pertuwpt, pertuapt, pertuaprn, pertuafha
-# strep01, strep03, strep04, strep05, strep06a, strep06b, strep07f, strep09v, strep14, strep18c,
-# strep19a, strep19f, strep23f
-# hbv
-```{r}
-datsens1_l <- lapply(dat_l[c("pertuwpt", "pertuapt", "pertuaprn", "pertuafha", "strep01", "strep03", 
-                             "strep04", "strep05", "strep06a", "strep06b", "strep07f", "strep09v", 
-                             "strep14", "strep18c", "strep19a", "strep19f", "strep23f", "hbv")],
-                     filter, reg_6 == "1_Temperate")
-datsens1_l
-
-walk(names(datsens1_l), function(x) {
-  dose <- if(x %in% c("vzv", "measl", "mumps", "rubel", 
-                      "hav", "multi_mmr-vzv", "multi_mmr")) "v1" else "vl"
-  saveRDS(datsens1_l[[x]], glue("{dirs$outputs}/modfit/dataseonlytemp_brms_{x}_{dose}_s08.rds"))
-})
-```
-
 # Sensitivity analysis with extra methods data =====================================================
 
 # Load packages, themes, directories, and functions
@@ -61,7 +25,7 @@ stu_ppat <- readRDS(glue("{dirs$processed}/stu_ppat.rds"))
 stu_ppat <- stu_ppat[!(names(stu_ppat) %in% c("pertu", "polio"))]
 ```
 
-# Data frames for unipathogen models ===============================================================
+# Data frames for unipathogen models ---------------------------------------------------------------
 Prepare data frames for unipathogen models
 Unipathogen: Single vaccination with a unique or multiple immunogenicity measurements
 
@@ -70,7 +34,7 @@ Unipathogen: Single vaccination with a unique or multiple immunogenicity measure
 ```{r}
 dat_comb_uni <- list()
 # Unipathogen univariate: 
-dat_comb_uni$unipat_mono <- lapply(stu_ppat, function(x) {
+dat_comb_uni$unipat_mono <- lapply(stu_ppat[!str_detect(names(stu_ppat), "7|10|11|13|23")], function(x) {
   # Filter the dataframes to check which combinations have the highest number of individuals
   x %>%
     filter(if_all(starts_with("reg_"), ~ .x >= 0.8)) %>%
@@ -89,13 +53,14 @@ dat_comb_uni$unipat_mono <- lapply(stu_ppat, function(x) {
   filter(max(pid_n) == pid_n) %>%
   ungroup() %>%
   # Label doses and split serology names
-  mutate(doses = case_when(doses > 1 ~ "l", doses == 1 ~ "1"),
+  mutate(doses = case_when(pat_dat == "rota" & doses > 1 ~ "l", pat_dat != "rota" & doses == 1 ~ "1", 
+                           pat_dat != "rota" & doses == 3 ~ "3"),
          imm_met_s1 = strsplit(imm_met_s1, "-"),
          imm_sero_s1 = strsplit(imm_sero_s1, "-"))
 
 # Unipathogen multivariate 
 # Pathogens with multiple seronames: "men" "strep"
-dat_comb_uni$unipat_multi <- lapply(stu_ppat, function(x) {
+dat_comb_uni$unipat_multi <- lapply(stu_ppat[names(stu_ppat) != "strep"], function(x) {
   # Filter the dataframes to check which combinations have the highest number of individuals
   x %>%
     filter(if_all(starts_with("reg_"), ~ .x >= 0.8)) %>%
@@ -116,7 +81,8 @@ dat_comb_uni$unipat_multi <- lapply(stu_ppat, function(x) {
   filter(max(pid_n) == pid_n) %>%
   ungroup() %>%
   # Label doses and split serology names
-  mutate(doses = case_when(doses > 1 ~ "l", doses == 1 ~ "1"),
+  mutate(doses = case_when(pat_dat == "rota" & doses > 1 ~ "l", pat_dat != "rota" & doses == 1 ~ "1", 
+                           pat_dat != "rota" & doses == 3 ~ "3"),
          imm_met_s1 = strsplit(imm_met_s1, "-"), 
          imm_sero_s1 = strsplit(imm_sero_s1, "-"))
 
@@ -127,14 +93,16 @@ dat_comb_uni <- bind_rows(dat_comb_uni, .id = "multi") %>%
 # List of data frame combinations
 ```{r}
 dat_select <- dat_comb_uni %>%
-  mutate(sufx = case_when(multi == "unipat_mono" ~ sub(".*_", "", str_remove_all(imm_sero_s1, "anti_|iga")), 
-                          .default = ""),
-         sufx = case_when(pat_dat == sufx ~ "", .default = sufx)) %>%
+  mutate(sufx = case_when(
+    multi == "unipat_mono" ~ sub(".*_", "", str_remove_all(imm_sero_s1, "anti_|iga")), 
+    .default = ""),
+    sufx = case_when(pat_dat == sufx ~ "", .default = sufx)) %>%
   expand_grid(
     multi_pat = FALSE,
     kgc = c(NA, "kgc_1", "kgc_2", "kgc_3"),
     thr = 0.8) %>%
-  mutate(name_df = glue("datasemeth_brms_{prefx}{pat_dat}{sufx}_v{doses}_s{str_remove(thr, '\\\\.')}_{kgc}"),
+  mutate(name_df = glue(
+    "datasemeth_brms_{prefx}{pat_dat}{sufx}_v{doses}_s{str_remove(thr, '\\\\.')}_{kgc}"),
          name_df = str_remove_all(name_df, "_NA"))
 ```
 
@@ -145,12 +113,6 @@ pat_df_l <- sapply(dat_select$name_df, function(x) {
   pat_dat <- if(dat_select[dat_select$name_df == x, "multi"][[1]] == "multipat_multi") { 
     stu_mpat 
   } else { stu_ppat }
-  
-  # TEST STREP ONLY ONE VACCINE
-  if(str_detect(x, "multi_strep")) { 
-    pat_dat[[dat_select[dat_select$name_df == x, "pat_dat"][[1]]]] <- filter(
-      pat_dat[[dat_select[dat_select$name_df == x, "pat_dat"][[1]]]], vac_name_v1 == "strep10") 
-  }
   
   # Function to create data frame for mono/multi-pathogen and mono/multivariate models.
   fun_dgsk_modpat(
@@ -172,7 +134,7 @@ setdiff(distinct(bind_rows(stu_ppat), study)$study,
         distinct(bind_rows(pat_df_l[str_subset(names(pat_df_l), "kgc", negate = TRUE)]), study)$study)
 ```
 
-# Exclusion per photoperiod and climate group ======================================================
+# Exclusion per photoperiod and climate group ------------------------------------------------------
 ```{r}
 # Identify groups that ended up with just one observation 
 exclude_1obs_df <- sapply(names(pat_df_l), function(i) {
@@ -212,6 +174,29 @@ distinct(bind_rows(pat_df_l[str_subset(names(pat_df_l), "kgc", negate = TRUE)]),
 length(bind_rows(pat_df_l)$study)
 ```
 
+# Exclude groups with only one observation per vac_conc and vac_name
+```{r}
+exclude_1obs_vac_df <- bind_rows(pat_df_l, .id = "name_df") %>%
+  group_by(name_df, vac_conc, vac_name_v1) %>%
+  summarise(count = n(), .groups = "drop") %>%
+  filter(count == 1) 
+
+pat_df_l <- sapply(names(pat_df_l), function(x) {
+  # Fetch the corresponding data frame from the list
+  data <- pat_df_l[[x]]
+  # Fetch rules for the data frame 
+  df_rules <- filter(exclude_1obs_vac_df, name_df == x)
+  # Apply filtering for each rule in this data frame
+  if(nrow(df_rules) > 0) {
+    # Filter the data frame based on classification and value
+    data <- data %>% filter(!(vac_conc == df_rules$vac_conc & 
+                                vac_name_v1 == as.character(df_rules$vac_name_v1)))
+  }
+  return(data)
+}, simplify = FALSE)
+```
+
+
 # Total participants 
 ```{r}
 lapply(pat_df_l, function(x) c(studies_vl = length(unique(x$study)), 
@@ -240,10 +225,81 @@ bind_rows(pat_df_l[str_subset(names(pat_df_l), "kgc", negate = TRUE)], .id = "da
   facet_wrap(~dat)
 ```
 
-
-
 ####################################################################################################
 # END
 ####################################################################################################
 
+# Sensitivity analysis only temperate data =========================================================
+# Check if the models are not better just because there is data of other than the temperate regions (
+# which do not have enough data eg. tropical regions)
+# # Load packages, themes, directories, and functions
+# ```{r}
+# rm(list = ls())
+# source("00_pck.R")
+# ```
+# 
+# # Read in the data (only s08 data)
+# ```{r}
+# dat_l <- lapply(str_subset(list.files(glue("{dirs$modfit}"), full.names = TRUE), "s08.rds"), readRDS)
+# names(dat_l) <- sub(".*brms_(.*?)_(vl|v1)_s08.*", "\\1", 
+#                     str_subset(list.files(glue("{dirs$modfit}")), "s08.rds"))
+# 
+# ```
+# 
+# # Try sensitivity analysis, only temperate data 
+# # pertuwpt, pertuapt, pertuaprn, pertuafha
+# # strep01, strep03, strep04, strep05, strep06a, strep06b, strep07f, strep09v, strep14, strep18c,
+# # strep19a, strep19f, strep23f
+# # hbv
+# ```{r}
+# datsens1_l <- lapply(dat_l[c("pertuwpt", "pertuapt", "pertuaprn", "pertuafha", "strep01", "strep03", 
+#                              "strep04", "strep05", "strep06a", "strep06b", "strep07f", "strep09v", 
+#                              "strep14", "strep18c", "strep19a", "strep19f", "strep23f", "hbv")],
+#                      filter, reg_6 == "1_Temperate")
+# datsens1_l
+# 
+# walk(names(datsens1_l), function(x) {
+#   dose <- if(x %in% c("vzv", "measl", "mumps", "rubel", 
+#                       "hav", "multi_mmr-vzv", "multi_mmr")) "v1" else "vl"
+#   saveRDS(datsens1_l[[x]], glue("{dirs$outputs}/modfit/dataseonlytemp_brms_{x}_{dose}_s08.rds"))
+# })
+#```
 
+# Sensitivity analysis only seropositive data rotavirus ============================================
+# Check if the models are better when using only seropositive data for rotavirus 
+
+# Load packages, themes, directories, and functions
+# ```{r}
+# rm(list = ls())
+# source("00_pck.R")
+# ```
+
+# Read in the data (only s08 data)
+# ```{r}
+# dat_l <- readRDS(glue("{dirs$modfit}/data_brms_rota_vl_s08.rds"))
+# ```
+
+# Compare histograms and datapoints per region 
+# ```{r}
+# # Filter the data for only seropositive individuals
+# datsens_l <- filter(dat_l, censored == 0)
+# 
+# # Histogram
+# bind_rows(list(all = dat_l, sens = datsens_l), .id = "sens") %>%
+#   ggplot(aes(x = imm_val_s1, color = reg_6)) + 
+#   geom_density() +
+#   scale_x_continuous(trans = "log10") + 
+#   facet_grid(~sens)
+# 
+# # Per week data
+# bind_rows(list(all = dat_l, sens = datsens_l), .id = "sens") %>%
+#   ggplot(aes(x = vac_week_v1)) + 
+#   geom_histogram(color = "white", bins = 52) +
+#   scale_x_continuous() + 
+#   facet_wrap(sens~reg_6, scales = "free_y", ncol = 5)
+# ```
+
+# Filter the data and save it
+# ```{r}
+# saveRDS(datsens_l, glue("{dirs$outputs}/modfit/dataseonlyseropos_brms_rota_vl_s08.rds"))
+# ```

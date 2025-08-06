@@ -51,7 +51,7 @@ Unipathogen: Single vaccination with a unique or multiple immunogenicity measure
 ```{r}
 dat_comb_uni <- list()
 # Unipathogen univariate: 
-dat_comb_uni$unipat_mono <- lapply(stu_ppat, function(x) {
+dat_comb_uni$unipat_mono <- lapply(stu_ppat[!str_detect(names(stu_ppat), "7|10|11|13|23")], function(x) {
   # Filter the dataframes to check which combinations have the highest number of individuals
   x %>%
     filter(if_all(starts_with("reg_"), ~ .x >= 0.8)) %>%
@@ -75,13 +75,14 @@ dat_comb_uni$unipat_mono <- dat_comb_uni$unipat_mono %>%
   slice_head(n = 1) %>%
   ungroup() %>%
   # Label doses and split serology names
-  mutate(doses = case_when(doses > 1 ~ "l", doses == 1 ~ "1"),
+  mutate(doses = case_when(pat_dat == "rota" & doses > 1 ~ "l", pat_dat != "rota" & doses == 1 ~ "1", 
+                           pat_dat != "rota" & doses == 3 ~ "3"),
          imm_met_s1 = strsplit(imm_met_s1, "-"),
          imm_sero_s1 = strsplit(imm_sero_s1, "-"))
 
 # Unipathogen multivariate 
 # Pathogens with multiple seronames: "pertua" "men" "strep" "ipv" "opv"
-dat_comb_uni$unipat_multi <- lapply(stu_ppat, function(x) {
+dat_comb_uni$unipat_multi <- lapply(stu_ppat[names(stu_ppat) != "strep"], function(x) {
   # Filter the dataframes to check which combinations have the highest number of individuals
   x %>%
     filter(if_all(starts_with("reg_"), ~ .x >= 0.8)) %>%
@@ -99,8 +100,9 @@ dat_comb_uni$unipat_multi <- lapply(stu_ppat, function(x) {
   filter(max(pid_n) == pid_n) %>%
   ungroup() %>%
   # Label doses and split serology names
-  mutate(doses = case_when(doses > 1 ~ "l", doses == 1 ~ "1"),
-         imm_met_s1 = strsplit(imm_met_s1, "-"), 
+  mutate(doses = case_when(pat_dat == "rota" & doses > 1 ~ "l", pat_dat != "rota" & doses == 1 ~ "1", 
+                           pat_dat != "rota" & doses == 3 ~ "3"),
+         imm_met_s1 = strsplit(imm_met_s1, "-"),
          imm_sero_s1 = strsplit(imm_sero_s1, "-"))
 
 dat_comb_uni <- bind_rows(dat_comb_uni, .id = "multi") %>%
@@ -171,7 +173,8 @@ dat_comb_multi <- lapply(stu_mpat, function(x) {
   filter(max(pid_n) == pid_n) %>%
   ungroup() %>%
   # Label doses and split serology names
-  mutate(doses = case_when(doses > 1 ~ "l", doses == 1 ~ "1"),
+  mutate(doses = case_when(pat_dat == "rota" & doses > 1 ~ "l", pat_dat != "rota" & doses == 1 ~ "1", 
+                           pat_dat != "rota" & doses == 3 ~ "3"),
          imm_sero_s1 = strsplit(imm_sero_s1, "-"),
          imm_met_s1 = strsplit(imm_met_s1, "-"),
          multi = "multipat_multi",
@@ -201,12 +204,6 @@ pat_df_l <- sapply(dat_select$name_df, function(x) {
   pat_dat <- if(dat_select[dat_select$name_df == x, "multi"][[1]] == "multipat_multi") { 
     stu_mpat 
   } else { stu_ppat }
-  
-  # TEST STREP ONLY ONE VACCINE
-  if(str_detect(x, "multi_strep")) { 
-    pat_dat[[dat_select[dat_select$name_df == x, "pat_dat"][[1]]]] <- filter(
-      pat_dat[[dat_select[dat_select$name_df == x, "pat_dat"][[1]]]], vac_name_v1 == "strep10") 
-  }
   
   # Function to create data frame for mono/multi-pathogen and mono/multivariate models.
   fun_dgsk_modpat(
@@ -284,9 +281,16 @@ lapply(pat_df_l, function(x) c(studies_vl = length(unique(x$study)),
 # Save data frames 
 ```{r}
 walk(names(pat_df_l), function(x) {
-  pat <- paste0(dat_select[dat_select$name_df == x, "prefx"][[1]], 
-                dat_select[dat_select$name_df == x, "pat_dat"][[1]])
-  saveRDS(pat_df_l[[x]], glue("{dirs$outputs}/modfit/{x}.rds"))
+  # Rewrite rotavirus (save the complete and the subset dataset)
+  if(str_detect(x, "_rota_")) {
+    # Save all the data for sensitivity analyses
+    x_new <- str_replace_all(x, "data", "dataseallsero")
+    saveRDS(pat_df_l[[x]], glue("{dirs$outputs}/modfit/{x_new}.rds"))
+    # Filter the data for only seropositive individuals
+    saveRDS(filter(pat_df_l[[x]], censored == 0), glue("{dirs$outputs}/modfit/{x}.rds"))
+  } else {
+    saveRDS(pat_df_l[[x]], glue("{dirs$outputs}/modfit/{x}.rds"))
+  }
 })
 ```
 

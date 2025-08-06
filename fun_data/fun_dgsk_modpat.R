@@ -30,7 +30,7 @@ fun_dgsk_modpat <- function(dat = stu_ppat[[pat]], method = "elisa", seroname = 
     dat <- filter(dat, doses == dose) 
   } else if(dose == "l") {
     dat <- group_by(dat, study, pid) %>%
-      filter(doses <= 3) %>%
+      filter(doses > 1 & doses <= 3) %>%
       mutate(ldose = max(doses)) %>%
       filter(doses == ldose) %>%
       ungroup() %>%
@@ -49,6 +49,7 @@ fun_dgsk_modpat <- function(dat = stu_ppat[[pat]], method = "elisa", seroname = 
       vac_conc_n = vac_conc,
       vac_conc = c(scale(vac_conc)),
       pi_vac_week_v1 = vac_week_v1 * (2*pi/52),
+      pi_birth_week = birth_week * (2*pi/52),
       across(starts_with("vac_name_v"), ~ replace_na(.x, "No_dose")),
       across(starts_with("vac_name_conco"), ~ replace_na(.x, "No_conco")),
       imm_spos_s1 = case_when(censored == 1 ~ 0, .default = 1) 
@@ -62,6 +63,7 @@ fun_dgsk_modpat <- function(dat = stu_ppat[[pat]], method = "elisa", seroname = 
     # Relocate variables
     relocate(study, country, center, rct_group,                                          # RCT data
              eligibility, pid, sex, age, age_ref, age_ref_date, birth_date, birth_week,  # Ind data
+             pi_birth_week,
              doses, vac_conc, vac_conc_n, vac_conc_unit,                                 # Vac data
              ends_with("v1"),
              ends_with("v2"),
@@ -79,11 +81,11 @@ fun_dgsk_modpat <- function(dat = stu_ppat[[pat]], method = "elisa", seroname = 
       pivot_wider(names_from = imm_sero_s1, values_from = c(censored, imm_spos_s1, imm_val_s1, imm_cutoff_s1)) %>%
       filter(if_all(starts_with("imm_val_s1"), ~ !is.na(.x))) %>%
       relocate(study, country, center, rct_group, eligibility, pid, sex, age, age_ref, age_ref_date, 
-               birth_date, birth_week, doses, vac_conc, vac_conc_n, vac_conc_unit, ends_with("v1"),
-               ends_with("v2"), ends_with("v3"),  ends_with("v4"), ends_with("v5"), imm_met_s1, 
-               starts_with("imm_cutoff_s1"), imm_date_s1, time_vl_s1, starts_with("imm_val_s1"), 
-               starts_with("censored"), starts_with("imm_spos_s1"), lon_med, lat_med, 
-               starts_with("kgc"), starts_with("reg"))
+               birth_date, birth_week, pi_birth_week, doses, vac_conc, vac_conc_n, vac_conc_unit, 
+               ends_with("v1"), ends_with("v2"), ends_with("v3"),  ends_with("v4"), ends_with("v5"), 
+               imm_met_s1, starts_with("imm_cutoff_s1"), imm_date_s1, time_vl_s1, 
+               starts_with("imm_val_s1"), starts_with("censored"), starts_with("imm_spos_s1"), 
+               lon_med, lat_med, starts_with("kgc"), starts_with("reg"))
   }
   
   # Handle multi-multipathogen case (multiple serology markers for multiple pathogens)
@@ -93,7 +95,7 @@ fun_dgsk_modpat <- function(dat = stu_ppat[[pat]], method = "elisa", seroname = 
       pivot_wider(names_from = imm_sero_s1, values_from = c(censored, imm_spos_s1, imm_val_s1, imm_met_s1, imm_cutoff_s1)) %>%
       filter(if_all(starts_with("imm_val_s1"), ~ !is.na(.x))) %>%
       relocate(study, country, center, rct_group, eligibility, pid, sex, age, age_ref, age_ref_date, 
-               birth_date, birth_week, doses, vac_conc_unit, ends_with("v1"),
+               birth_date, birth_week, pi_birth_week, doses, vac_conc_unit, ends_with("v1"),
                ends_with("v2"), ends_with("v3"),  ends_with("v4"), ends_with("v5"), 
                starts_with("imm_cutoff_s1"), imm_date_s1, time_vl_s1, starts_with("imm_val_s1"), 
                starts_with("censored"), starts_with("imm_spos_s1"), lon_med, lat_med, 

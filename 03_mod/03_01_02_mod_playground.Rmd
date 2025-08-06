@@ -16,15 +16,17 @@ rm(list = ls())
 source("../00_pck.R")
 
 # Define pathogen
-args_pat <- "strep04"
+args_pat <- "rota"
 # Define doses
-dose <- if(args_pat %in% c("vzv", "measl", "mumps", "rubel", 
-                           "hav", "multi_mmr-vzv", "multi_mmr")) "v1" else "vl"
+dose <- case_when(
+  args_pat %in% c("vzv", "measl", "mumps", "rubel", "hav", "multi_mmr-vzv", "multi_mmr") ~ "v1",
+  args_pat == "rota" ~ "vl",
+  .default = "v3")
 ```
 
 # Read in the data ---------------------------------------------------------------------------------
 ```{r}
-args_dat <- glue("datasemeth_brms_{args_pat}_{dose}_s08.rds")
+args_dat <- glue("data_brms_{args_pat}_{dose}_s08.rds")
 dat <- readRDS(file = glue("{dirs$modfit}/{args_dat}"))
 ```
 
@@ -32,6 +34,7 @@ dat <- readRDS(file = glue("{dirs$modfit}/{args_dat}"))
 ```{r}
 l_formula <- readRDS(file = glue("{dirs$modfit}/formula_brms_{args_pat}_l.rds"))
 args_fo <- names(l_formula)[[3]]
+args_fo
 ```
 
 # Retrieve the iters from the command line arguments (in server script ) ---------------------------
@@ -46,8 +49,7 @@ crit <- FALSE
 mod <- brm(formula = l_formula[[args_fo]],
              data = dat, family = Gamma(link = "log"),
              warmup = 1000, iter = args_iter, chains = 1,
-             init = 0, control = list(adapt_delta = 0.95),
-             save_all_pars = TRUE)
+             init = 0, control = list(adapt_delta = 0.95), save_pars = save_pars(all = TRUE))
 
 if(crit == TRUE) mod <- add_criterion(mod, criterion = c("waic"))
 ```
@@ -63,5 +65,7 @@ stancode(mod)
 ####################################################################################################
 END
 ####################################################################################################
+
+
 
 

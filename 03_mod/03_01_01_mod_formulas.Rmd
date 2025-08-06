@@ -11,9 +11,9 @@ Bayesian regression models (BRMS). It handles both univariate (uni-pathogen) and
 (uni-pathogen and multi-pathogen) model specifications.
 
 Functions Used:
-- `fun_add_formula.R`: Function to add new expression to list making sure it did not exist and the 
+- `fun_formula_add.R`: Function to add new expression to list making sure it did not exist and the 
 name is not repeated
-- `fun_formulas.R` and helper `fun_formulas_multipathogen`: Function to generate BRMS formulas.
+- `fun_formula.R` and helper `fun_formula_multipathogen`: Function to generate BRMS formulas.
 
 Outputs: 
 For each unipathogen, multi-unipathogen and multi-multipathogen (46), in the folder 
@@ -25,16 +25,16 @@ outputs/modfit:
 ```{r}
 rm(list = ls())
 source("../00_pck.R")
-source("fun_add_formula.R")
-source("fun_formulas.R")
+source("fun_formula_add.R")
+source("fun_formula.R")
 ```
 
 # Read in the data
 ```{r}
 dat_l <- lapply(str_subset(list.files(glue("{dirs$modfit}"), full.names = TRUE), "s08.rds"), readRDS)
-names(dat_l) <- sub(".*brms_(.*?)_(vl|v1)_s08.*", "\\1", 
+names(dat_l) <- sub(".*brms_(.*?)_(vl|v1|v3)_s08.*", "\\1", 
                     str_subset(list.files(glue("{dirs$modfit}")), "s08.rds"))
-```
+``` 
 
 # For univariate models, quality checks on factor levels and grouping variables to define covariates
 ```{r}
@@ -85,7 +85,7 @@ patuni_df <- data.frame(
                  "strep07f", "strep09v", "strep14", "strep18c", "strep19a", "strep19f", "strep23f") ~ 
         list(c("vac_conc", "vac_name_v1", "(1|study)", "(1|study:country:center:rct_group)")),
       # Pathogens with different vaccine concentrations only 
-      pat %in% c("rota", "vzv", "measl", "mumps", "rubel", "mena", "menc", "meny", "hib", 
+      pat %in% c("vzv", "measl", "mumps", "rubel", "mena", "menc", "meny", "hib", 
                  "pertuwpt", "pertuapt", "pertuafha", "pertuaprn") ~ 
         list(c("vac_conc", "(1|study)", "(1|study:country:center:rct_group)")),
       # Pathogens with same vaccine and concentration in all studies:
@@ -93,6 +93,8 @@ patuni_df <- data.frame(
         list(c("(1|study)", "(1|study:country:center:rct_group)")),
       pat %in% c("hav", "opv1", "opv2", "opv3") ~ 
         list(c("(1|center)", "(1|center:rct_group)")),
+      pat == "rota" ~ 
+        list(c("doses", "vac_conc", "(1|study)", "(1|study:country:center:rct_group)")),
       TRUE ~ list(NULL)))
 ```
 
@@ -116,15 +118,18 @@ bind_rows(dat_l[str_subset(names(dat_l), "multi")], .id = "pat") %>%
 # corresponding data file
 
 patmulti_df <- data.frame(
-  pat = c("multi_men", "multi_strep", "multi_ipv", "multi_opv", "multi_pertua",
+  pat = c("multi_men", "multi_ipv", "multi_opv", "multi_pertua",
+          "multi_strep7", "multi_strep10", "multi_strep11", "multi_strep13", 
           "multi_dtpa", "multi_dtpw", "multi_hib-men", "multi_mmr", "multi_mmr-vzv")) %>%
   mutate(
     doses = case_when(pat %in% c("multi_mmr-vzv", "multi_mmr") ~ "d1", TRUE ~ "d3"),
     others = case_when(
       # Pathogens with different vaccine names and concentrations
       #### Taking out last level as rct_group not convering 
-      pat %in% c("multi_strep") ~ list(
+      pat %in% c("multi_strep10") ~ list(
         c("(1|study)", "(1|study:country:center)")),
+      pat %in% c("multi_strep11") ~ list(
+        c("vac_conc", "(1|study)", "(1|study:country:center:rct_group)")),
       # Pathogens with different vaccine concentrations only 
       pat %in% c("multi_men", "multi_pertua") ~ list(
         c("vac_conc", "(1|study)", "(1|study:country:center:rct_group)")),
@@ -132,13 +137,12 @@ patmulti_df <- data.frame(
       pat %in% c("multi_ipv", "multi_mmr", "multi_mmr-vzv", "multi_dtpw") ~ 
         list(c("(1|study)", "(1|study:country:center:rct_group)")),
       #### Taking out last level as rct_group not convering 
-      pat %in% c("multi_dtpa", "multi_hib-men", "multi_opv") ~ 
+      pat %in% c("multi_dtpa", "multi_hib-men", "multi_opv", "multi_strep13", "multi_strep7") ~ 
         list(c("(1|study)")),
-      
       TRUE ~ list(NULL))) %>%
   rowwise() %>%  # Ensure operations happen row by row
   mutate(multi_pat = list(readRDS(glue(
-    "{dirs$modfit}/data_brms_{pat}_{case_when(doses == 'd1' ~ 'v1', .default = 'vl')}_s08.rds")) %>%
+    "{dirs$modfit}/data_brms_{pat}_{case_when(doses == 'd1' ~ 'v1', .default = 'v3')}_s08.rds")) %>%
       names() %>%
       str_subset("imm_val_s1") %>%
       str_remove("imm_val_s1_"))) %>%
@@ -181,17 +185,19 @@ patmulti_photo_df
 patuni_photo_formula_l <- sapply(unique(patuni_photo_df$pat), function(x) {
   l_formula <- list()
   for (i in which(patuni_photo_df$pat == x)) {
-    l_formula <- fun_add_formula(
-      l_formula, fun_formulas(
+    l_formula <- fun_formula_add(
+      l_formula, fun_formula(
         pathogen = patuni_photo_df[i,"pat"][[1]], 
+        cens = if_else(x == "rota", FALSE, TRUE),
         data = "s08", 
         doses = patuni_photo_df[i,"doses"][[1]], 
         model_nm = patuni_photo_df[i,"model_nm"][[1]], 
         others = patuni_photo_df[i,"others"][[1]][[1]],
         varname = patuni_photo_df[i,"varname"][[1]]))}
-  saveRDS(l_formula, file = glue("{dirs$modfit}/formula_brms_{x}_l.rds"))
   return(l_formula)
 }, simplify = FALSE)
+
+patuni_photo_formula_l$rota
 ```
 
 # Multivariate Models: Generate and Save Model Formulas
@@ -203,8 +209,8 @@ patuni_photo_formula_l <- sapply(unique(patuni_photo_df$pat), function(x) {
 patmulti_photo_formula_l <- sapply(unique(patmulti_photo_df$pat), function(x) {
   l_formula <- list()
   for (i in which(patmulti_photo_df$pat == x)) {
-    l_formula <- fun_add_formula(
-      l_formula, fun_formulas_multipathogen(
+    l_formula <- fun_formula_add(
+      l_formula, fun_formula_multipathogen(
         pathogen = patmulti_photo_df[i,"pat"][[1]], 
         data = "s08", 
         doses = patmulti_photo_df[i,"doses"][[1]], 
@@ -213,105 +219,131 @@ patmulti_photo_formula_l <- sapply(unique(patmulti_photo_df$pat), function(x) {
         varname = patmulti_photo_df[i,"varname"][[1]],
         multi_pat = patmulti_photo_df[i,"multi_pat"][[1]][[1]]
         ))}
-  saveRDS(l_formula, file = glue("{dirs$modfit}/formula_brms_{x}_l.rds"))
-  return(l_formula)
-}, simplify = FALSE)
-```
-
-# Seropositive models ==============================================================================
-# Univariate Models: Generate and Save Model Formulas
-```{r}
-# For each univariate model:
-# - Iterate over unique pathogens in 'patuni_photo_df'.
-# - For each pathogen, generate formulas using fun_formulas and aggregate them with fun_add_formula.
-# - Save the resulting list of formulas as an RDS file for later model fitting.
-patuni_photo_spos_formula_l <- sapply(unique(patuni_photo_df$pat), function(x) {
-  l_formula <- list()
-  for (i in which(patuni_photo_df$pat == x)) {
-    l_formula <- fun_add_formula(
-      l_formula, fun_formulas(
-        pathogen = patuni_photo_df[i,"pat"][[1]], 
-        data = "s08", 
-        doses = patuni_photo_df[i,"doses"][[1]], 
-        model_nm = patuni_photo_df[i,"model_nm"][[1]], 
-        others = patuni_photo_df[i,"others"][[1]][[1]],
-        varname = patuni_photo_df[i,"varname"][[1]],
-        outseropos = TRUE))}
-  saveRDS(l_formula, file = glue("{dirs$modfit}/formula_brms_{x}_l.rds"))
   return(l_formula)
 }, simplify = FALSE)
 
-# x = "rota"
-# i = 1
-```
-
-# Sensitivity temperate ============================================================================
-```{r}
-patuni_photo_df_sens <- patuni_photo_df %>%
-  filter(
-    pat %in% c("pertuwpt", "pertuapt", "pertuaprn", "pertuafha", 
-               "strep01", "strep03", "strep04", "strep05", "strep06a", "strep06b", "strep07f", 
-               "strep09v", "strep14", "strep18c", "strep19a", "strep19f", "strep23f", "hbv"),
-    model_nm %in% c("base", "cs")
-  ) 
-
-patuni_photo_formula_sens_l <- sapply(unique(patuni_photo_df_sens$pat), function(x) {
-  l_formula <- list()
-  for (i in which(patuni_photo_df_sens$pat == x)) {
-    l_formula <- fun_add_formula(
-      l_formula, fun_formulas(
-        pathogen = patuni_photo_df_sens[i,"pat"][[1]], 
-        data = "seonlytemp_s08", 
-        doses = patuni_photo_df_sens[i,"doses"][[1]], 
-        model_nm = patuni_photo_df_sens[i,"model_nm"][[1]], 
-        others = patuni_photo_df_sens[i,"others"][[1]][[1]],
-        varname = patuni_photo_df_sens[i,"varname"][[1]]))}
-  saveRDS(l_formula, file = glue("{dirs$modfit}/formula_brms_{x}_l.rds"))
-  return(l_formula)
-}, simplify = FALSE)
+patmulti_photo_formula_l$multi_men
 ```
 
 # Sensitivity methods ==============================================================================
 ```{r}
-patuni_photo_df_sensmeth <- patuni_photo_df %>%
+patuni_photo_df_semeth <- patuni_photo_df %>%
   filter(pat %in% c("mumps", "vzv", "dipht", "mena", "menc", "meny",
                     "strep01", "strep03", "strep04", "strep05", "strep06a", "strep06b", "strep07f", 
-                    "strep09v", "strep14", "strep18c", "strep19a", "strep19f", "strep23f")) 
+                    "strep09v", "strep14", "strep18c", "strep19a", "strep19f", "strep23f")) %>%
+  # Fix that dipht only has two vac_conc-vac_name_v1
+  mutate(others = case_when(pat == "dipht" ~ list(
+    c("vac_conc", "(1|study)", "(1|study:country:center:rct_group)")),
+    .default = others))
 
-patuni_photo_formula_sensmeth_l <- sapply(unique(patuni_photo_df_sensmeth$pat), function(x) {
-  l_formula <- list()
-  for (i in which(patuni_photo_df_sensmeth$pat == x)) {
-    l_formula <- fun_add_formula(
-      l_formula, fun_formulas(
-        pathogen = patuni_photo_df_sensmeth[i,"pat"][[1]], 
+for (x in unique(patuni_photo_df_semeth$pat)) {
+  for (i in which(patuni_photo_df_semeth$pat == x)) {
+    patuni_photo_formula_l[[x]] <- fun_formula_add(omit_exp = TRUE,
+      patuni_photo_formula_l[[x]], fun_formula(
+        pathogen = patuni_photo_df_semeth[i,"pat"][[1]], 
         data = "semeth_s08", 
-        doses = patuni_photo_df_sensmeth[i,"doses"][[1]], 
-        model_nm = patuni_photo_df_sensmeth[i,"model_nm"][[1]], 
-        others = patuni_photo_df_sensmeth[i,"others"][[1]][[1]],
-        varname = patuni_photo_df_sensmeth[i,"varname"][[1]]))}
-  saveRDS(l_formula, file = glue("{dirs$modfit}/formula_brms_{x}_l.rds"))
-  return(l_formula)
-}, simplify = FALSE)
+        doses = patuni_photo_df_semeth[i,"doses"][[1]], 
+        model_nm = patuni_photo_df_semeth[i,"model_nm"][[1]], 
+        others = patuni_photo_df_semeth[i,"others"][[1]][[1]],
+        varname = patuni_photo_df_semeth[i,"varname"][[1]]))
+    }
+}
 
-patmulti_photo_df_sensmeth <- patmulti_photo_df %>%
-  filter(pat %in% c("multi_men", "multi_strep")) 
+patmulti_photo_df_semeth <- patmulti_photo_df %>%
+  filter(pat %in% c("multi_men", "multi_strep7", "multi_strep10", "multi_strep11", "multi_strep13")) 
 
-patmulti_photo_formula_l <- sapply(unique(patmulti_photo_df_sensmeth$pat), function(x) {
-  l_formula <- list()
-  for (i in which(patmulti_photo_df_sensmeth$pat == x)) {
-    l_formula <- fun_add_formula(
-      l_formula, fun_formulas_multipathogen(
-        pathogen = patmulti_photo_df_sensmeth[i,"pat"][[1]], 
+for (x in unique(patmulti_photo_df_semeth$pat)) {
+  for (i in which(patmulti_photo_df_semeth$pat == x)) {
+    patmulti_photo_formula_l[[x]] <- fun_formula_add(omit_exp = TRUE,
+      patmulti_photo_formula_l[[x]], fun_formula_multipathogen(
+        pathogen = patmulti_photo_df_semeth[i,"pat"][[1]], 
         data = "semeth_s08", 
-        doses = patmulti_photo_df_sensmeth[i,"doses"][[1]], 
-        model_nm = patmulti_photo_df_sensmeth[i,"model_nm"][[1]], 
-        others = patmulti_photo_df_sensmeth[i,"others"][[1]][[1]],
-        varname = patmulti_photo_df_sensmeth[i,"varname"][[1]],
-        multi_pat = patmulti_photo_df_sensmeth[i,"multi_pat"][[1]][[1]]
-        ))}
-  saveRDS(l_formula, file = glue("{dirs$modfit}/formula_brms_{x}_l.rds"))
-  return(l_formula)
-}, simplify = FALSE)
+        doses = patmulti_photo_df_semeth[i,"doses"][[1]], 
+        model_nm = patmulti_photo_df_semeth[i,"model_nm"][[1]], 
+        others = patmulti_photo_df_semeth[i,"others"][[1]][[1]],
+        varname = patmulti_photo_df_semeth[i,"varname"][[1]],
+        multi_pat = patmulti_photo_df_semeth[i,"multi_pat"][[1]][[1]]))
+    }
+}
+patuni_photo_formula_l$dipht
+patmulti_photo_formula_l$multi_men
+```
+
+# Sensitivity seropositive rota ====================================================================
+```{r}
+patuni_photo_df_seallsero <- patuni_photo_df %>%
+  filter(pat == "rota") 
+
+for(x in unique(patuni_photo_df_seallsero$pat)) {
+  for (i in which(patuni_photo_df_seallsero$pat == x)) {
+    patuni_photo_formula_l[[x]] <- fun_formula_add(
+      patuni_photo_formula_l[[x]], fun_formula(
+        cens = TRUE,
+        pathogen = patuni_photo_df_seallsero[i,"pat"][[1]], 
+        data = "seallsero_s08", 
+        doses = patuni_photo_df_seallsero[i,"doses"][[1]], 
+        model_nm = patuni_photo_df_seallsero[i,"model_nm"][[1]], 
+        others = patuni_photo_df_seallsero[i,"others"][[1]][[1]],
+        varname = patuni_photo_df_seallsero[i,"varname"][[1]]))
+    }
+}
+
+patuni_photo_formula_l$rota
+```
+
+# Sensitivity birth ================================================================================
+
+```{r}
+# Univariate Models: Generate and Save Model Formulas
+patuni_photo_df_sebirth <- patuni_photo_df %>%
+  filter(model_nm %in% c("cs", "csi")) %>%
+  mutate(model_nm = paste0("b", model_nm))
+
+for (x in unique(patuni_photo_df_sebirth$pat)) {
+  for (i in which(patuni_photo_df_sebirth$pat == x)) {
+    patuni_photo_formula_l[[x]] <- fun_formula_add(
+      patuni_photo_formula_l[[x]], fun_formula(
+        pathogen = patuni_photo_df_sebirth[i,"pat"][[1]], 
+        cens = if_else(x == "rota", FALSE, TRUE),
+        data = "sebirth_s08", 
+        doses = patuni_photo_df_sebirth[i,"doses"][[1]], 
+        model_nm = patuni_photo_df_sebirth[i,"model_nm"][[1]], 
+        others = patuni_photo_df_sebirth[i,"others"][[1]][[1]],
+        varname = patuni_photo_df_sebirth[i,"varname"][[1]]))
+    }
+}
+
+# Multivariate Models: Generate and Save Model Formulas
+patmulti_photo_df_sebirth <- patmulti_photo_df %>%
+  filter(model_nm %in% c("cs", "csi")) %>%
+  mutate(model_nm = paste0("b", model_nm))
+
+for (x in unique(patmulti_photo_df_sebirth$pat)) {
+  for (i in which(patmulti_photo_df_sebirth$pat == x)) {
+    patmulti_photo_formula_l[[x]] <- fun_formula_add(
+      patmulti_photo_formula_l[[x]], fun_formula_multipathogen(
+        pathogen = patmulti_photo_df_sebirth[i,"pat"][[1]], 
+        data = "sebirth_s08", 
+        doses = patmulti_photo_df_sebirth[i,"doses"][[1]], 
+        model_nm = patmulti_photo_df_sebirth[i,"model_nm"][[1]], 
+        others = patmulti_photo_df_sebirth[i,"others"][[1]][[1]],
+        varname = patmulti_photo_df_sebirth[i,"varname"][[1]],
+        multi_pat = patmulti_photo_df_sebirth[i,"multi_pat"][[1]][[1]]))
+    }
+}
+
+patuni_photo_formula_l$rota
+patmulti_photo_formula_l$multi_men
+```
+
+# Save them ========================================================================================
+```{r}
+walk(names(patuni_photo_formula_l), function(x) {
+  saveRDS(patuni_photo_formula_l[[x]], glue("{dirs$modfit}/formula_brms_{x}_l.rds"))
+})
+walk(names(patmulti_photo_formula_l), function(x) {
+  saveRDS(patmulti_photo_formula_l[[x]], glue("{dirs$modfit}/formula_brms_{x}_l.rds"))
+})
 ```
 
 ####################################################################################################
@@ -323,6 +355,88 @@ patmulti_photo_formula_l <- sapply(unique(patmulti_photo_df_sensmeth$pat), funct
 
 
 
+
+
+# Seropositive models ==============================================================================
+# Univariate Models: Generate and Save Model Formulas
+```{r}
+# # For each univariate model:
+# # - Iterate over unique pathogens in 'patuni_photo_df'.
+# # - For each pathogen, generate formulas using fun_formulas and aggregate them with fun_add_formula.
+# # - Save the resulting list of formulas as an RDS file for later model fitting.
+# patuni_photo_spos_formula_l <- sapply(unique(patuni_photo_df$pat), function(x) {
+#   l_formula <- list()
+#   for (i in which(patuni_photo_df$pat == x)) {
+#     l_formula <- fun_add_formula(
+#       l_formula, fun_formulas(
+#         pathogen = patuni_photo_df[i,"pat"][[1]], 
+#         data = "s08", 
+#         doses = patuni_photo_df[i,"doses"][[1]], 
+#         model_nm = patuni_photo_df[i,"model_nm"][[1]], 
+#         others = patuni_photo_df[i,"others"][[1]][[1]],
+#         varname = patuni_photo_df[i,"varname"][[1]],
+#         outseropos = TRUE))}
+#   saveRDS(l_formula, file = glue("{dirs$modfit}/formula_brms_{x}_l.rds"))
+#   return(l_formula)
+# }, simplify = FALSE)
+# 
+# # x = "rota"
+# # i = 1
+```
+
+# Sensitivity temperate ============================================================================
+```{r}
+# patuni_photo_df_sens <- patuni_photo_df %>%
+#   filter(
+#     pat %in% c("pertuwpt", "pertuapt", "pertuaprn", "pertuafha", 
+#                "strep01", "strep03", "strep04", "strep05", "strep06a", "strep06b", "strep07f", 
+#                "strep09v", "strep14", "strep18c", "strep19a", "strep19f", "strep23f", "hbv"),
+#     model_nm %in% c("base", "cs")
+#   ) 
+# 
+# patuni_photo_formula_sens_l <- sapply(unique(patuni_photo_df_sens$pat), function(x) {
+#   l_formula <- list()
+#   for (i in which(patuni_photo_df_sens$pat == x)) {
+#     l_formula <- fun_add_formula(
+#       l_formula, fun_formulas(
+#         pathogen = patuni_photo_df_sens[i,"pat"][[1]], 
+#         data = "seonlytemp_s08", 
+#         doses = patuni_photo_df_sens[i,"doses"][[1]], 
+#         model_nm = patuni_photo_df_sens[i,"model_nm"][[1]], 
+#         others = patuni_photo_df_sens[i,"others"][[1]][[1]],
+#         varname = patuni_photo_df_sens[i,"varname"][[1]]))}
+#   saveRDS(l_formula, file = glue("{dirs$modfit}/formula_brms_{x}_l.rds"))
+#   return(l_formula)
+# }, simplify = FALSE)
+```
+
+# Simulations predictions formulas =================================================================
+
+# Univariate Models: Generate and Save Model Formulas
+```{r}
+# # For each univariate model:
+# # - Iterate over unique pathogens in 'patuni_photo_df'.
+# # - For each pathogen, generate formulas using fun_formulas and aggregate them with fun_add_formula.
+# # - Save the resulting list of formulas as an RDS file for later model fitting.
+# patuni_photo_formula_l <- sapply(unique(patuni_photo_df$pat), function(x) {
+#   l_formula <- list()
+#   for (i in which(patuni_photo_df$pat == x & patuni_photo_df$varname == "reg_6")) {
+#     l_formula <- fun_add_formula(
+#       l_formula, fun_formulas(
+#         pathogen = patuni_photo_df[i,"pat"][[1]], 
+#         data = "s08", 
+#         doses = patuni_photo_df[i,"doses"][[1]], 
+#         model_nm = patuni_photo_df[i,"model_nm"][[1]], 
+#         others = patuni_photo_df[i,"others"][[1]][[1]],
+#         varname = patuni_photo_df[i,"varname"][[1]]))}
+#   saveRDS(l_formula, file = glue("{dirs$modfit}/formula_brms_{x}_l.rds"))
+#   return(l_formula)
+# }, simplify = FALSE)
+```
+
+####################################################################################################
+# End
+####################################################################################################
 
 # ==================================================================================================
 # Photoperiod and climate models ===================================================================

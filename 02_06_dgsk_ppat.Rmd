@@ -144,11 +144,13 @@ patdf_l <- list()
 patdf_checks <- list()
 
 # Loop through each pathogen and some specific vaccines (ipv, opv, pertuw, pertua)
-for (vac in c(unique(stu_perpat$pat), "ipv", "opv", "pertuw", "pertua")) {
+for (vac in c(unique(stu_perpat$pat), "ipv", "opv", "pertuw", "pertua", "strep7", "strep10", 
+              "strep11", "strep13", "strep23")) {
   
   # Map the vaccines to the correct pathogen name
   i <- case_when(vac %in% c("pertuw", "pertua") ~ "pertu",
                  vac %in% c("ipv", "opv") ~ "polio",
+                 vac %in% c("strep7", "strep10", "strep11", "strep13", "strep23") ~ "strep",
                  .default = vac)
 
   # Get the list of studies for the i pathogen
@@ -217,8 +219,8 @@ for (vac in c(unique(stu_perpat$pat), "ipv", "opv", "pertuw", "pertua")) {
   # Adjust country names for rotavirus studies
   if(vac == "rota") patdf_l[[vac]] <- mutate(patdf_l[[vac]], country = str_remove_all(country, "_.*"))
   
-  # Subset data for Polio and Pertussis 
-  if(vac %in% c("pertuw", "pertua", "ipv", "opv")) {
+  # Subset data for Polio, Pertussis, and Strep
+  if(vac %in% c("pertuw", "pertua", "ipv", "opv", "strep7", "strep10", "strep11", "strep13", "strep23")) {
     patdf_l[[vac]] <- filter(patdf_l[[vac]], 
                              if_all(starts_with("vac_name_v"), 
                                     ~ . == str_replace(vac, "pertu", "dtp") | is.na(.))) 

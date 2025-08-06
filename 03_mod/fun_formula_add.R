@@ -5,7 +5,7 @@
 # duplicate checks on both the formula expressions and their associated names.
 # If duplicates are detected, the function stops execution with an error message.
 ####################################################################################################
-fun_add_formula <- function(formula_l, new_formula, omit_exp = FALSE) {
+fun_formula_add <- function(formula_l, new_formula, omit_exp = FALSE) {
   # Arguments:
   # - formula_l: (list) A list of existing formulas.
   # - new_formula: (string) A vector or list of new formulas to be added. 
