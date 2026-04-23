@@ -1,12 +1,12 @@
 ---
-title: "Data frames per pathogen for models"
+title: "Data frames per pathogen for sensitivity models"
 author: "Laura Andrea Barrrero Guevara"
 date: '2022-08-12'
 ---
 
 ####################################################################################################
-Purpose of script: This script prepares the data for models, applying further exclusions based on 
-spatial and climate data. The output includes three types of data frames:
+Purpose of script: This script prepares the data for models of sensitivity analyses, applying 
+further exclusions based on spatial.
 ####################################################################################################
 
 # Sensitivity analysis with extra methods data =====================================================
@@ -22,7 +22,6 @@ source("../fun_data/fun_dgsk_modpat.R")
 # Load the list of data frames per pathogen
 ```{r}
 stu_ppat <- readRDS(glue("{dirs$processed}/stu_ppat.rds"))
-# No pertussis combined nor polio combined (as pertussis included dtpa and dtpw and polio ipv and opv)
 stu_ppat <- stu_ppat[!(names(stu_ppat) %in% c("pertu", "polio"))]
 ```
 

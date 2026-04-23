@@ -8,7 +8,6 @@ date: '2022-08-12'
 Purpose:
 - Extract metadata from ClinicalTrials.gov into a SQLite database (only available for 189 out 
 of 265 studies).
-- (Experimental) Summarize information using OpenAI GPT.
 
 Output:
 - `stu_meta_ctgov.rds`: Data frame containing metadata of GSK studies with protocol information.
@@ -125,73 +124,6 @@ stu_meta_ctgov <- pomp::bake(glue("{dirs$processed}/stu_meta_ctgov.rds"),
 dbDisconnect(db_ctgov$con)
 # Optionally, delete the SQLite database file
 # unlink(db_ctgov$dbname)
-```
-
-# Extract information using OpenAI GPT (experimental)
-```{r}
-# Function to ask GPT to summarize metadata from ClinicalTrials.gov
-fun_askgpt <- function(fun_data_df = stu_meta_ctgov, fun_prompt = "ask", api_key = api_key) {
-  # Arguments:
-  # - fun_data_df: (data frame) Text on which to base the response
-  # - fun_prompt: (string) Question/Prompt to send to GPT
-  # - api_key: (string) API key for OpenAI GPT
-  # Output:
-  # - result: (string) GPT answer
-  
-  # Send a request to the OpenAI GPT API
-  response <- POST(
-    url = "https://api.openai.com/v1/chat/completions", # API endpoint
-    add_headers(Authorization = paste("Bearer", api_key)), # API key for authorization
-    encode = "json", # Request body encoding
-    # Request 
-    body = list(
-      model = "gpt-4o-mini", # Model to use (see https://platform.openai.com/docs/models)
-      temperature = 0, # Control the creativity of the response
-      messages = list(
-        list(role = "user", content = fun_prompt),  # User's prompt
-        list(role = "assistant", content = paste0("vectorstore:", toJSON(fun_data_df))) # Data on which to base the response
-        )
-      ))
-  
-  # Parse the response
-  result <- content(response, as = "parsed")
-  # Return the answer as a string
-  return(result$choices[[1]]$message$content)
-}
-
-# API key for OpenAI GPT
-api_key <- "sk-proj-9wN8Jd69zHiPkQe1K8E8T3BlbkFJJN3KljiZY76fLQ6t1E9a"
-
-# Extract only inclusion and exclusion criteria
-ctgov_inclusionexclusion <- stu_meta_ctgov %>%
-  select(study, success, protocolSection.eligibilityModule.eligibilityCriteria) %>%
-  rename(inclusion = protocolSection.eligibilityModule.eligibilityCriteria) %>%
-  mutate(
-    inclusion = str_remove_all(tolower(inclusion), "\n|\\*"),
-    exclusion = str_remove_all(inclusion,".*exclusion|criteria: "),
-    inclusion = str_remove_all(inclusion,"exclusion.*|inclusion criteria: "))
-
-# Write CSV file with eligibility criteria
-write.csv(select(stu_meta_ctgov, study, success, protocolSection.eligibilityModule.eligibilityCriteria), 
-          glue("{dirs$processed}/00_meta_ctgov/stu_meta_ctgov_criteriaeligibility.csv"))
-# Write CSV file with inclusion and exclusion criteria
-write.csv(ctgov_inclusionexclusion, 
-          glue("{dirs$processed}/00_meta_ctgov/stu_meta_ctgov_criteriaincluexclu.csv"))
-
-# Use GPT to analyze the inclusion and exclusion criteria
-answers <- list()
-for (i in 1:2) {
-  answers[[i]] <- lapply(c(
-    "Does the inclusion criteria mentiones previous vaccination or doses or biologicals? Answer with a quote",
-    "Does the inclusion criteria requires previous vaccination or doses or biologicals? Answer with a quote"), 
-    function(x) {  
-      c(fun_askgpt(fun_data_df = ctgov_inclusionexclusion[i, "inclusion"], 
-                        fun_prompt = x, api_key))
-    })
-}
-
-# Flatten the list of answers into a single vector
-unlist(answers, recursive = TRUE)
 ```
 
 ####################################################################################################

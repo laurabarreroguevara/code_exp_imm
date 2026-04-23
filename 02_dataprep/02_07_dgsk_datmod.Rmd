@@ -6,7 +6,7 @@ date: '2022-08-12'
 
 ####################################################################################################
 Purpose of script: This script prepares the data for models, applying further exclusions based on 
-spatial and climate data. The output includes three types of data frames:
+spatial. The output includes three types of data frames:
 
 - Unipathogen: Single vaccination with a single immunogenicity measurement after vaccination.
 - Multi-unipathogen: Single vaccination with multiple immunogenicity measurements (e.g., pertussis).

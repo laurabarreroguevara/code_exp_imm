@@ -1,12 +1,12 @@
 ---
-title: "BRMS plot results"
+title: "BRMS amplitude and phase plot results"
 author: "Laura Andrea Barrrero Guevara"
 date: "2023-02-23"
 output: html_document
 ---
 
 ####################################################################################################
-Purpose of script: To check the model results and plot it 
+Purpose of script: To check the model amplitude and phase of the best models and plot it 
 ####################################################################################################
 
 ```{r}

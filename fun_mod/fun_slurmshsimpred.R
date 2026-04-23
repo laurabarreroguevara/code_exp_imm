@@ -1,5 +1,5 @@
 ####################################################################################################
-# Function to generate SLURM shell script to execute an R model fitting job.
+# Function to generate SLURM shell script to execute an R model fitting job for simulations. 
 # This function constructs a shell script containing SLURM directives and environment setup commands 
 # to run an R script (fune_sim_simpred.R) on a cluster. The script is tailored with resource 
 # allocation settings, job parameters, and environment variables required by the R script.

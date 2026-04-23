@@ -1,12 +1,12 @@
 ---
-title: "BRMS"
+title: "Check simulation and bias"
 author: "Laura Andrea Barrrero Guevara"
 date: "2023-02-23"
 output: html_document
 ---
 
 ################################################################################ 
-Purpose of script: To fit brms models to all the studies 
+Purpose of script: To check the models power and evaluate bias.
 ################################################################################
 
 # Set up
