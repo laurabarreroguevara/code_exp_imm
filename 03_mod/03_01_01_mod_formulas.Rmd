@@ -196,8 +196,6 @@ patuni_photo_formula_l <- sapply(unique(patuni_photo_df$pat), function(x) {
         varname = patuni_photo_df[i,"varname"][[1]]))}
   return(l_formula)
 }, simplify = FALSE)
-
-patuni_photo_formula_l$rota
 ```
 
 # Multivariate Models: Generate and Save Model Formulas
@@ -221,8 +219,6 @@ patmulti_photo_formula_l <- sapply(unique(patmulti_photo_df$pat), function(x) {
         ))}
   return(l_formula)
 }, simplify = FALSE)
-
-patmulti_photo_formula_l$multi_men
 ```
 
 # Sensitivity methods ==============================================================================
@@ -265,8 +261,6 @@ for (x in unique(patmulti_photo_df_semeth$pat)) {
         multi_pat = patmulti_photo_df_semeth[i,"multi_pat"][[1]][[1]]))
     }
 }
-patuni_photo_formula_l$dipht
-patmulti_photo_formula_l$multi_men
 ```
 
 # Sensitivity seropositive rota ====================================================================
@@ -287,8 +281,7 @@ for(x in unique(patuni_photo_df_seallsero$pat)) {
         varname = patuni_photo_df_seallsero[i,"varname"][[1]]))
     }
 }
-
-patuni_photo_formula_l$rota
+patuni_photo_df_seallsero$rota
 ```
 
 # Sensitivity birth ================================================================================
@@ -331,10 +324,33 @@ for (x in unique(patmulti_photo_df_sebirth$pat)) {
         multi_pat = patmulti_photo_df_sebirth[i,"multi_pat"][[1]][[1]]))
     }
 }
+```
+
+# Splines ==========================================================================================
+
+```{r}
+# Univariate Models: Generate and Save Model Formulas
+patuni_photo_df_sesplines <- patuni_photo_df %>%
+  filter(model_nm %in% c("cs", "csi")) %>%
+  mutate(model_nm = if_else(model_nm == "cs", "cc", "cci"))
+
+for (x in unique(patuni_photo_df_sesplines$pat)) {
+  for (i in which(patuni_photo_df_sesplines$pat == x)) {
+    patuni_photo_formula_l[[x]] <- fun_formula_add(
+      patuni_photo_formula_l[[x]], fun_formula(
+        pathogen = patuni_photo_df_sesplines[i,"pat"][[1]], 
+        cens = if_else(x == "rota", FALSE, TRUE),
+        data = "sesplines_s08", 
+        doses = patuni_photo_df_sesplines[i,"doses"][[1]], 
+        model_nm = patuni_photo_df_sesplines[i,"model_nm"][[1]], 
+        others = patuni_photo_df_sesplines[i,"others"][[1]][[1]],
+        varname = patuni_photo_df_sesplines[i,"varname"][[1]]))
+    }
+}
 
 patuni_photo_formula_l$rota
-patmulti_photo_formula_l$multi_men
 ```
+
 
 # Save them ========================================================================================
 ```{r}

@@ -1,0 +1,62 @@
+---
+title: "R2 results"
+author: "Laura Andrea Barrrero Guevara"
+date: "2023-02-23"
+output: html_document
+---
+
+####################################################################################################
+Purpose of script: To check the R2 of the best models 
+####################################################################################################
+
+```{r}
+rm(list = ls())
+source("../00_pck.R")
+```
+
+# Read in the data of the models 
+```{r}
+waic_best <- readRDS(glue("{dirs$modres}/all_waicbest.rds"))
+```
+
+# Extract R2 =======================================================================================
+```{r}
+pat_sel <- c("rota", "hav", "hbv", "dipht", "tetan", "pertuwpt", "ipv1", 
+             "hib", "menc", "strep04", "measl", "mumps", "rubel", "vzv")
+
+r2_best <- sapply(str_subset(waic_best$mod_best, "multi", negate = TRUE), function(x) {
+  # Read in r2
+  r2 <- readRDS(glue("{dirs$modres}/modres_r2/r2_{x}"))
+  # Tidy up
+  bind_rows(attr(r2$r2_dec,"CI")) %>%
+    mutate(
+      r2 = c(r2$r2_dec$R2_Bayes, r2$r2_dec$R2_Bayes_marginal),
+      r2_type = c("bayes", "bayes_marginal")) %>%
+    add_row(CI = 0.95, CI_low = r2$r2_all[3], CI_high = r2$r2_all[4], r2 = r2$r2_all[1], r2_type = "all") %>%
+    select(r2_type, r2, CI_low, CI_high) %>%
+    rename_with(tolower)
+}, simplify = FALSE) %>%
+  bind_rows(.id = "mod") 
+
+r2_best %>%
+  filter(str_detect(mod, "semeth|sebirth|seallsero", negate = TRUE),
+         str_detect(mod, str_c(pat_sel, collapse = "|"))) %>%
+  filter(r2_type == "bayes") %>%
+  arrange(r2) %>%
+  summarise(round(mean(r2),2), round(min(r2),2), round(max(r2),2))
+```
+
+###################################################################################################
+# END 
+####################################################################################################
+
+
+
+
+
+
+
+
+
+
+

@@ -22,32 +22,53 @@ outputs/slurm_sh:
 ```{r}
 rm(list = ls())
 source("../00_pck.R")
-source("fun_slurmshsimcos.R")
+source("fun_slurmshsimpred.R")
 
-pat_l <- list.files(glue("{dirs$outputs}/simcosfit")) %>%
-  str_extract("(?<=s08_).*?(?=_cs)") %>%
-  unique()
+# Read in the best models 
+pat_l <- readRDS(glue("{dirs$modres}/all_waicbest.rds")) %>%
+  bind_rows(readRDS(glue("{dirs$modres}/all_waiccombbest.rds"))) %>%
+  filter(dat %in% c("s08", "semeth_s08", "seallsero_s08"), mod_name_best != "base") %>%
+  distinct(pat, mod_best) 
 pat_l
 ```
 
 # Loop over each pathogen in the defined list
 ```{r}
 ## Read the list of models specific to the current pathogen
-l_formula <- list.files(glue("{dirs$outputs}/simcosfit")) %>%
-  str_remove_all("simcos_|.rds") %>%
-  str_subset(str_c(pat_l, collapse = "|")) 
+l_formula <- str_remove_all(pat_l$mod_best, ".rds")
 
 ## Identify model scripts that have already been executed
 ## List the files in the "runned" directory 
 already_runned <- str_remove_all(list.files(glue("{dirs$outputs}/slurmsh/runned")), 
-                                 ".sh|runsimcos_")
+                                 ".sh|runsimpred_sim_")
 # ## Filter out any formulas that have already been processed to avoid duplicate runs
 l_formula <- l_formula[!(l_formula %in% already_runned)]
 
 ## For each remaining model in the formula list, generate the corresponding SLURM script
 walk(l_formula, function(args_fo) {
+  pathogen <- pat_l[str_detect(pat_l$mod_best, args_fo), "pat"][[1]]
+  # Determine the vaccine dose and data based on the model name
+  vac <- case_when(str_detect(args_fo, "bmvl") ~ "vl",
+                   str_detect(args_fo, "bmv3") ~ "v3",
+                   str_detect(args_fo, "bmv2") ~ "v2",
+                   str_detect(args_fo, "bmv1") ~ "v1")
+  dfk <- case_when(str_detect(args_fo, "dfkgc1") ~ "_kgc_1",
+                   str_detect(args_fo, "dfkgc2") ~ "_kgc_2",
+                   str_detect(args_fo, "dfkgc3") ~ "_kgc_3",
+                   TRUE ~ "")
+  dat_name <- case_when(
+    str_detect(args_fo, "seonlytemp") ~ glue("dataseonlytemp_brms_{pathogen}_{vac}_s08{dfk}.rds"), 
+    str_detect(args_fo, "semeth") ~ glue("datasemeth_brms_{pathogen}_{vac}_s08{dfk}.rds"),
+    str_detect(args_fo, "seonlyseropos") ~ 
+      glue("dataseonlyseropos_brms_{pathogen}_{vac}_s08{dfk}.rds"),
+    str_detect(args_fo, "seallsero") ~ glue("dataseallsero_brms_{pathogen}_{vac}_s08{dfk}.rds"),
+    str_detect(args_fo, "sebirth") ~ glue("data_brms_{pathogen}_{vac}_s08{dfk}.rds"),
+    .default = glue("data_brms_{pathogen}_{vac}_s08{dfk}.rds"))
+  
   # Generate the SLURM shell script file 
-  fun_slurmshsimcos(args_fo = args_fo, time = "24:00:00", nsim = 100)
+  fun_slurmshsimpred_sim(args_fo = args_fo, dat_name = dat_name, pathogen = pathogen,
+                         time = "24:00:00")
+  fun_slurmshsimpred_mod(args_fo = args_fo, dat_name = dat_name, time = "24:00:00", nsim = 100)
 })
 ```
 

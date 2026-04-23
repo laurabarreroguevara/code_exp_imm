@@ -48,9 +48,9 @@ fun_formula <- function(pathogen = "rota",
   seasonal_covars <- switch(
     model_nm,
     # Cyclic cubic spline for the vaccination week.
-    "cc"    = "s(vac_week_v1, bs = 'cc')",
+    "cc"    = "s(pi_vac_week_v1, bs = 'cc')",
     # Factor-smoother interaction with latitudinal region.
-    "cci"   = glue("s(vac_week_v1, {varname}, bs = 'fs', xt = list(bs = 'cc'))"),
+    "cci"   = glue("s(pi_vac_week_v1, {varname}, bs = 'fs', xt = list(bs = 'cc'))"),
     # Cosine and sine transformations for the vaccination week. 
     "cs"    = c("cos(pi_vac_week_v1)", "sin(pi_vac_week_v1)"),
     # Cosine and sine transformations for the vaccination week, with latitudinal region.

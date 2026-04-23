@@ -18,18 +18,18 @@ theme_set(theme_classic() + theme(strip.background = element_blank()))
 
 # Read nasapower data 
 ```{r}
-all_nasapower <- readRDS(glue("{dirs$processed}/03_stu_climate/stu_nasapower.rds")) %>%
-  filter(week != 53) %>%
-  mutate(pi_week = week * (2*pi/52),
-         llid = str_replace_all(llid, " ", "_"))
-
-saveRDS(all_nasapower, glue("{dirs$outputs}/climfit/all_nasapower.rds"))
+all_nasapower <- pomp::bake(glue("{dirs$climfit}/all_nasapower.rds"), dir = "", {
+  readRDS(glue("{dirs$processed}/03_stu_climate/stu_nasapower.rds")) %>%
+    filter(week != 53) %>%
+    mutate(pi_week = week * (2*pi/52),
+           llid = str_replace_all(llid, " ", "_"))
+})
 ```
 
 # Plot some 
 ```{r}
 all_nasapower %>%
-  filter(clim == "clim_t2m", llid %in% unique(all_clim$llid)[1:160]) %>%
+  filter(clim == "clim_t2m", llid %in% unique(all_nasapower$llid)[1:160]) %>%
   ggplot(aes(x = week, y = value_norm, color = paste0(lon,lat))) +
   geom_line() + 
   facet_wrap(study+country~.) + 
@@ -38,317 +38,433 @@ all_nasapower %>%
 
 # Run 1 model for 1 llid
 ```{r}
-length(unique(all_nasapower$llid))
-dat <- all_nasapower %>%
-  filter(llid == unique(all_nasapower$llid)[1])
+if(FALSE) {
+  length(unique(all_nasapower$llid))
+  dat <- all_nasapower %>%
+    filter(llid == unique(all_nasapower$llid)[1])
+  
+  mod_l <- sapply(unique(dat$clim)[1], function(x) {
+    brm(value_norm ~ cos(pi_week) + sin(pi_week), data = filter(dat, clim == x))
+  }, simplify = FALSE)
+  
+  # Check fit 
+  filter(dat, clim == "clim_rh2m") %>%
+    mutate(dat = "data") %>%
+    bind_rows(filter(dat, clim == "clim_rh2m") %>%
+                mutate(dat = "prediction",
+                       value_norm = posterior_predict(mod_l[[1]], ndraws = 1)[1,])) %>%
+    bind_rows(conditional_effects(mod_l[[1]], effects = c("pi_week"))$`pi_week` %>%
+                mutate(value_norm = estimate__, dat = "mod")) %>% 
+    ggplot(aes(x = pi_week, y = value_norm, color = dat, fill = dat)) + 
+    geom_ribbon(aes(ymin = lower__, ymax = upper__), alpha = 0.1, color = "transparent") + 
+    geom_line() + 
+    scale_color_manual(values = c("black", "grey", "orange")) + 
+    scale_fill_manual(values = c("black", "grey", "orange"))
+}
+```
 
-mod_l <- sapply(unique(dat$clim)[1], function(x) {
-  brm(value_norm ~ cos(pi_week) + sin(pi_week), data = filter(dat, clim == x))
+# Run models in cluster 
+```{r}
+stopifnot(length(list.files(glue("{dirs$clim_rhats}")))>2)
+```
+
+# Check rhats 
+```{r}
+# Check that Rhats < 1
+rhats <- pomp::bake(glue("{dirs$climres}/all_rhats.rds"), dir = "", {
+  bind_rows(lapply(list.files(glue("{dirs$clim_rhats}"), full.names = TRUE), readRDS)) %>%
+  group_by(mod) %>%
+  filter(Rhat == max(Rhat)) %>%
+  mutate(Rhat = round(Rhat, digits = 1), Rhat_cond = Rhat == 1) %>%
+  select(mod, Rhat_cond) %>%
+  ungroup()
+})
+
+# All models converged
+df_converged <- rhats %>%
+  filter(Rhat_cond == TRUE)
+df_converged$mod[130]
+```
+
+# Get cofficients
+```{r}  
+mutate(all_nasapower, mod = paste0("brmclim_", clim, "_", llid, ".rds"))
+
+all_coefcosine <- pomp::bake(file = glue("{dirs$climres}/all_coefcosine.rds"), dir = "", {
+  # Read in the coeficients 
+  sapply(df_converged$mod, function(x) {
+    readRDS(glue("{dirs$clim_coef}/coef_{x}"))$fixed %>%
+      rownames_to_column(var = "parameter")
+  }, simplify = FALSE) %>%
+    bind_rows(.id = "mod") %>%
+    mutate(
+      # Define parameter type (int, p_cos, p_sin)
+      param = case_when(str_detect(parameter, "cos") ~ "p_cos", 
+                        str_detect(parameter, "sin") ~ "p_sin",
+                        .default = "int")) %>%
+    select(mod, param, Estimate) %>%
+    pivot_wider(names_from = param, values_from = Estimate) %>%
+    # Estimate amplitude and phase -----------------------------------------------------------------
+    mutate(amp_ls = fun_amp_ls(p_cos = p_cos, p_sin = p_sin, mu = int),
+           phi = fun_phi(p_cos = p_cos, p_sin = p_sin, phi_type = "week"),
+           amp = fun_amp_emp(p_cos = p_cos, p_sin = p_sin, mu = int, val_return = "amp_ns"),
+           mu_ns = fun_amp_emp(p_cos = p_cos, p_sin = p_sin, mu = int, val_return = "mu_ns")) %>%
+    # Fix names ----------------------------------------------
+    rename_with(~paste0(.x, "_mean"), .cols = c(int, p_cos, p_sin, amp_ls, amp, phi, mu_ns)) %>%
+    # Add all the data from the model --------------------------------------------------------------
+    left_join(mutate(all_nasapower, mod = paste0("brmclim_", clim, "_", llid, ".rds")) %>%
+                distinct(study, country, llid, lon, lat, clim, mod), by = join_by(mod))
+})
+```
+
+# Extract draws from the posterior for amplitude and phase =========================================
+```{r}
+all_samplescosine_l <- sapply(unique(all_coefcosine$clim), function(clim_i) {
+  pomp::bake(file = glue("{dirs$climres}/all_samplescosine_{clim_i}.rds"), dir = "", {
+  # Read in the coefficients 
+  sapply(str_subset(df_converged$mod, paste0(clim_i, "_")), function(x) {
+    readRDS(glue("{dirs$clim_samples}/samples_{x}")) %>%
+      mutate(sam_no = row_number()) %>%
+      pivot_longer(-sam_no, names_to = "parameter", values_to = "Estimate") %>%
+      filter(str_detect(parameter, "sigma", negate = TRUE))
+  }, simplify = FALSE) %>%
+    bind_rows(.id = "mod") %>%
+    mutate(
+      # Define parameter type (int, p_cos, p_sin)
+      param = case_when(str_detect(parameter, "cos") ~ "p_cos", 
+                        str_detect(parameter, "sin") ~ "p_sin",
+                        .default = "int")) %>%
+    select(sam_no, mod, param, Estimate) %>%
+    pivot_wider(names_from = param, values_from = Estimate) %>%
+    # Estimate amplitude and phase -----------------------------------------------------------------  
+    mutate(sam_amp_ls = fun_amp_ls(p_cos = p_cos, p_sin = p_sin, mu = int),
+           sam_phi = fun_phi(p_cos = p_cos, p_sin = p_sin, phi_type = "week"),
+           sam_amp = fun_amp_emp(p_cos = p_cos, p_sin = p_sin, mu = int, val_return = "amp_ns"),
+           mu_ns = fun_amp_emp(p_cos = p_cos, p_sin = p_sin, mu = int, val_return = "mu_ns")) %>%
+    group_by(mod) %>% 
+    summarise(across(c(
+      int, p_cos, p_sin, sam_amp_ls, mu_ns, sam_amp),
+      list(mean = mean, median = median, q25 = ~quantile(.x, 0.25), q75 = ~quantile(.x, 0.75),
+           ci95lo = ~quantile(.x, 0.025), ci95up = ~quantile(.x, 0.975), min = min, max = max),
+      .names = "sam_{.col}_{.fn}"),
+      sam_phi_mean = fun_phisummary(sam_phi, "phi_mean"),
+      sam_phi_median = fun_phisummary(sam_phi, "phi_median"),
+      sam_phi_q25 = fun_phisummary(sam_phi, "phi_q25"),
+      sam_phi_q75 = fun_phisummary(sam_phi, "phi_q75"),
+      sam_phi_ci95lo = fun_phisummary(sam_phi, "phi_ci95lo"),
+      sam_phi_ci95up = fun_phisummary(sam_phi, "phi_ci95up"),
+      sam_phi_min = fun_phisummary(sam_phi, "phi_min"),
+      sam_phi_max = fun_phisummary(sam_phi, "phi_max")) %>%
+    ungroup() %>%
+    rename_with(~str_replace_all(.x, "sam_sam_", "sam_")) %>%
+    # Add mean estimates ---------------------------------------------------------------------------
+    left_join(distinct(all_coefcosine, mod, int_mean, p_cos_mean, p_sin_mean, 
+                       amp_ls_mean, amp_mean, phi_mean, mu_ns_mean, study, country, llid, lon, lat,
+                       clim), by = join_by(mod))
+  })
+}, simplify = FALSE)
+```
+
+# Plot it 
+```{r}
+all_samplescosine_l$clim_t2m %>%
+  mutate(sam_phi_ci95lo1 = sam_phi_ci95lo,
+         sam_phi_ci95up1 = case_when(sam_phi_ci95lo >= sam_phi_ci95up ~ 52,
+                                     .default = sam_phi_ci95up),
+         sam_phi_ci95lo2 = case_when(sam_phi_ci95lo >= sam_phi_ci95up ~ 0),
+         sam_phi_ci95up2 = case_when(sam_phi_ci95lo >= sam_phi_ci95up ~ sam_phi_ci95up),
+         sam_phi_ci95lenght = case_when(is.na(sam_phi_ci95lo2) ~ (sam_phi_ci95up1 - sam_phi_ci95lo1),
+                                        !is.na(sam_phi_ci95lo2) ~ (sam_phi_ci95up1 - sam_phi_ci95lo1) + 
+                                          (sam_phi_ci95up2 - sam_phi_ci95lo2))) %>%
+  mutate(sam_phi_ci95up1 = case_when(sam_phi_ci95lo >= sam_phi_ci95up ~ 52.5,
+                                     .default = sam_phi_ci95up),
+         sam_phi_ci95lo2 = case_when(sam_phi_ci95lo >= sam_phi_ci95up ~ -0.5)) %>%
+  ggplot(aes(x = sam_phi_mean, y = lat, color = country)) + 
+  geom_point() + 
+  geom_segment(aes(x = sam_phi_ci95lo1, xend = sam_phi_ci95up1), size = 0.4) + 
+  geom_segment(aes(x = sam_phi_ci95lo2, xend = sam_phi_ci95up2), size = 0.4) + 
+  scale_color_viridis_d() +
+  theme(legend.position = "none") + 
+all_samplescosine_l$clim_t2m %>%
+  ggplot(aes(x = sam_amp_mean, y = lat, color = country)) + 
+  geom_point() + 
+  geom_segment(aes(x = sam_amp_ci95lo, xend = sam_amp_ci95up), size = 0.4) + 
+  scale_color_viridis_d() +
+  theme(legend.position = "none") 
+```
+
+# Designate to each study-country a single amplitude and phase: 
+```{r}
+# Each study country combination contained many locations
+all_samplescosine_l$clim_t2m %>%
+  filter(study == "100388") %>%
+  ggplot(aes(x = amp_mean)) +
+  geom_histogram() + 
+  facet_wrap(~country)
+
+# Designate for the median latitude and longitude
+clim_amphi <- lapply(all_samplescosine_l, function(x) {
+  x %>%
+  group_by(study, country) %>%
+  mutate(lat_med = median(lat),
+         lon_med = median(lon)) %>%
+  slice_min(abs(lat - median(lat, na.rm = TRUE)), n = 1, with_ties = FALSE) %>%
+  ungroup() %>%
+  select(clim, study, country, lat_med, lon_med, sam_phi_mean, sam_phi_ci95lo, sam_phi_ci95up,
+         sam_amp_mean, sam_amp_ci95lo, sam_amp_ci95up, llid, mod) %>%
+  rename_with(~str_replace_all(.x, "sam_", "clim_"), starts_with("sam_")) %>%
+  rename(clim_mod = mod)
+  }) %>%
+  bind_rows()
+```
+
+# Compare results to immunogenicity amplitude and phase ============================================
+
+# Read in the best models amplitude and phase 
+```{r}
+wbest_phisumm <- readRDS(file = glue("{dirs$modres}/wbest_phisumm.rds"))
+wbest_ampsumm <- readRDS(file = glue("{dirs$modres}/wbest_ampsumm.rds"))
+```
+
+# Read in the data from the vaccinations 
+# to obtain information on the regions and the no of individuals
+```{r}
+# Read in all the data
+dat_l <- lapply(str_subset(str_subset(list.files(glue("{dirs$modfit}"), full.names = TRUE), "s08.rds"),
+                           "datase", negate = TRUE), readRDS)
+names(dat_l) <- sub(".*brms_(.*?)_(vl|v1|v3)_s08.*", "\\1", 
+                    str_subset(str_subset(list.files(glue("{dirs$modfit}")), "s08.rds"),
+                           "datase", negate = TRUE))
+
+# Obtain information on the regions according to the best model 
+dat_clu <- sapply(unique(filter(wbest_ampsumm, dat == "s08")$pat), function(x) {
+  if(!is.na(filter(wbest_ampsumm, pat == x, dat == "s08")[[1, "reg"]])) {
+  dat_l[[x]] %>%
+      rename(clu = filter(wbest_ampsumm, pat == x, dat == "s08")[[1, "reg"]]) %>%
+      mutate(reg = filter(wbest_ampsumm, pat == x, dat == "s08")[[1, "reg"]],
+             clu = str_remove_all(clu, " ")) %>%
+      mutate(total = n()) %>%
+      group_by(study, country, reg, clu) %>%
+      reframe(tot = n()/total) %>%
+      distinct(study, country, reg, clu, tot)
+  } else {
+  dat_l[[x]] %>%
+      mutate(clu = NA, reg = NA) %>%
+      mutate(total = n()) %>%
+      group_by(study, country, reg, clu) %>%
+      reframe(tot = n()/total) %>%
+      distinct(study, country, reg, clu, tot)
+  }
+}, simplify = FALSE) %>%
+  bind_rows(.id = "pat")
+
+# Bring the data from the regions, the amplitude and phase from the immunogenicity with that of the
+# climate variables
+dat_climvacc <- dat_clu %>%
+  left_join(filter(wbest_ampsumm, dat == "s08"), by = join_by(pat, reg, clu)) %>%
+  # Exclude the clusters not included (no mod data)
+  select(pat, study, country, reg, clu, mod, mod_name, imm_name, mod_out, dat, vac, gauss, pat_tidy,
+         multi, tot, sam_amp_mean, sam_amp_ci95lo, sam_amp_ci95up, sam_phi_mean, sam_phi_ci95lo,
+         sam_phi_ci95up) %>%
+  right_join(clim_amphi, by = join_by(study, country), relationship = "many-to-many") %>%
+  mutate(sam_phi_ci95lo1 = sam_phi_ci95lo,
+         sam_phi_ci95up1 = case_when(sam_phi_ci95lo >= sam_phi_ci95up ~ 52,
+                                     .default = sam_phi_ci95up),
+         sam_phi_ci95lo2 = case_when(sam_phi_ci95lo >= sam_phi_ci95up ~ 0),
+         sam_phi_ci95up2 = case_when(sam_phi_ci95lo >= sam_phi_ci95up ~ sam_phi_ci95up)) %>%
+  mutate(sam_phi_ci95up1 = case_when(sam_phi_ci95lo >= sam_phi_ci95up ~ 52.5,
+                                    .default = sam_phi_ci95up),
+         sam_phi_ci95lo2 = case_when(sam_phi_ci95lo >= sam_phi_ci95up ~ -0.5)) %>%
+  mutate(clim_phi_ci95lo1 = clim_phi_ci95lo,
+         clim_phi_ci95up1 = case_when(clim_phi_ci95lo >= clim_phi_ci95up ~ 52,
+                                     .default = clim_phi_ci95up),
+         clim_phi_ci95lo2 = case_when(clim_phi_ci95lo >= clim_phi_ci95up ~ 0),
+         clim_phi_ci95up2 = case_when(clim_phi_ci95lo >= clim_phi_ci95up ~ clim_phi_ci95up)) %>%
+  mutate(clim_phi_ci95up1 = case_when(clim_phi_ci95lo >= clim_phi_ci95up ~ 52.5,
+                                    .default = clim_phi_ci95up),
+         clim_phi_ci95lo2 = case_when(clim_phi_ci95lo >= clim_phi_ci95up ~ -0.5)) %>%
+  ungroup() %>%
+  filter(!is.na(mod))
+
+# Summarise dataframe so that there is only one point per region 
+dat_climvaccsumm <- dat_climvacc %>%
+  group_by(clim, pat, reg, clu, mod, lat_med, sam_amp_mean, sam_phi_mean) %>%
+  mutate(weight_scaled = round(tot * 100)) %>%
+  uncount(weight_scaled) %>%
+  summarise(clim_amp_mean = median(clim_amp_mean),
+            clim_phi_mean = fun_phisummary(clim_phi_mean, summ_type = "phi_median"),
+            .groups = "drop")
+```
+
+# Plot them together 
+```{r}
+# Phase
+dat_climvacc %>%
+  ggplot(aes(y = sam_phi_mean, x = clim_phi_mean, size = tot, color = clu)) + 
+  geom_point(alpha = 0.5) + 
+  geom_segment(aes(x = clim_phi_ci95lo1, xend = clim_phi_ci95up1), size = 0.4) +
+  geom_segment(aes(x = clim_phi_ci95lo2, xend = clim_phi_ci95up2), size = 0.4) +
+  geom_segment(aes(y = sam_phi_ci95lo1, yend = sam_phi_ci95up1), size = 0.4) +
+  geom_segment(aes(y = sam_phi_ci95lo2, yend = sam_phi_ci95up2), size = 0.4) +
+  scale_color_viridis_d(option = "rocket", end = 0.7) + 
+  facet_wrap(~clim)
+dat_climvaccsumm %>%
+  ggplot(aes(y = sam_phi_mean, x = clim_phi_mean, color = clu)) + 
+  geom_point() + 
+  scale_color_viridis_d(option = "rocket", end = 0.7) + 
+  facet_wrap(~clim)
+
+# Amplitude
+dat_climvacc %>%
+  ggplot(aes(y = sam_amp_mean, x = clim_amp_mean, size = tot, color = clu)) + 
+  geom_point(alpha = 0.5) + 
+  geom_segment(aes(x = clim_amp_ci95lo, xend = clim_amp_ci95up), size = 0.4) +
+  geom_segment(aes(y = sam_amp_ci95lo, yend = sam_amp_ci95up), size = 0.4) +
+  scale_color_viridis_d(option = "rocket", end = 0.7) + 
+  facet_wrap(~clim, scales = "free")
+dat_climvaccsumm %>%
+  ggplot(aes(y = sam_amp_mean, x = clim_amp_mean, color = clu)) + 
+  geom_point() + 
+  scale_color_viridis_d(option = "rocket", end = 0.7) + 
+  facet_wrap(~clim, scales = "free")
+```
+
+# Plot them one next to the other
+```{r}
+dat_climvacc %>%
+  ggplot(aes(x = sam_phi_mean, y = lat_med, size = tot, color = clu)) + 
+  geom_point(alpha = 0.5) + 
+  geom_segment(aes(x = sam_phi_ci95lo1, xend = sam_phi_ci95up1), size = 0.4) + 
+  geom_segment(aes(x = sam_phi_ci95lo2, xend = sam_phi_ci95up2), size = 0.4) + 
+  scale_color_viridis_d(option = "rocket", end = 0.7) + 
+  facet_wrap(~clim, scales = "free", ncol = 5) + 
+  theme(legend.position = "none") +
+dat_climvaccsumm %>%
+  ggplot(aes(x = sam_phi_mean, y = lat_med, color = clu)) + 
+  geom_point(alpha = 0.5) + 
+  scale_color_viridis_d(option = "rocket", end = 0.7) + 
+  facet_wrap(~clim, scales = "free", ncol = 5) + 
+dat_climvacc %>%
+  ggplot(aes(x = clim_phi_mean, y = lat_med, size = tot, color = clu)) + 
+  geom_point(alpha = 0.5) + 
+  geom_segment(aes(x = clim_phi_ci95lo1, xend = clim_phi_ci95up1), size = 0.4) + 
+  geom_segment(aes(x = clim_phi_ci95lo2, xend = clim_phi_ci95up2), size = 0.4) + 
+  scale_color_viridis_d(option = "rocket", end = 0.7) + 
+  facet_wrap(~clim, scales = "free", ncol = 5) + 
+  theme(legend.position = "none") + 
+plot_layout(ncol = 1) 
+
+dat_climvacc %>%
+  ggplot(aes(x = sam_amp_mean, y = lat_med, size = tot, color = clu)) + 
+  geom_point(alpha = 0.5) + 
+  geom_segment(aes(x = sam_amp_ci95lo, xend = sam_amp_ci95up), size = 0.4) + 
+  scale_color_viridis_d(option = "rocket", end = 0.7) + 
+  facet_wrap(~clim, scales = "free", ncol = 5) + 
+  theme(legend.position = "none") +
+dat_climvaccsumm %>%
+  ggplot(aes(x = sam_amp_mean, y = lat_med, color = clu)) + 
+  geom_point(alpha = 0.5) + 
+  scale_color_viridis_d(option = "rocket", end = 0.7) + 
+  facet_wrap(~clim, scales = "free", ncol = 5) + 
+dat_climvacc %>%
+  ggplot(aes(x = clim_amp_mean, y = lat_med, size = tot, color = clu)) + 
+  geom_point(alpha = 0.5) + 
+  geom_segment(aes(x = clim_amp_ci95lo, xend = clim_amp_ci95up), size = 0.4) + 
+  scale_color_viridis_d(option = "rocket", end = 0.7) + 
+  facet_wrap(~clim, scales = "free", ncol = 5) + 
+  theme(legend.position = "none") + 
+plot_layout(ncol = 1) 
+```
+
+# Test correlation
+```{r}
+dat_climvaccor <- dat_climvaccsumm
+# dat_climvaccor <- dat_climvaccsumm %>%
+#   filter(str_detect(mod, "csi"))
+
+cor_l <- sapply(unique(dat_climvaccor$clim), function(x) {
+  # Transform climate variable
+  phi_clim <- circular::circular(filter(dat_climvaccor, clim == x)$clim_phi_mean * ((2*pi)/52), 
+                             units = "radians", modulo = "2pi")
+  # Transform immunogenicity variable
+  phi_imm <- circular::circular(filter(dat_climvaccor, clim == x)$sam_phi_mean * ((2*pi)/52), 
+                            units = "radians", modulo = "2pi")
+  # Test correlation
+  phi_cor <- cor.test(sin(phi_clim - mean(phi_clim)), sin(phi_imm - mean(phi_imm)))
+  amp_cor <- cor.test(filter(dat_climvaccor, clim == x)$clim_amp_mean, 
+                      filter(dat_climvaccor, clim == x)$sam_amp_mean)
+  
+  return(data.frame(
+    var = c("phi", "amp"),
+    cor_pers = c(phi_cor$estimate[[1]], amp_cor$estimate[[1]]),
+    cor_95lo = c(phi_cor$conf.int[1], amp_cor$conf.int[1]),
+    cor_95up = c(phi_cor$conf.int[2], amp_cor$conf.int[2]),
+    cor_pval = c(phi_cor$p.value, amp_cor$p.value)))
 }, simplify = FALSE)
 
-mod_l[[1]]
+bind_rows(cor_l, .id = "clim") %>%
+  mutate(cor_pval = round(cor_pval, digits = 3)) %>%
+  arrange(var)
 ```
 
-# Check fit 
+# Test partial correlation
 ```{r}
-filter(dat, clim == "clim_rh2m") %>%
-  mutate(dat = "data") %>%
-  bind_rows(filter(dat, clim == "clim_rh2m") %>%
-              mutate(dat = "prediction",
-                     value_norm = posterior_predict(mod_l[[1]], ndraws = 1)[1,])) %>%
-  bind_rows(conditional_effects(mod_l[[1]], effects = c("pi_week"))$`pi_week` %>%
-              mutate(value_norm = estimate__, dat = "mod")) %>% 
-  ggplot(aes(x = pi_week, y = value_norm, color = dat, fill = dat)) + 
-  geom_ribbon(aes(ymin = lower__, ymax = upper__), alpha = 0.1, color = "transparent") + 
-  geom_line() + 
-  scale_color_manual(values = c("black", "grey", "orange")) + 
-  scale_fill_manual(values = c("black", "grey", "orange"))
+rh2m <- circular::circular(filter(dat_climvaccor, clim == "clim_rh2m")$clim_phi_mean * ((2*pi)/52), 
+                             units = "radians", modulo = "2pi")
+t2m <- circular::circular(filter(dat_climvaccor, clim == "clim_t2m")$clim_phi_mean * ((2*pi)/52), 
+                             units = "radians", modulo = "2pi")
+imm <- circular::circular(filter(dat_climvaccor, clim == "clim_t2m")$sam_phi_mean * ((2*pi)/52), 
+                             units = "radians", modulo = "2pi")
+
+ppcor_l <- list()
+# Correlation with relative humidity controlling for temperature
+ppcor_l["rh2m|t2m_phi"] <- list(ppcor::pcor.test(imm, rh2m, t2m))
+ppcor_l["rh2m|t2m_amp"] <- list(ppcor::pcor.test(
+  filter(dat_climvaccor, clim == "clim_t2m")$sam_amp_mean, 
+  filter(dat_climvaccor, clim == "clim_rh2m")$clim_amp_mean, 
+  filter(dat_climvaccor, clim == "clim_t2m")$clim_amp_mean))
+# Correlation with temperature controlling for relative humidity
+ppcor_l["t2m|rh2m_phi"] <- list(ppcor::pcor.test(imm, t2m, rh2m))
+ppcor_l["t2m|rh2m_amp"] <- list(ppcor::pcor.test(
+  filter(dat_climvaccor, clim == "clim_t2m")$sam_amp_mean, 
+  filter(dat_climvaccor, clim == "clim_t2m")$clim_amp_mean, 
+  filter(dat_climvaccor, clim == "clim_rh2m")$clim_amp_mean))
+
+bind_rows(ppcor_l, .id = "clim") %>%
+  mutate(p.value = round(p.value, digits = 3)) %>%
+  separate(clim, into = c("clim", "var"), sep = "_") %>%
+  arrange(var)
 ```
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# Run a model per clim, study and country 
+# Last check of climate model fit ==================================================================
 ```{r}
-mod_l <- list()
-for(clim_name in c("clim_t2m")) {
-  mod_l[[clim_name]] <- sapply(unique(datselclim$study_country), function(x) {
-    pomp::bake(glue("{dirs$outputs}/clim_models/brm_{clim_name}_{x}.rds"), dir = "", {
-      brm(value ~ cos(pi_week) + sin(pi_week), 
-          data = filter(datselclim, clim == clim_name, study_country == x))
-    })
-  }, simplify = FALSE)
+fun_modfit <- function(llid_sel = dat_climvacc$llid[1], clim_sel = "clim_t2m") {
+  cosine <- filter(all_coefcosine, llid == llid_sel, clim == clim_sel)
+  pred <- readRDS(glue("{dirs$climres}/climres_pred/pred_{cosine$mod[[1]]}"))[1,]
+  dat <- filter(all_nasapower, llid == llid_sel, clim == clim_sel) %>%
+    mutate(pred = pred,
+           modcos = cosine$p_cos_mean*cos(pi_week) + cosine$p_sin_mean*sin(pi_week),
+           modcoslo = cosine$p_cos_mean*cos(pi_week) + cosine$p_sin_mean*sin(pi_week),
+           modcosup = cosine$p_cos_mean*cos(pi_week) + cosine$p_sin_mean*sin(pi_week),
+           )
+return(dat)
 }
-```
 
-# Get cofficients and Rhats
-```{r}
-# Get coefficients
-coef <- lapply(mod_l$clim_t2m, recursive = FALSE, summary)
+pred_l <- sapply(unique(dat_climvacc$clim), function(x) {
+   pomp::bake(glue("{dirs$climres}/all_pred_{x}.rds"), dir = "", {
+     lapply(dat_climvacc$llid, fun_modfit, clim_sel = x) %>%
+       bind_rows()
+   }) 
+}, simplify = FALSE)
 
-# Get Rhats
-rhats <- lapply(coef, function(x) {
-  bind_rows(x$fixed, x$spec_pars, x$random$`study:country`) %>%
-    rownames_to_column("coefficient") }) %>%
-  bind_rows(.id = "mod") %>%
-  mutate(pat = str_remove(mod, "\\..*"),
-         clim = str_remove(mod, "^[^.]*\\.")) %>%
-  group_by(mod) %>%
-  filter(Rhat == max(Rhat)) %>%
-  mutate(Rhat = round(Rhat, digits = 1),
-         Rhat_cond = Rhat == 1)
-
-rhats %>%
-  filter(Rhat_cond == FALSE)
-```
-
-# Get amplitude and phase and plot it
-```{r}
-all_coefcosine <- sapply(coef, function(x) rownames_to_column(x$fixed, var = "parameter"), 
-                         simplify = FALSE) %>%
-  bind_rows(.id = "study_country") %>%
-  mutate(clim = "clim_t2m") %>%
-  left_join(distinct(datselclim, clim, study_country, study, country, reg_6),
-            by = join_by(study_country, clim), relationship = "many-to-many") %>%
-  # Define parameter type (int, p_cos, p_sin)
-  mutate(param = case_when(str_detect(parameter, "cos") ~ "p_cos",
-                    str_detect(parameter, "sin") ~ "p_sin",
-                    .default = "int")) %>%
-  select(clim, study_country, study, country, param, Estimate, reg_6) %>%
-  pivot_wider(names_from = param, values_from = Estimate) %>% 
-  # Estimate amplitude and phase -----------------------------------------------------------------
-  mutate(amp = fun_amp_ls(p_cos = p_cos, p_sin = p_sin, mu = int),
-         phi = fun_phi(p_cos = p_cos, p_sin = p_sin, phi_type = "week")) 
-
-filter(datselclim, clim == "clim_t2m") %>%
-  distinct(pat, study, country, reg_6, tot, tot_per, study_country) %>%
-  left_join(all_coefcosine) %>%
-  ggplot(aes(x = phi, y = reg_6, size = tot_per, color = pat)) + 
-  geom_point(alpha = 0.5) + 
-filter(datselclim, clim == "clim_t2m") %>%
-  distinct(pat, study, country, reg_6, tot, tot_per, study_country) %>%
-  left_join(all_coefcosine) %>%
-  ggplot(aes(x = amp, y = reg_6, size = tot_per, color = pat)) + 
-  geom_point(alpha = 0.5) + 
-  scale_x_continuous(trans = "log2")
-
-filter(datselclim, clim == "clim_t2m", study_country == "105910_Russia") %>%
-  ggplot(aes(x = pi_week, y = value)) + 
-  geom_line() 
-```
-
-```{r}
-test
-conditional_effects(test)
-pred <- posterior_predict(test, ndraws = 100)
-
-filter(datselclim, clim == "clim_t2m", pat == "rota") %>%
-  mutate(pred = pred[1,]) %>%
-  group_by(study, country) %>%
-  mutate(value = value - mean(value),
-         pred = pred - mean(pred)) %>%
-  ggplot(aes(x = week, y = value, group = paste0(study,country), alpha = tot)) +
-  geom_line() + 
+pred_l$clim_cloud_amt %>%
+  bind_rows(.id = "clim") %>%
+  ggplot(aes(x = week, y = value_norm, group = llid)) + 
+  geom_point() + 
   geom_line(aes(y = pred), color = "red") + 
-  facet_wrap(~reg_6) + 
-  theme(legend.position = "none")
+  geom_line(aes(y = modcos), color = "blue") +
+  facet_wrap(~country, scales = "free")
 ```
-
-
-
-
-
-
-
-# Figure XX ========================================================================================
-
-# Prepare data for the plot climate+immunogenicity results 
-```{r}
-datpl1_sam <- datpl_sam %>%
-  filter(sam_no <= 100) %>%
-  rename(week = "vac_week_v1", value_norm = sam_estimate) %>%
-  mutate(clim = "1imm", 
-         tot_per = 1) %>%
-  select(sam_no, pat, pat_tidy, clu, week, tot, tot_per, clim, value_norm, phi_mean, phi_mean_shift, checkgaps_all) 
-
-datpl1_samrug <- distinct(datpl1_sam, week, tot, tot_per, clu, pat, pat_tidy, phi_mean, phi_mean_shift) %>%
-  mutate(week = case_when(!is.na(tot) ~ week)) %>%
-  mutate(pat_tidy = reorder(as.character(pat_tidy), phi_mean_shift))
-
-datpl1_clim <- datselclim %>%
-  rename("clu" = "reg_6") %>%
-  select(pat, clu, week, tot_per, clim, value_norm, lat_med, lon_med) %>%
-  mutate(clu = str_remove_all(clu, " ")) %>%
-  filter(clim %in% c("clim_rh2m", "clim_t2m", "clim_t2mdew")) %>%
-  left_join(distinct(datpl1_sam, pat, clu, pat_tidy, phi_mean_shift, checkgaps_all), by = join_by(pat, clu)) %>%
-  filter(checkgaps_all == FALSE)
-```
-
-# Plot climate+immunogenicity results 
-```{r}
-plclu_l <- list()
-for(i in unique(datpl1_sam$clu)) {
-  plclu_l[[i]] <- bind_rows(datpl1_sam, datpl1_clim) %>%
-    mutate(pat_tidy = reorder(pat_tidy, phi_mean_shift)) %>%
-    filter(clu == i) %>%
-    mutate(pat_tidy = droplevels(pat_tidy)) %>%
-    ggplot(aes(x = week, y = value_norm, color = phi_mean, alpha = tot_per,
-               group = paste0(sam_no, lat_med, lon_med))) + 
-    geom_line() + 
-    geom_point(data = filter(datpl1_samrug, clu == i) %>%
-                 mutate(pat_tidy = droplevels(pat_tidy)), 
-               aes(y = -Inf), group = 1, shape = "|", size = 3, color = "black") +
-    scale_x_continuous("Week", breaks = c(1,18,35,52), limits = c(1,52), expand = c(0,0)) + 
-    scale_y_continuous("Value", expand = c(0.2,0)) + 
-    scale_color_gradientn("Peak timing", breaks = c(1,18,35,52), limits = c(0,52), na.value = "black",
-                          colours = c(viridis(100, begin = 0, option = "C"), 
-                                      rev(viridis(100, begin = 0, option = "C")))) +
-    ggh4x::facet_nested_wrap(~pat_tidy+clim, scales = "free_y", nest_line = TRUE,
-                             solo_line = TRUE, ncol = 8) +
-    theme(legend.position = "top") +
-    ggtitle(i)
-  # Find number of pathogens
-  npat <- ceiling(length(unique(filter(datpl1_samrug, clu == i)$pat))/2)
-  # Save the plot 
-  ggsave(plclu_l[[i]], width = 10, height = 2 + npat*1.2, file = paste0("../figures/clim/", i, "_reg_6.pdf"))
-}
-
-plclu_l
-```
-
-####################################################################################################
-# END
-####################################################################################################
-
-
-# Run 3 eg models for rota
-```{r}
-# mod1 <- brm(value ~ cos(pi_week)*reg_6 + sin(pi_week)*reg_6, 
-#           data = filter(datselclim, clim == "clim_t2m", pat == "rota"), chains = 2)
-# mod2 <- brm(value | weights(tot_per) ~ cos(pi_week)*reg_6 + sin(pi_week)*reg_6, 
-#           data = filter(datselclim, clim == "clim_t2m", pat == "rota"), chains = 2)
-
-pl_effects <- list()
-pl_effects$clim_t2m <- filter(datselclim, clim == "clim_t2m", pat == "rota") %>% 
-  mutate(dat = "data") %>%
-bind_rows(conditional_effects(mod1, effects = c("pi_week:reg_6"))$`pi_week:reg_6` %>%
-  mutate(value = estimate__,
-         tot_per = 100,
-         dat = "mod1")) %>% 
-bind_rows(conditional_effects(mod2, effects = c("pi_week:reg_6"))$`pi_week:reg_6` %>%
-  mutate(value = estimate__,
-         tot_per = 100,
-         dat = "mod2")) %>%
-  ggplot(aes(x = pi_week, y = value, group = paste0(study, country, dat), 
-             alpha = tot_per, color = dat, fill = dat)) + 
-  geom_ribbon(aes(ymin = lower__, ymax = upper__), alpha = 0.1, color = "transparent") + 
-  geom_line() +
-  facet_grid(~reg_6) 
-
-# mod3 <- brm(value ~ cos(pi_week)*reg_6 + sin(pi_week)*reg_6, 
-#           data = filter(datselclim, clim == "clim_rh2m", pat == "rota"), chains = 2)
-# mod4 <- brm(value | weights(tot_per) ~ cos(pi_week)*reg_6 + sin(pi_week)*reg_6, 
-#           data = filter(datselclim, clim == "clim_rh2m", pat == "rota"), chains = 2)
-
-pl_effects$clim_rh2m <- filter(datselclim, clim == "clim_rh2m", pat == "rota") %>% 
-  mutate(dat = "data") %>%
-bind_rows(conditional_effects(mod3, effects = c("pi_week:reg_6"))$`pi_week:reg_6` %>%
-  mutate(value = estimate__,
-         tot_per = 100,
-         dat = "mod3")) %>% 
-bind_rows(conditional_effects(mod4, effects = c("pi_week:reg_6"))$`pi_week:reg_6` %>%
-  mutate(value = estimate__,
-         tot_per = 100,
-         dat = "mod4")) %>%
-  ggplot(aes(x = pi_week, y = value, group = paste0(study, country, dat), 
-             alpha = tot_per, color = dat, fill = dat)) + 
-  geom_ribbon(aes(ymin = lower__, ymax = upper__), alpha = 0.1, color = "transparent") + 
-  geom_line() +
-  facet_grid(~reg_6) 
-pl_effects$clim_rh2m
-
-mod5 <- brm(value ~ cos(pi_week)*study_country + sin(pi_week)*study_country, 
-            data = filter(datselclim, clim == "clim_rh2m", pat == "rota"), chains = 2)
-
-test <- filter(datselclim, clim == "clim_rh2m", pat == "rota") %>% 
-  mutate(dat = "data") %>%
-bind_rows(conditional_effects(mod5, effects = c("pi_week:study_country"))$`pi_week:study_country` %>%
-  mutate(value = estimate__,
-         tot_per = 100,
-         dat = "mod3") %>%
-    left_join(distinct(filter(datselclim, clim == "clim_rh2m", pat == "rota"), reg_6, study_country))) %>%
-  ggplot(aes(x = pi_week, y = value, group = paste0(study_country, dat), 
-             alpha = tot_per, color = dat, fill = dat)) + 
-  geom_ribbon(aes(ymin = lower__, ymax = upper__), alpha = 0.1, color = "transparent") + 
-  geom_line() +
-  facet_grid(~reg_6) 
-pl_effects$clim_rh2m
-```
-
-# Run models per pathogen 
-```{r}
-mod_l <- list()
-for(pat_name in unique(datselclim$pat)) {
-  mod_l[[pat_name]] <- sapply(c("clim_t2m", "clim_rh2m", "clim_cloud_amt"), function(x) {
-    # Check # study:country
-    n_sc <- max((filter(datselclim, clim == x, pat == pat_name) %>%
-      distinct(study, country, reg_6) %>%
-      group_by(reg_6) %>%
-      summarise(tot = n()))$tot)
-    # If only one study:country
-    if(n_sc == 1) {
-      pomp::bake(glue("{dirs$outputs}/clim_models/brm_{pat_name}_{x}.rds"), dir = "", {
-        brm(value ~ cos(pi_week)*reg_6 + sin(pi_week)*reg_6, 
-          data = filter(datselclim, clim == x, pat == pat_name))
-      })
-    } else if (n_sc > 1) {
-    # If more than one study:country
-    pomp::bake(glue("{dirs$outputs}/clim_models/brm_{pat_name}_{x}.rds"), dir = "", {
-      brm(value ~ cos(pi_week)*reg_6 + sin(pi_week)*reg_6 + (1|study:country), 
-        data = filter(datselclim, clim == x, pat == pat_name))
-    })
-    }
-  }, simplify = FALSE)
-}
-
-# Get coefficients
-coef <- lapply(unlist(mod_l, recursive = FALSE), summary)
-
-# Get Rhats
-rhats <- lapply(coef, function(x) {
-  bind_rows(x$fixed, x$spec_pars, x$random$`study:country`) %>%
-    rownames_to_column("coefficient") }) %>%
-  bind_rows(.id = "mod") %>%
-  mutate(pat = str_remove(mod, "\\..*"),
-         clim = str_remove(mod, "^[^.]*\\.")) %>%
-  group_by(mod) %>%
-  filter(Rhat == max(Rhat)) %>%
-  mutate(Rhat = round(Rhat, digits = 1),
-         Rhat_cond = Rhat == 1)
-
-rhats %>%
-  filter(Rhat_cond == FALSE)
-```
-
-
-
-
 
 
 

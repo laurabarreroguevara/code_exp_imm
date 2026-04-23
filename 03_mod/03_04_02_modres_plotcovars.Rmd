@@ -11,6 +11,7 @@ Purpose of script: To check the model results and plot it
 
 ```{r}
 rm(list = ls())
+library(ggh4x)
 source("../00_pck.R")
 source("../fun_figures/fun_breaks.R")
 source("../fun_figures/fun_limits.R")
@@ -30,7 +31,7 @@ pat_sel <- c("rota", "hav", "hbv", "dipht", "tetan", "pertuwpt", "ipv1",
              "hib", "menc", "strep04", "measl", "mumps", "rubel", "vzv")
 ```
 
-# Define models converging that have a sine function 
+# Define models converging
 ```{r}
 df_converged <- filter(waic_df, dat %in% c("s08", "semeth_s08"), mod_out == "imm") %>%
   # The function needs arguments reg (NA for cs and "reg_x" for csi) and multi (multi pat)
@@ -46,11 +47,22 @@ all_coefre <- readRDS(file = glue("{dirs$modres}/all_coefre.rds"))
 # Extract draws from the posterior for covars coefficients factors
 all_samplecovarsfct <- readRDS(file = glue("{dirs$modres}/all_samplescovarsfct.rds"))
 all_coefrescor <- readRDS(file = glue("{dirs$modres}/all_coefrescor.rds"))
+all_samplesshape <- readRDS(file = glue("{dirs$modres}/all_samplesshape.rds"))
 ```
 
 # Figure 4 =========================================================================================
 
-# Prepare data 
+# Tidy mini pathogen names
+```{r}
+# tidy_namesmini_pat <- data.frame(pat_tidy = unique(all_coefcovars$pat_tidy)) %>%
+#   mutate(pat_tidy_mini = case_when(
+#     pat_tidy %in% c("Rubella", "Varicella", "Mumps", "Measles", "Tetanus", "Diphteria", "Rotavirus") ~ pat_tidy,
+#     pat_tidy == "Hepatitis A virus" ~ "HAV",
+#     pat_tidy == "Hepatitis B virus" ~ "HBV",
+#     .default = str_remove_all(pat_tidy, "ingitidis|tussis \\(W\\)|tussis \\(A\\)|luenzae|io \\(I\\)|eumoniae")))
+```
+
+# Tidy parameteter names
 ```{r}
 param_tidy_names <- data.frame(
   param = c("age", "sex", "time_vl_s1", "vac_conc", "time_v1_v2", "time_v2_v3", "reg_2", "reg_6", 
@@ -62,22 +74,54 @@ param_tidy_names <- data.frame(
     "Age", "Sex (M)", "Time Last-vaccination to \nImmunogenicity", 
     "Time 1st-vaccination to \n2nd-vaccination", "Time 2nd-vaccination to \n3rd-vaccination", 
     "Vaccine concentration", "Region (Temperate)", "Region (North)", "Vaccine")))
+```
 
+# Prepare data 
+```{r}
 # Prepare covars 
 datpl_l <- list()
 # Data for not factors
 datpl_l$nfct <- filter(all_coefcovars, pat %in% pat_sel, dat == "s08", mod %in% waic_best$mod_best, 
                        !(param %in% c("Intercept", "reg_2", "reg_3", "reg_4", "reg_6", "vac_name_v1"))) %>%
   left_join(param_tidy_names, by = join_by(param)) %>%
+  #left_join(tidy_namesmini_pat, by = join_by(pat_tidy)) %>%
   mutate(sig = case_when(est_ci95lo > 0 ~ "pos", est_ci95up < 0 ~ "neg"))
 # Data from uvn models 
 datpl_l$fct <- filter(all_coefcovars, pat %in% pat_sel, dat == "s08", mod %in% waic_best$mod_best,
                       param %in% c("Intercept", "reg_2", "reg_3", "reg_4", "reg_6", "vac_name_v1")) %>%
   left_join(param_tidy_names, by = join_by(param)) %>%
+  #left_join(tidy_namesmini_pat, by = join_by(pat_tidy)) %>%
   mutate(sig = case_when(est_ci95lo > 0 ~ "pos", est_ci95up < 0 ~ "neg"))
 # Data from re 
-datpl_l$re <- filter(all_coefre, pat %in% pat_sel, dat == "s08", mod %in% waic_best$mod_best) 
+datpl_l$re <- filter(all_coefre, pat %in% pat_sel, dat == "s08", mod %in% waic_best$mod_best) #%>%
+  #left_join(tidy_namesmini_pat, by = join_by(pat_tidy))
+datpl_l$shape <- filter(all_samplesshape, pat %in% pat_sel, dat == "s08", mod %in% waic_best$mod_best) %>%
+  mutate(est = 1/sqrt(estimate) * 100) %>%
+  group_by(mod, param, waic, pat, mod_out, mod_name, reg, dat, vac, gauss, multi, pat_tidy, Rhat_cond, waic_diff) %>%
+  summarise(est_ci95lo = round(quantile(est, 0.025), digits = 3), 
+            est_ci95up = round(quantile(est, 0.975), digits = 3),
+            est = round(mean(est), digits = 3))
 ```
+
+```{r}
+datpl_l$nfct %>%
+  filter(param == "vac_conc") %>%
+  arrange(est) %>%
+  filter(sig == "neg") %>%
+  #filter(str_detect(pat, "hav|meas|mump|rubel", negate = TRUE)) %>%
+  mutate(est = round(est*100, digits = 2), 
+         est_ci95lo = round(est_ci95lo*100, digits = 2), 
+         est_ci95up = round(est_ci95up*100, digits = 2))
+
+datpl_l$fct %>% 
+  filter(param == "vac_name_v1") %>%
+  mutate(est = round(est*100, digits = 2), 
+         est_ci95lo = round(est_ci95lo*100, digits = 2), 
+         est_ci95up = round(est_ci95up*100, digits = 2))
+```
+
+
+
 
 # Plot age, sex, time, time beween doses, time to serology, vaccine concentration
 ```{r}
@@ -86,13 +130,13 @@ names(col_sig) <- c("pos", "neg")
 
 pl_cov_l <- sapply(c("age", "sex", "time_vl_s1", "time_v1_v2", "time_v2_v3", "vac_conc"), function(x) {
   filter(datpl_l$nfct, param == x) %>%
-    ggplot(aes(x = est, y = reorder(pat_tidy, est), color = sig)) +
+    ggplot(aes(x = est*100, y = reorder(pat_tidy, est), color = sig)) +
     geom_vline(xintercept = 0, linetype = "dotted", color = "grey") + 
     geom_point() +
-    geom_segment(aes(x = est_ci95lo, xend = est_ci95up)) + 
+    geom_segment(aes(x = est_ci95lo*100, xend = est_ci95up*100)) + 
     facet_grid(~param_tidy, scales = "free") + 
     scale_color_manual(values = col_sig) + 
-    scale_x_continuous("Estimate") + 
+    scale_x_continuous("Estimate (% change)") + 
     theme(legend.position = "none", 
           axis.title.y = element_blank(), 
           strip.text.x = element_text(hjust = 0))
@@ -103,18 +147,17 @@ pl_cov_l
 
 # Plot region, vac name
 ```{r}
-library(ggh4x)
 pl_cov_l$reg <- filter(datpl_l$fct, str_detect(param, "reg")) %>%
   left_join(rename(tidy_names_clu, param_i = clu, param_i_tidy = clu_tidy), by = join_by(param_i)) %>%
   mutate(param_i_tidy = factor(param_i_tidy, levels = rev(levels(param_i_tidy)))) %>%
-  ggplot(aes(x = est, y = param_i_tidy, color = sig)) +
+  ggplot(aes(x = est*100, y = param_i_tidy, color = sig)) +
     geom_vline(xintercept = 0, linetype = "dotted", color = "grey") + 
     geom_point() +
-    geom_segment(aes(x = est_ci95lo, xend = est_ci95up)) + 
+    geom_segment(aes(x = est_ci95lo*100, xend = est_ci95up*100)) + 
     facet_nested(param_tidy+reorder(pat_tidy, est)~"Region", scales = "free", space = "free",
                  nest_line = TRUE, solo_line = TRUE) + 
     scale_color_manual(values = col_sig) + 
-    scale_x_continuous("Estimate") + 
+    scale_x_continuous("Estimate (% change)") + 
     theme(legend.position = "none", 
           axis.title.y = element_blank(),
           strip.text.y = element_text(angle = 0, hjust = 0), 
@@ -126,14 +169,14 @@ pl_cov_l$vac_name_v1 <- filter(datpl_l$fct, str_detect(param, "vac_name_v1")) %>
                                labels = c("DTPw", "Pfizer-7","Pfizer-13",  "GSK-11"))) %>%
   mutate(param_tidy = case_when(param_i == "dtpw" ~ "Vaccine \n(DTPa)",
                                 str_detect(param_i, "strep") ~ "Vaccine \n(GSK-10)")) %>%
-  ggplot(aes(x = est, y = param_i_tidy, color = sig)) +
+  ggplot(aes(x = est*100, y = param_i_tidy, color = sig)) +
     geom_vline(xintercept = 0, linetype = "dotted", color = "grey") + 
     geom_point() +
-    geom_segment(aes(x = est_ci95lo, xend = est_ci95up)) + 
+    geom_segment(aes(x = est_ci95lo*100, xend = est_ci95up*100)) + 
     facet_nested(param_tidy+pat_tidy~"Vaccine", scales = "free", space = "free",
                nest_line = TRUE, solo_line = TRUE) + 
     scale_color_manual(values = col_sig) + 
-    scale_x_continuous("Estimate") + 
+    scale_x_continuous("Estimate (% change)") + 
     theme(legend.position = "none", 
           axis.title.y = element_blank(),
           #strip.text.y = element_text(angle = 0, hjust = 0), 
@@ -146,127 +189,135 @@ pl_cov_l$re <- filter(datpl_l$re, param == "re") %>%
   mutate(param_i = factor(
     param_i, levels = c("study", "study:country:center:rct_group", "center", "center:rct_group"),
     labels = c( "Study", "Study:Country:Center:RCT-arm", "Center", "Center-RCT-arm"))) %>%
-  ggplot(aes(x = est, y = param_i)) +
+  ggplot(aes(x = est*100, y = param_i)) +
     geom_point() +
-    geom_segment(aes(x = est_ci95lo, xend = est_ci95up)) + 
+    geom_segment(aes(x = est_ci95lo*100, xend = est_ci95up*100)) + 
     facet_nested(reorder(pat_tidy, est)~"Random effects", scales = "free", space = "free") + 
-    scale_x_continuous("Estimate (SD)") + 
+    scale_x_continuous("Estimate (% change)") + 
     theme(legend.position = "none", 
           axis.title.y = element_blank(),
           strip.text.y = element_text(angle = 0, hjust = 0), 
           strip.text.x = element_text(hjust = 0))
-pl_cov_l$shape <- filter(datpl_l$re, param == "shape") %>%
+pl_cov_l$shape <- filter(datpl_l$shape, param == "shape") %>%
   ggplot(aes(x = est, y = reorder(pat_tidy, est))) +
     geom_point() +
     geom_segment(aes(x = est_ci95lo, xend = est_ci95up)) + 
-    facet_grid(~"Shape") +
-    scale_x_continuous("Estimate (SD)") + 
+    facet_grid(~"Coefficient of variation") +
+    scale_x_continuous("Estimate (%)") + 
     theme(legend.position = "none", 
           axis.title.y = element_blank(), 
           strip.text.x = element_text(hjust = 0))
+
+datpl_l$shape %>%
+  arrange(est)
 ```
 
+# Plot the MVN effects 
+
+# Prepare data 
 ```{r}
+# Function to make symmetric 
+make_symmetric <- function(df) {
+
+  metrics <- c("rescor", "rescor_se", "rescor_ci95lo", "rescor_ci95up")
+
+  labs <- sort(unique(c(df$patuni1, df$patuni2)))
+
+  grid <- expand_grid(patuni1 = labs, patuni2 = labs) %>%
+    mutate(.a = pmin(patuni1, patuni2),
+           .b = pmax(patuni1, patuni2))
+
+  df_norm <- df %>%
+    transmute(
+      .a = pmin(patuni1, patuni2),
+      .b = pmax(patuni1, patuni2),
+      across(all_of(metrics))
+    )
+
+  out <- grid %>%
+    left_join(df_norm, by = c(".a", ".b"), relationship = "many-to-many") %>%
+    select(-.a, -.b) %>%
+    mutate(
+      rescor        = if_else(patuni1 == patuni2, 1, rescor),
+      rescor_se     = if_else(patuni1 == patuni2, 0, rescor_se),
+      rescor_ci95lo = if_else(patuni1 == patuni2, 1, rescor_ci95lo),
+      rescor_ci95up = if_else(patuni1 == patuni2, 1, rescor_ci95up)
+    )
+
+  out
+}
+
+# Prepare data 
 dat_rescor <- all_coefrescor %>%
-  filter(mod_name == "base") %>%
+  filter(mod_name == "base", pat != "multi_opv") %>%
   mutate(multipat = if_else(pat %in% c("multi_ipv", "multi_strep", "multi_men", "multi_pertua"), 
-                            "Uni pathogen", "Multi pathogen")) %>%
-  filter(!str_detect(pat, "multi_strep")) %>%
-  mutate(patuni_tidy1 = case_when(
-    patuni_tidy1 %in% c("Rubella", "Varicella", "Mumps", "Measles", "Tetanus", "Diphteria") ~ substr(patuni_tidy1, 1, 3),
-    patuni_tidy1 == "N. meningitidis C" ~ "N. men C",
-    patuni_tidy1 == "Pertussis (A) PT" ~ "Per PT",
-    patuni_tidy1 == "Pertussis (W) PT" ~ "Per PT",
-    patuni_tidy1 == "Pertussis (A) PRN" ~ "Per PRN",
-    patuni_tidy1 == "Pertussis (A) FHA" ~ "Per FHA",
-    patuni_tidy1 == "N. meningitidis A" ~ "N. men A",
-    patuni_tidy1 == "H. influenzae B" ~ "H. inf B",
-    patuni_tidy1 == "Polio (I) 1" ~ "Pol 1",
-    patuni_tidy1 == "Polio (I) 2" ~ "Pol 2",
-    patuni_tidy1 == "Polio (I) 3" ~ "Pol 3",
-    .default = patuni_tidy1 ),
-    patuni_tidy2 = case_when(
-    patuni_tidy2 %in% c("Rubella", "Varicella", "Mumps", "Measles", "Tetanus", "Diphteria") ~ substr(patuni_tidy2, 1, 3),
-    patuni_tidy2 == "N. meningitidis C" ~ "N. men C",
-    patuni_tidy2 == "N. meningitidis A" ~ "N. men A",
-    patuni_tidy2 == "H. influenzae B" ~ "H. inf B",
-    patuni_tidy2 == "Pertussis (A) PT" ~ "Per PT",
-    patuni_tidy1 == "Pertussis (W) PT" ~ "Per PT",
-    patuni_tidy2 == "Pertussis (A) PRN" ~ "Per PRN",
-    patuni_tidy2 == "Pertussis (A) FHA" ~ "Per FHA",
-    patuni_tidy2 == "Polio (I) 1" ~ "Pol 1",
-    patuni_tidy2 == "Polio (I) 2" ~ "Pol 2",
-    patuni_tidy2 == "Polio (I) 3" ~ "Pol 3",
-    .default = patuni_tidy2 ),
-    
-    ) %>%
-  mutate(pat_tidy = str_remove_all(pat_tidy, "multi")) %>%
-  mutate(pat2lab_tidy = paste0(patuni_tidy1, "-", patuni_tidy2)) 
+                            "Uni pathogen", "Multi pathogen"),
+         pat_tidy = trimws(str_remove_all(pat_tidy, "multi"))) %>%
+  select(pat, patuni1, patuni2, rescor, rescor_se, rescor_ci95lo, rescor_ci95up) %>%
+  group_by(pat) %>%
+  group_modify(~ make_symmetric(.x)) %>%
+  ungroup() %>%
+  left_join(tidy_names_pat, by = join_by(pat)) %>%
+  left_join(rename_with(tidy_names_pat, ~paste0(.x, "uni1")), by = join_by(patuni1)) %>%
+  left_join(rename_with(tidy_names_pat, ~paste0(.x, "uni2")), by = join_by(patuni2))
+```
 
-dat_rescor %>%
-  expand(nesting(imm_name1, imm_name2), pat_tidy) %>%
-  ggplot(aes(x = rescor, y = pat2lab_tidy)) + 
-  geom_vline(aes(xintercept = 0), linetype = "dotted", color = "grey") + 
-  geom_point() + 
-  geom_segment(aes(x = rescor_ci95lo, xend = rescor_ci95up)) +
-  facet_nested(reorder(pat_tidy, rescor)~"Correlation", 
-               scales = "free", space = "free", nest_line = TRUE, solo_line = TRUE) +
-  scale_y_discrete("") + 
-  theme(strip.text.y = element_text(angle = 0, hjust = 0),
-        legend.position = "none")
-
-dat_rescor %>%
-  select(patuni_tidy1, patuni_tidy2, pat_tidy, rescor) %>%
-  group_by(pat_tidy) %>%
-  expand(patuni_tidy1, patuni_tidy2)
-
-
+# Plot MVN effects  
+```{r}
 pl_cov_l$mvn <- dat_rescor %>%
-  ggplot(aes(x = patuni_tidy2, y = patuni_tidy1, fill = rescor)) +
+  mutate(
+    pat_tidy = str_remove_all(pat_tidy, " multi | multi"),
+    pat_tidy = if_else(pat_tidy == "Men-Hib", "Hib-Men", pat_tidy), 
+    pat_tidy = factor(pat_tidy, levels = c(
+      "MMRV", "MMR", "Hib-Men", "DTP (A)", "DTP (W)", "N. men",  "S. pn10",  "S. pn7",
+      "Pertu (A)", "Polio (I)")),
+  patuni_mvntidy1 = factor(pat_tidyuni1, levels = c(
+       "Diphteria", "Tetanus", "Pertu (A) PT", "Measles", "Mumps", "Rubella", "Varicella", "H. inf B", "N. men A", "N. men C",
+       "Per PRN", "Per FHA", "Polio (I) 1", "Polio (I) 2", "Polio (I) 3", "S. pn 01", "S. pn 04", "S. pn 05",
+       "S. pn 06a", "S. pn 06b", "S. pn 07f", "S. pn 09v", "S. pn 14", "S. pn 18c", "S. pn 19a",
+       "S. pn 19f", "S. pn 23f")),
+     patuni_mvntidy2 = factor(pat_tidyuni2, levels = c(
+       "Diphteria", "Tetanus", "Pertu (A) PT", "Measles", "Mumps", "Rubella", "Varicella", "H. inf B", "N. men A", "N. men C",
+       "Per PRN", "Per FHA", "Polio (I) 1", "Polio (I) 2", "Polio (I) 3", "S. pn 01", "S. pn 04", "S. pn 05",
+       "S. pn 06a", "S. pn 06b", "S. pn 07f", "S. pn 09v", "S. pn 14", "S. pn 18c", "S. pn 19a",
+       "S. pn 19f", "S. pn 23f"))) %>%
+  ggplot(aes(x = pat_tidyuni1, y = pat_tidyuni2, fill = rescor)) +
   geom_tile() + 
   scale_x_discrete("") + 
   scale_y_discrete("") + 
-  facet_nested_wrap(reorder(pat_tidy, rescor)~., scales= "free", ncol = 8) + 
-  scale_fill_viridis("Correlation")
+  facet_nested_wrap(pat_tidy~., scales= "free", ncol = 5) + 
+  scale_fill_viridis("Correlation", direction = -1, option = "magma") +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+pl_cov_l$mvn
 ```
 
+```{r}
+dat_rescor %>%
+  filter(!(pat %in% c("multi_dtpa", "multi_dtpw", "multi_hib-men", "multi_mmr", "multi_mmr-vzv"))) %>%
+  arrange(rescor) %>%
+  mutate(rescor = round(rescor, digits = 3),
+         rescor_ci95lo = round(rescor_ci95lo, digits = 3),
+         rescor_ci95up = round(rescor_ci95up, digits = 3))
+```
 
 
 # Figure 4 =========================================================================================
-
 ```{r}
-fig4a <- (pl_cov_l$age + pl_cov_l$sex + pl_cov_l$time_vl_s1 + pl_cov_l$time_v1_v2 + 
-            pl_cov_l$time_v2_v3 + pl_cov_l$vac_conc)
-fig4b <- pl_cov_l$shape + pl_cov_l$vac_name_v1
-fig4 <- free(fig4a) + free(fig4b) + plot_layout(ncol = 1, heights = c(2,1))
+fig4a  <- (pl_cov_l$age + pl_cov_l$sex + pl_cov_l$vac_conc + pl_cov_l$vac_name_v1 + 
+           pl_cov_l$time_v1_v2 + pl_cov_l$time_v2_v3 +  pl_cov_l$time_vl_s1 + pl_cov_l$shape) + 
+  plot_layout(ncol = 4)
 
-fig4 <- pl_cov_l$age + pl_cov_l$sex + pl_cov_l$vac_name_v1 + 
-  pl_cov_l$time_v1_v2 + pl_cov_l$time_v2_v3 + pl_cov_l$mvn + 
-  pl_cov_l$time_vl_s1 + pl_cov_l$vac_conc + pl_cov_l$shape 
-
-fig4a / ((pl_cov_l$vac_name_v1 / pl_cov_l$sha)| pl_cov_l$mvn )
-
-fig4a2 <- (fig4a | pl_cov_l$mvn) + plot_layout(widths = c(3, 1)) 
-fig4 <- free(fig4a2) + free(fig4b) + plot_layout(ncol = 1, heights = c(2,1))
-ggsave(fig4, file = "../figures/fig4.pdf", width = 12, height = 9)
+fig4 <- (free(fig4a) + free(pl_cov_l$mvn)) + plot_layout(ncol = 1, heights = c(1.3,1))
+ 
+ggsave(fig4, file = "../figures/fig4.pdf", width = 11.5, height = 12)
 ```
-
-```{r}
-fig4a <- (pl_cov_l$age + pl_cov_l$sex + pl_cov_l$time_vl_s1 + pl_cov_l$time_v1_v2 + 
-            pl_cov_l$time_v2_v3 + pl_cov_l$vac_conc + pl_cov_l$shape + free(pl_cov_l$vac_name_v1)) + 
-  plot_layout(ncol = 4) 
-fig4 <- free(fig4a) + free(pl_cov_l$mvn) + plot_layout(ncol = 1, heights = c(4,1))
-
-ggsave(fig4, file = "../figures/fig4.pdf", width = 12, height = 9)
-```
-
 
 # Supplementary figure 4 =========================================================================== 
 
 ```{r}
-supfig4 <- pl_cov_l$reg + pl_cov_l$re
-supfig4
-ggsave(supfig4, file = "../figures/supfig4.pdf", width = 10, height = 5.5)
+# supfig4 <- pl_cov_l$reg + pl_cov_l$re
+# supfig4
+# ggsave(supfig4, file = "../figures/figsup10.pdf", width = 10, height = 5.5)
 ```
 
 # Figures with the real data =======================================================================
@@ -286,6 +337,55 @@ datsel_l <- bind_rows(dat_l[pat_sel], .id = "pat")
 ```{r}
 pl_covars_all <- sapply(c("age", "time_vl_s1", "vac_conc", "time_v1_v2", "time_v2_v3"), function(x) {
 # Obtain coefficients
+  datcoef <- datpl_l$nfct %>%
+    filter(param == x) %>%
+    # Add intercept 
+    left_join(datpl_l$fct %>%
+                filter(param == "Intercept") %>%
+                rename(int = est, int_ci95lo = est_ci95lo, int_ci95up = est_ci95up) %>%
+                select(mod, starts_with("int"), dat, reg, multi), 
+              by = join_by(mod, dat, reg, multi))
+  
+  # Obtain new values
+  param_grids <- datsel_l %>%
+    filter(pat %in% datcoef$pat) %>%
+    rename(param_x = x) %>%
+    group_by(pat) %>%
+    reframe(param_x = seq(min(param_x), max(param_x), length.out = 100)) %>%
+    left_join(select(datcoef, pat, starts_with("est"), starts_with("int"), sig, pat_tidy),
+              by = join_by(pat)) %>%
+    mutate(pred = exp(int + (est*param_x)),
+           pred_ci95lo = exp(int_ci95lo + (est_ci95lo*param_x)),
+           pred_ci95up = exp(int_ci95up + (est_ci95up*param_x)))
+  
+  pl <- datsel_l %>%
+    filter(pat %in% datcoef$pat) %>%
+    left_join(tidy_names_pat, by = join_by(pat)) %>%
+    left_join(distinct(param_grids, pat, est), by = join_by(pat)) %>%
+    rename(param_x = x) %>%
+    ggplot(aes(x = param_x, y = imm_val_s1)) +
+    geom_point(alpha = 0.01)  +
+    geom_line(data = param_grids, aes(y = pred, color = sig), size = 1) +
+    geom_ribbon(data = param_grids, aes(ymin = pred_ci95lo, ymax = pred_ci95up, y = NULL, fill = sig), 
+                color = "transparent", alpha = 0.3) +
+    scale_x_continuous(unique(datcoef$param_tidy), breaks = fun_breaks, limits = fun_limits, expand = c(0,0)) +
+    scale_y_log10("Immunogenicity (log10)") +
+    scale_color_manual(values = col_sig) + 
+    scale_fill_manual(values = col_sig) + 
+    facet_wrap(~reorder(pat_tidy, -est), scales = "free", ncol = 4) + 
+    theme(legend.position = "none")
+  
+    nreg <- if(length(unique(datcoef$pat)) / 4  ==  3.5) 8 else 6
+    ggsave(pl, width = 8, height = nreg,
+           file = paste0("../figures/modres_covars/covars_", x, ".pdf"))
+  return(pl)
+}, simplify = FALSE)
+```
+
+# Plot sex 
+```{r}
+x <- "sex"
+# Obtain coefficients
 datcoef <- datpl_l$nfct %>%
   filter(param == x) %>%
   # Add intercept 
@@ -294,118 +394,200 @@ datcoef <- datpl_l$nfct %>%
               rename(int = est, int_ci95lo = est_ci95lo, int_ci95up = est_ci95up) %>%
               select(mod, starts_with("int"), dat, reg, multi), 
             by = join_by(mod, dat, reg, multi))
-
+  
 # Obtain new values
 param_grids <- datsel_l %>%
   filter(pat %in% datcoef$pat) %>%
   rename(param_x = x) %>%
   group_by(pat) %>%
-  reframe(param_x = seq(min(param_x), max(param_x), length.out = 100)) %>%
   left_join(select(datcoef, pat, starts_with("est"), starts_with("int"), sig, pat_tidy),
             by = join_by(pat)) %>%
-  mutate(pred = exp(int + (est*param_x)),
-         pred_ci95lo = exp(int_ci95lo + (est_ci95lo*param_x)),
-         pred_ci95up = exp(int_ci95up + (est_ci95up*param_x)))
+  mutate(pred = if_else(param_x == "F", exp(est), exp(int + est)),
+         pred_ci95lo = if_else(param_x == "F", exp(est_ci95lo), exp(int_ci95lo + est_ci95lo)),
+         pred_ci95up = if_else(param_x == "F", exp(est_ci95up), exp(int_ci95up + est_ci95up)))
 
-pl <- datsel_l %>%
-  filter(pat %in% datcoef$pat) %>%
-  left_join(tidy_names_pat, by = join_by(pat)) %>%
-  left_join(distinct(param_grids, pat, est), by = join_by(pat)) %>%
-  rename(param_x = x) %>%
-  ggplot(aes(x = param_x, y = imm_val_s1)) +
-  geom_point(alpha = 0.01)  +
-  geom_line(data = param_grids, aes(y = pred, color = sig), size = 1) +
-  geom_ribbon(data = param_grids, aes(ymin = pred_ci95lo, ymax = pred_ci95up, y = NULL, fill = sig), 
-              color = "transparent", alpha = 0.3) +
-  scale_x_continuous(unique(datcoef$param_tidy), breaks = fun_breaks, limits = fun_limits, expand = c(0,0)) +
-  scale_y_log10("Immunogenicity (log)") +
-  scale_color_manual(values = col_sig) + 
-  scale_fill_manual(values = col_sig) + 
-  facet_wrap(~reorder(pat_tidy, -est), scales = "free", ncol = 5) + 
-  theme(legend.position = "none")
-
-  nreg <- length(unique(datcoef$pat)) / 5
-  ggsave(pl, width = 8, height = 2*nreg,
+pl <- param_grids %>%
+  mutate(param_x = factor(param_x, levels = c("M", "F"))) %>%
+  ggplot(aes(x = imm_val_s1, fill = param_x)) +
+  geom_density(adjust = 2, color = "transparent", alpha = 0.5) +
+  scale_x_log10("Immunogenicity (log10)") +
+  scale_y_continuous("Density", breaks = fun_breaks, limits = fun_limits, expand = c(0,0)) +
+  scale_fill_manual("Sex", values = c("darkblue", "black")) + 
+  facet_wrap(~reorder(pat_tidy, -est), scales = "free", ncol = 4) +  
+  theme(legend.position = "top")
+  
+  ggsave(pl, width = 8, height = 8,
          file = paste0("../figures/modres_covars/covars_", x, ".pdf"))
-  return(pl)
-}, simplify = FALSE)
 ```
+
+# Plot vaccines  
+```{r}
+x <- "vac_name_v1"
+# Obtain coefficients
+datcoef <- datpl_l$fct %>%
+  filter(param == x) %>%
+  # Add intercept 
+  left_join(datpl_l$fct %>%
+              filter(param == "Intercept") %>%
+              rename(int = est, int_ci95lo = est_ci95lo, int_ci95up = est_ci95up) %>%
+              select(mod, starts_with("int"), dat, reg, multi), 
+            by = join_by(mod, dat, reg, multi))
+  
+# Obtain new values
+param_grids <- datsel_l %>%
+  filter(pat %in% datcoef$pat) %>%
+  rename(param_x = x) %>%
+  group_by(pat) %>%
+  left_join(select(datcoef, pat, starts_with("est"), starts_with("int"), sig, pat_tidy),
+            by = join_by(pat)) %>%
+  mutate(pred = if_else(param_x %in% c("dtpa", "strep10"), exp(est), exp(int + est)),
+         pred_ci95lo = if_else(param_x %in% c("dtpa", "strep10"), exp(est_ci95lo), exp(int_ci95lo + est_ci95lo)),
+         pred_ci95up = if_else(param_x %in% c("dtpa", "strep10"), exp(est_ci95up), exp(int_ci95up + est_ci95up)))
+
+pl <- param_grids %>%
+  mutate(param_i_tidy = factor(param_x, levels = c("dtpa", "dtpw", "strep10", "strep11", "strep7", "strep13"),
+                               labels = c("DTPa", "DTPw", "GSK-10", "GSK-11", "Pfizer-7","Pfizer-13"))) %>%
+  ggplot(aes(x = imm_val_s1, fill = param_i_tidy)) +
+  geom_density(adjust = 2, color = "transparent", alpha = 0.5) +
+  scale_x_log10("Immunogenicity (log10)") +
+  scale_y_continuous("Density", breaks = fun_breaks, limits = fun_limits, expand = c(0,0)) +
+  scale_fill_manual("Vaccine", values = c("black", "darkblue", "black", "darkblue", "firebrick1", "firebrick4")) + 
+  facet_wrap(~pat_tidy, scales = "free", ncol = 4) +  
+  guides(fill = guide_legend(nrow = 1, byrow = TRUE)) + 
+  theme(legend.position = "top")
+  
+  nreg <- length(unique(datcoef$pat)) / 5
+  ggsave(pl, width = 7, height = 3,
+         file = paste0("../figures/modres_covars/covars_", x, ".pdf"))
+```
+
+# Plot vaccine concentrations:
+```{r}
+# Obtain coefficients
+  datcoef <- datpl_l$nfct %>%
+    filter(param == "vac_conc") %>%
+    # Add intercept 
+    left_join(datpl_l$fct %>%
+                filter(param == "Intercept") %>%
+                rename(int = est, int_ci95lo = est_ci95lo, int_ci95up = est_ci95up) %>%
+                select(mod, starts_with("int"), dat, reg, multi), 
+              by = join_by(mod, dat, reg, multi))
+  
+  # Obtain new values
+  param_grids <- datsel_l %>%
+    filter(pat %in% datcoef$pat) %>%
+    rename(param_x = "vac_conc") %>%
+    group_by(pat) %>%
+    reframe(param_x = seq(min(param_x), max(param_x), length.out = 100)) %>%
+    left_join(select(datcoef, pat, starts_with("est"), starts_with("int"), sig, pat_tidy),
+              by = join_by(pat)) %>%
+    mutate(pred = exp(int + (est*param_x)),
+           pred_ci95lo = exp(int_ci95lo + (est_ci95lo*param_x)),
+           pred_ci95up = exp(int_ci95up + (est_ci95up*param_x)))
+  
+  pl <- datsel_l %>%
+    filter(pat %in% datcoef$pat) %>%
+    left_join(tidy_names_pat, by = join_by(pat)) %>%
+    left_join(distinct(param_grids, pat, est), by = join_by(pat)) %>%
+    rename(param_x = "vac_conc_n") %>%
+    ggplot(aes(x = param_x, y = imm_val_s1)) +
+    geom_point(alpha = 0.01)  +
+    geom_line(data = param_grids, aes(y = pred, color = sig), size = 1) +
+    geom_ribbon(data = param_grids, aes(ymin = pred_ci95lo, ymax = pred_ci95up, y = NULL, fill = sig), 
+                color = "transparent", alpha = 0.3) +
+    scale_x_continuous(unique(datcoef$param_tidy), breaks = fun_breaks, limits = fun_limits, expand = c(0,0)) +
+    scale_y_log10("Immunogenicity (log10)") +
+    scale_color_manual(values = col_sig) + 
+    scale_fill_manual(values = col_sig) + 
+    facet_wrap(~reorder(pat_tidy, -est), scales = "free", ncol = 4) + 
+    theme(legend.position = "none")
+  
+  datsel_l %>%
+    filter(pat %in% datcoef$pat) %>%
+    left_join(tidy_names_pat, by = join_by(pat)) %>%
+    left_join(distinct(param_grids, pat, est), by = join_by(pat)) %>%
+    rename(param_x = "vac_conc") %>%
+    filter(pat == "hib") %>%
+    #distinct(rct_group)
+    ggplot(aes(x = param_x, y = imm_val_s1, color = vac_name_conco_v1)) +
+    geom_point(alpha = 0.1)  +
+    scale_x_continuous(unique(datcoef$param_tidy), breaks = fun_breaks, limits = fun_limits, expand = c(0,0)) +
+    scale_y_log10("Immunogenicity (log10)") +  
+    facet_wrap(~reorder(pat_tidy, -est), scales = "free", ncol = 4) 
+```
+
+
+
+
+
 
 # Plot distributions
 ```{r}
-pl_covars_all <- sapply(c("age", "time_vl_s1", "vac_conc", "time_v1_v2", "time_v2_v3"), function(x) {
-# Obtain coefficients
-datcoef <-filter(datpl_l$nfct, param == x) 
-
-pl <- datsel_l %>%
-  filter(pat %in% datcoef$pat) %>%
-  left_join(tidy_names_pat, by = join_by(pat)) %>%
-  left_join(distinct(datcoef, pat, est, sig), by = join_by(pat)) %>%
-  rename(param_x = x) %>%
-  ggplot(aes(x = param_x, color = sig)) +
-  geom_density()  +
-  scale_x_continuous(unique(datcoef$param_tidy)) +
-  scale_color_manual(values = col_sig) + 
-  facet_grid(reorder(pat_tidy, -est)~., scales = "free") + 
-  theme(legend.position = "none")
-
-
-pl <- datsel_l %>%
-  filter(pat %in% datcoef$pat) %>%
-  left_join(tidy_names_pat, by = join_by(pat)) %>%
-  left_join(distinct(datcoef, pat, est, sig), by = join_by(pat)) %>%
-  rename(param_x = x) %>%
-  ggplot(aes(x = param_x, color = sig, group = pat)) +
-  geom_density()  +
-  scale_x_continuous(unique(datcoef$param_tidy)) +
-  scale_color_manual(values = col_sig) + 
-  facet_grid(reorder(pat_tidy, -est)~.) + 
-  theme(legend.position = "none")
-
-  nreg <- length(unique(datcoef$pat)) / 5
-  ggsave(pl, width = 8, height = 2*nreg,
-         file = paste0("../figures/modres_covars/covarsdens_", x, ".pdf"))
-  return(pl)
-}, simplify = FALSE)
+# pl_covars_all <- sapply(c("age", "time_vl_s1", "vac_conc", "time_v1_v2", "time_v2_v3"), function(x) {
+#   # Obtain coefficients
+#   datcoef <-filter(datpl_l$nfct, param == x) 
+# 
+#   pl <- datsel_l %>%
+#     filter(pat %in% datcoef$pat) %>%
+#     left_join(tidy_names_pat, by = join_by(pat)) %>%
+#     left_join(distinct(datcoef, pat, est, sig), by = join_by(pat)) %>%
+#     rename(param_x = x) %>%
+#     ggplot(aes(x = param_x, color = sig)) +
+#     geom_density()  +
+#     scale_x_continuous(unique(datcoef$param_tidy)) +
+#     scale_color_manual(values = col_sig) + 
+#     #facet_grid(reorder(pat_tidy, -est)~., scales = "free") + 
+#     theme(legend.position = "none")
+#   
+#   
+#   pl <- datsel_l %>%
+#     filter(pat %in% datcoef$pat) %>%
+#     left_join(tidy_names_pat, by = join_by(pat)) %>%
+#     left_join(distinct(datcoef, pat, est, sig), by = join_by(pat)) %>%
+#     rename(param_x = x) %>%
+#     ggplot(aes(x = param_x, color = sig, group = pat)) +
+#     geom_density()  +
+#     scale_x_continuous(unique(datcoef$param_tidy)) +
+#     scale_color_manual(values = col_sig) + 
+#     #facet_grid(reorder(pat_tidy, -est)~.) + 
+#     theme(legend.position = "none")
+# 
+#   nreg <- length(unique(datcoef$pat)) / 5
+#   ggsave(pl, width = 8, height = 2*nreg,
+#          file = paste0("../figures/modres_covars/covarsdens_", x, ".pdf"))
+#   return(pl)
+# }, simplify = FALSE)
 ```
 
-
-# Plot factors
 ```{r}
-
-```
-
-
-
-```{r}
-
-
-
-
-     group_by(across(-c(sam_no, estimate, estimate_level))) %>%
-      mutate(estlev_ci95lo = quantile(estimate_level, 0.025),
-             estlev_ci95up = quantile(estimate_level, 0.975),
-             estlev_mean = mean(estimate_level), .groups = "drop") %>%
-test %>%
-  filter(param_level == "vac_name_v1", str_detect(pat, "strep")) %>%
-  group_by(sam_no, mod, imm_name) %>%
-  mutate(comp = case_when(
-    estimate_level[param_i == "strep7"],
-  )
-         diff = estimate_level - comp) %>%
-  ungroup() %>%
-  group_by(pat, mod, param_i) %>%
-  summarise(mea = mean(diff), q1 = quantile(diff, 0.025), q2 = quantile(diff, 0.975)) %>%
-  filter(mod %in% waic_best$mod_best, pat %in% pat_sel) %>%
-  ggplot(aes(x = mea, y = param_i)) +
-  geom_point() +
-  geom_vline(aes(xintercept = 0)) + 
-  geom_segment(aes(x = q1, xend = q2))
-
-# Strep 7  = Prevnar Pfizer
-# Strep 10 = GSK10
-# Strep 11 = GSK11
-# Strep 13 = Prevnar13 Pfizer
+# 
+# 
+# 
+# 
+#      group_by(across(-c(sam_no, estimate, estimate_level))) %>%
+#       mutate(estlev_ci95lo = quantile(estimate_level, 0.025),
+#              estlev_ci95up = quantile(estimate_level, 0.975),
+#              estlev_mean = mean(estimate_level), .groups = "drop") %>%
+# test %>%
+#   filter(param_level == "vac_name_v1", str_detect(pat, "strep")) %>%
+#   group_by(sam_no, mod, imm_name) %>%
+#   mutate(comp = case_when(
+#     estimate_level[param_i == "strep7"],
+#   )
+#          diff = estimate_level - comp) %>%
+#   ungroup() %>%
+#   group_by(pat, mod, param_i) %>%
+#   summarise(mea = mean(diff), q1 = quantile(diff, 0.025), q2 = quantile(diff, 0.975)) %>%
+#   filter(mod %in% waic_best$mod_best, pat %in% pat_sel) %>%
+#   ggplot(aes(x = mea, y = param_i)) +
+#   geom_point() +
+#   geom_vline(aes(xintercept = 0)) + 
+#   geom_segment(aes(x = q1, xend = q2))
+# 
+# # Strep 7  = Prevnar Pfizer
+# # Strep 10 = GSK10
+# # Strep 11 = GSK11
+# # Strep 13 = Prevnar13 Pfizer
 ```
 
 

@@ -498,6 +498,11 @@ stu_checks <- sapply(names(patdf_l), function(pat) {
 }, simplify = FALSE) %>%
   bind_rows(.id = "pat") %>%
   pivot_wider(names_from = filter, values_from = c(row_n, study_n, pid_n)) 
+
+# Check 110 studies 
+distinct(bind_rows(patdf_row_l), study)
+# Check 58,765 pid
+distinct(bind_rows(patdf_row_l), study, pid)
 ```
 
 # Save data ========================================================================================

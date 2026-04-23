@@ -33,21 +33,44 @@ dirs$raw              <- paste0(dirs$seas_imm_server, "/data/raw")
 dirs$processed        <- paste0(dirs$seas_imm_server, "/data/processed")
 
 # To outputs
-dirs$outputs          <- paste0(dirs$seas_imm_server, "/outputs")
-dirs$modfit           <- paste0(dirs$seas_imm_server, "/outputs/modfit")
-dirs$modres           <- paste0(dirs$seas_imm_server, "/outputs/modres")     
-dirs$rhats            <- paste0(dirs$seas_imm_server, "/outputs/modres/modres_rhats")
-dirs$waic             <- paste0(dirs$seas_imm_server, "/outputs/modres/modres_waic")
-dirs$coef             <- paste0(dirs$seas_imm_server, "/outputs/modres/modres_coef")
+#dirs$outputs          <- paste0(dirs$seas_imm_server, "/outputs")
+dirs$outputs           <- paste0("/Users/u_barrero-guevara/_seas_imm_pappos/outputs")
+#dirs$modfit           <- paste0(dirs$seas_imm_server, "/outputs/modfit")
+dirs$modfit           <- paste0("/Users/u_barrero-guevara/_seas_imm_pappos/outputs/modfit")
+#dirs$modres           <- paste0(dirs$seas_imm_server, "/outputs/modres")     
+dirs$modres           <- paste0("/Users/u_barrero-guevara/_seas_imm_pappos/outputs/modres")    
+#dirs$rhats            <- paste0(dirs$seas_imm_server, "/outputs/modres/modres_rhats")
+dirs$rhats            <- paste0("/Users/u_barrero-guevara/_seas_imm_pappos/outputs/modres/modres_rhats")
+#dirs$waic             <- paste0(dirs$seas_imm_server, "/outputs/modres/modres_waic")
+dirs$waic             <- paste0("/Users/u_barrero-guevara/_seas_imm_pappos/outputs/modres/modres_waic")
+#dirs$coef             <- paste0(dirs$seas_imm_server, "/outputs/modres/modres_coef")
+dirs$coef             <- paste0("/Users/u_barrero-guevara/_seas_imm_pappos/outputs/modres/modres_coef")
 dirs$ceffects         <- paste0(dirs$seas_imm_server, "/outputs/modres/modres_ceffects")
 dirs$cespa            <- paste0(dirs$seas_imm_server, "/outputs/modres/modres_cespa")
-dirs$pred             <- paste0(dirs$seas_imm_server, "/outputs/modres/modres_pred")
-dirs$samples          <- paste0(dirs$seas_imm_server, "/outputs/modres/modres_samples")
+#dirs$pred             <- paste0(dirs$seas_imm_server, "/outputs/modres/modres_pred")
+dirs$pred             <- paste0("/Users/u_barrero-guevara/_seas_imm_pappos/outputs/modres/modres_pred")
+#dirs$samples          <- paste0(dirs$seas_imm_server, "/outputs/modres/modres_samples")
+dirs$samples          <- paste0("/Users/u_barrero-guevara/_seas_imm_pappos/outputs/modres/modres_samples")
 dirs$simcosfit        <- paste0(dirs$seas_imm_server, "/outputs/simcosfit")
 dirs$simcosres        <- paste0(dirs$seas_imm_server, "/outputs/simcosres")
 dirs$simcos_rhats     <- paste0(dirs$seas_imm_server, "/outputs/simcosres/simcosres_rhats")
 dirs$simcos_coef      <- paste0(dirs$seas_imm_server, "/outputs/simcosres/simcosres_coef")
 dirs$simcos_samples   <- paste0(dirs$seas_imm_server, "/outputs/simcosres/simcosres_samples")
+#dirs$simpredfit        <- paste0("/Users/u_barrero-guevara/_seas_imm_pappos/outputs/simpredfit")
+dirs$simpredfit        <- paste0("/Users/u_barrero-guevara/_seas_imm_pappos/outputs/simpredfit")
+#dirs$simpredres        <- paste0(dirs$seas_imm_server, "/outputs/simpredres")
+dirs$simpredres        <- paste0("/Users/u_barrero-guevara/_seas_imm_pappos/outputs/simpredres")
+#dirs$simpred_rhats     <- paste0(dirs$seas_imm_server, "/outputs/simpredres/simpredres_rhats")
+dirs$simpred_rhats     <- paste0("/Users/u_barrero-guevara/_seas_imm_pappos/outputs/simpredres/simpredres_rhats")
+#dirs$simpred_coef      <- paste0(dirs$seas_imm_server, "/outputs/simpredres/simpredres_coef")
+dirs$simpred_coef      <- paste0("/Users/u_barrero-guevara/_seas_imm_pappos/outputs/simpredres/simpredres_coef")
+#dirs$simpred_samples   <- paste0 (dirs$seas_imm_server, "/outputs/simpredres/simpredres_samples")
+dirs$simpred_samples   <- paste0("/Users/u_barrero-guevara/_seas_imm_pappos/outputs/simpredres/simpredres_samples")
+dirs$climfit           <- paste0(dirs$seas_imm_server, "/outputs/climfit")
+dirs$climres        <- paste0(dirs$seas_imm_server, "/outputs/climres")
+dirs$clim_rhats     <- paste0(dirs$seas_imm_server, "/outputs/climres/climres_rhats")
+dirs$clim_coef      <- paste0(dirs$seas_imm_server, "/outputs/climres/climres_coef")
+dirs$clim_samples   <- paste0(dirs$seas_imm_server, "/outputs/climres/climres_samples")
 
 # To local
 dirs$figures <- "figures"
@@ -71,18 +94,31 @@ tidy_names_pat <- data.frame(
     "multi_strep7", "multi_strep10", "multi_strep11", "multi_strep13",   
     "measl", "mumps", "rubel", "multi_mmr", "vzv", "multi_mmr-vzv"),
   pat_tidy = c(
-    "Rotavirus", "Hepatitis A virus", "Hepatitis B virus", "Diphteria", "Tetanus", 
-    "Pertussis (W) PT", "DTP (W) multi",
-    "Pertussis (A) PT", "Pertussis (A) FHA", "Pertussis (A) PRN", "Pertussis (A) multi", "DTP (A) multi", 
+    "Rotavirus", "HAV", "HBV", "Diphteria", "Tetanus", 
+    "Pertu (W) PT", "DTP (W) multi",
+    "Pertu (A) PT", "Pertu (A) FHA", "Pertu (A) PRN", "Pertu (A) multi", "DTP (A) multi", 
     "Polio (I) 1", "Polio (I) 2", "Polio (I) 3", "Polio (I) multi", 
     "Polio (O) 1", "Polio (O) 2", "Polio (O) 3", "Polio (O) multi", 
-    "H. influenzae B", "N. meningitidis A", "N. meningitidis C", "N. meningitidis Y", 
-    "N. meningitidis multi", "Men-Hib", 
-    "S. pneumoniae 01", "S. pneumoniae 03", "S. pneumoniae 04", "S. pneumoniae 05", "S. pneumoniae 06a", 
-    "S. pneumoniae 06b", "S. pneumoniae 07f", "S. pneumoniae 09v", "S. pneumoniae 14", "S. pneumoniae 18c", 
-    "S. pneumoniae 19a", "S. pneumoniae 19f", "S. pneumoniae 23f", 
-    "S. pneumoniae multi 7", "S. pneumoniae multi 10", "S. pneumoniae multi 11", "S. pneumoniae multi 13",
-    "Measles", "Mumps", "Rubella", "MMR multi", "Varicella", "MMRV multi")) %>%
+    "H. inf B", "N. men A", "N. men C", "N. men Y", 
+    "N. men multi", "Men-Hib", 
+    "S. pn 01", "S. pn 03", "S. pn 04", "S. pn 05", "S. pn 06a", 
+    "S. pn 06b", "S. pn 07f", "S. pn 09v", "S. pn 14", "S. pn 18c", 
+    "S. pn 19a", "S. pn 19f", "S. pn 23f", 
+    "S. pn multi 7", "S. pn multi 10", "S. pn multi 11", "S. pn multi 13",
+    "Measles", "Mumps", "Rubella", "MMR multi", "VZV", "MMRV multi")) %>%
+  # pat_tidy = c(
+  #   "Rotavirus", "Hepatitis A virus", "Hepatitis B virus", "Diphteria", "Tetanus", 
+  #   "Pertussis (W) PT", "DTP (W) multi",
+  #   "Pertussis (A) PT", "Pertussis (A) FHA", "Pertussis (A) PRN", "Pertussis (A) multi", "DTP (A) multi", 
+  #   "Polio (I) 1", "Polio (I) 2", "Polio (I) 3", "Polio (I) multi", 
+  #   "Polio (O) 1", "Polio (O) 2", "Polio (O) 3", "Polio (O) multi", 
+  #   "H. influenzae B", "N. meningitidis A", "N. meningitidis C", "N. meningitidis Y", 
+  #   "N. meningitidis multi", "Men-Hib", 
+  #   "S. pneumoniae 01", "S. pneumoniae 03", "S. pneumoniae 04", "S. pneumoniae 05", "S. pneumoniae 06a", 
+  #   "S. pneumoniae 06b", "S. pneumoniae 07f", "S. pneumoniae 09v", "S. pneumoniae 14", "S. pneumoniae 18c", 
+  #   "S. pneumoniae 19a", "S. pneumoniae 19f", "S. pneumoniae 23f", 
+  #   "S. pneumoniae multi 7", "S. pneumoniae multi 10", "S. pneumoniae multi 11", "S. pneumoniae multi 13",
+  #   "Measles", "Mumps", "Rubella", "MMR multi", "Varicella", "MMRV multi")) %>%
   mutate(pat_tidy = factor(pat_tidy, levels = pat_tidy))
 
 # List of immunogencity names

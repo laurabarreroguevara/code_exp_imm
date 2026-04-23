@@ -40,7 +40,7 @@ for (pathogen in pat_l) {
   ## List the files in the "runned" directory 
   already_runned <- str_remove(str_remove(list.files(glue("{dirs$outputs}/slurmsh/runned")), ".sh"),
                                glue("run_{pathogen}_brms_"))
-  # ## Filter out any formulas that have already been processed to avoid duplicate runs
+  ## Filter out any formulas that have already been processed to avoid duplicate runs
   l_formula <- l_formula[!(names(l_formula) %in% already_runned)]
   
   ## For each remaining model in the formula list, generate the corresponding SLURM script
@@ -65,6 +65,7 @@ for (pathogen in pat_l) {
       str_detect(args_fo, "seonlyseropos") ~ glue("dataseonlyseropos_brms_{pathogen}_{vac}_s08{dfk}.rds"),
       str_detect(args_fo, "seallsero") ~ glue("dataseallsero_brms_{pathogen}_{vac}_s08{dfk}.rds"),
       str_detect(args_fo, "sebirth") ~ glue("data_brms_{pathogen}_{vac}_s08{dfk}.rds"),
+      str_detect(args_fo, "sesplines") ~ glue("data_brms_{pathogen}_{vac}_s08{dfk}.rds"),
       .default = glue("data_brms_{pathogen}_{vac}_s08{dfk}.rds"))
     
     # Generate the SLURM shell script file 

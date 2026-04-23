@@ -1,0 +1,177 @@
+---
+title: "BRMS plot results"
+author: "Laura Andrea Barrrero Guevara"
+date: "2023-02-23"
+output: html_document
+---
+
+####################################################################################################
+Purpose of script: To check the model results and plot it 
+####################################################################################################
+
+```{r}
+rm(list = ls())
+source("../00_pck.R")
+theme_set(theme_classic() + theme(strip.background = element_blank()))
+```
+
+# Define main analyses 
+```{r}
+pat_sel <- c("rota", "hav", "hbv", "dipht", "tetan", "pertuwpt", "ipv1", 
+             "hib", "menc", "strep04", "measl", "mumps", "rubel", "vzv")
+```
+
+# Read in data 
+```{r}
+# Read best model
+waic_best <- readRDS(glue("{dirs$outputs}/modres/all_waicbest.rds"))
+waiccomb_best <- readRDS(glue("{dirs$modres}/all_waiccombbest.rds"))
+waic_best_all <- bind_rows(waiccomb_best, waic_best)
+
+# Read in data gaps
+all_datagaps <- readRDS(glue("{dirs$modres}/all_datagaps.rds")) 
+all_datagapssim <- readRDS(glue("{dirs$modres}/all_datagapssim.rds")) 
+
+all_samplescosine <- readRDS(glue("{dirs$modres}/all_samplescosine.rds")) %>%
+  left_join(all_datagapssim, by = join_by(pat, mod, reg, clu, dat))
+```
+
+# Select only main analyses
+```{r}
+sel_samplescosine <- all_samplescosine %>%
+  filter(is.na(included) | included == TRUE) %>%
+  # Take best models from main analyses that have latitudinal change
+  filter(mod %in% waic_best$mod_best, dat == "s08", pat %in% pat_sel)
+```
+
+# Mean amplitude 
+```{r}
+sel_samplescosine %>%
+  distinct(mod, pat, reg, clu, amp_mean, phi_mean) %>%
+  #arrange(phi_mean)
+  summarise(mean_amp_mean = round(mean(amp_mean*100), digits = 3),
+            min_amp_mean = round(min(amp_mean*100), digits = 3),
+            max_amp_mean = round(max(amp_mean*100), digits = 3))
+
+sel_samplescosine %>%
+  distinct(mod, pat, reg, clu, amp_mean, phi_mean) %>%
+  group_by(clu) %>%
+  mutate(phi_mean = circular::circular(phi_mean * ((2*pi)/52), units = "radians", modulo = "2pi")) %>%
+  summarise(phi_mean = as.numeric(mean(phi_mean)),
+            phi_mean_week = (phi_mean*52) / (2*pi))
+```
+
+# Compare amplitudes 
+```{r}
+test <- sel_samplescosine %>%
+  filter(!is.na(reg)) %>%
+  select(sam_no, pat, mod, clu, sam_amp) %>%
+  mutate(sam_amp = sam_amp * 100) %>%
+  pivot_wider(names_from = clu, values_from = sam_amp, names_prefix = "clu_") %>%
+  mutate(diff = clu_2_Subtropical - clu_3_Tropical,
+         diff_rel = clu_2_Subtropical/clu_3_Tropical*100)
+
+test %>%
+  group_by(pat, mod) %>%
+  summarise(sum_mean = mean(diff),
+            sum_qlo = quantile(diff, 0.025, na.rm = TRUE),
+            sum_qup = quantile(diff, 0.975, na.rm = TRUE),
+            sum_mean_rel = mean(diff_rel),
+            sum_qlo_rel = quantile(diff_rel, 0.025, na.rm = TRUE),
+            sum_qup_rel = quantile(diff_rel, 0.975, na.rm = TRUE)) %>%
+  mutate(across(starts_with("sum"), round, digits = 2))
+```
+
+# Compare phases 
+```{r}
+# test <- sel_samplescosine %>%
+#   filter(!is.na(reg)) %>%
+#   select(sam_no, pat, mod, clu, sam_phi) %>%
+#   mutate(sam_phi = circular::circular(sam_phi * ((2*pi)/52), units = "radians", modulo = "2pi")) %>%
+#   pivot_wider(names_from = clu, values_from = sam_phi, names_prefix = "clu_") %>%
+#   mutate(diff = clu_2_Subtropical - clu_1_Temperate)
+# 
+# test %>%
+#   group_by(pat, mod) %>%
+#   summarise(sum_mean = as.numeric(mean(diff)),
+#             sum_qlo = as.numeric(quantile(diff, probs = 0.025, na.rm = TRUE)), 
+#             sum_qup = as.numeric(quantile(diff, probs = 0.975, na.rm = TRUE))) %>%
+#   mutate(across(starts_with("sum"), round, digits = 2))
+# # Polio, Rubella, 2.17	1.41	3.02
+
+test %>%
+  ggplot(aes(x = diff)) +
+  geom_histogram() +
+  facet_wrap(~pat)
+
+test <- sel_samplescosine %>%
+  filter(!is.na(reg)) %>%
+  select(sam_no, pat, mod, clu, sam_phi) %>%
+  # convert from weeks (0–52) to radians
+  mutate(sam_phi_rad = sam_phi * (2 * pi / 52)) %>%
+  select(-sam_phi) %>%
+  pivot_wider(names_from = clu, values_from = sam_phi_rad, names_prefix = "clu_") %>%
+  # raw difference in radians
+  mutate(
+    diff_raw = clu_3_Tropical - clu_1_Temperate,
+    # circularly wrapped difference in (-pi, pi]
+    diff = atan2(sin(diff_raw), cos(diff_raw)),
+    # optional: convert to weeks difference
+    diff_weeks = diff / (2 * pi) * 52
+  )
+
+test %>%
+  group_by(pat, mod) %>%
+  summarise(
+    mean_diff_rad   = as.numeric(mean(diff, na.rm = TRUE)),
+    qlo_diff_rad    = as.numeric(quantile(diff, probs = 0.025, na.rm = TRUE)),
+    qup_diff_rad    = as.numeric(quantile(diff, probs = 0.975, na.rm = TRUE)),
+    mean_diff_weeks = as.numeric(mean(diff_weeks, na.rm = TRUE)),
+    qlo_diff_weeks  = as.numeric(quantile(diff_weeks, probs = 0.025, na.rm = TRUE)),
+    qup_diff_weeks  = as.numeric(quantile(diff_weeks, probs = 0.975, na.rm = TRUE))
+  ) %>%
+  mutate(across(starts_with(c("mean_", "qlo_", "qup_")), round, 2))
+```
+# For additional analyses
+```{r}
+add_samplescosine <- all_samplescosine %>%
+  filter(is.na(included) | included == TRUE) %>%
+  # Take best models from main analyses that have latitudinal change
+  filter(mod %in% waiccomb_best$mod_best, dat == "s08")
+```
+
+# Mean amplitude 
+```{r}
+test <- add_samplescosine %>%
+  filter(!is.na(reg)) %>%
+  select(sam_no, pat, mod, clu, sam_phi) %>%
+  # convert from weeks (0–52) to radians
+  mutate(sam_phi_rad = sam_phi * (2 * pi / 52)) %>%
+  select(-sam_phi) %>%
+  pivot_wider(names_from = clu, values_from = sam_phi_rad, names_prefix = "clu_") %>%
+  # raw difference in radians
+  mutate(
+    diff_raw = clu_3_Temperatesouth - clu_1_Temperate,
+    # circularly wrapped difference in (-pi, pi]
+    diff = atan2(sin(diff_raw), cos(diff_raw)),
+    # optional: convert to weeks difference
+    diff_weeks = diff / (2 * pi) * 52
+  )
+
+test %>%
+  group_by(pat, mod) %>%
+  summarise(
+    mean_diff_rad   = as.numeric(mean(diff, na.rm = TRUE)),
+    qlo_diff_rad    = as.numeric(quantile(diff, probs = 0.025, na.rm = TRUE)),
+    qup_diff_rad    = as.numeric(quantile(diff, probs = 0.975, na.rm = TRUE)),
+    mean_diff_weeks = as.numeric(mean(diff_weeks, na.rm = TRUE)),
+    qlo_diff_weeks  = as.numeric(quantile(diff_weeks, probs = 0.025, na.rm = TRUE)),
+    qup_diff_weeks  = as.numeric(quantile(diff_weeks, probs = 0.975, na.rm = TRUE))
+  ) %>%
+  mutate(across(starts_with(c("mean_", "qlo_", "qup_")), round, 2))
+```
+
+
+####################################################################################################
+# END
+####################################################################################################

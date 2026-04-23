@@ -1,0 +1,110 @@
+---
+title: "BRMS plot results"
+author: "Laura Andrea Barrrero Guevara"
+date: "2023-02-23"
+output: html_document
+---
+
+####################################################################################################
+Purpose of script: To check the model results and plot it 
+####################################################################################################
+
+```{r}
+rm(list = ls())
+source("../00_pck.R")
+theme_set(theme_classic() + theme(strip.background = element_blank()))
+```
+
+# Define main analyses 
+```{r}
+pat_sel <- c("rota", "hav", "hbv", "dipht", "tetan", "pertuwpt", "ipv1", 
+             "hib", "menc", "strep04", "measl", "mumps", "rubel", "vzv")
+```
+
+# Read best model
+```{r}
+waic_best <- readRDS(glue("{dirs$outputs}/modres/all_waicbest.rds")) %>%
+  filter(pat %in% pat_sel, dat == "s08", mod_name_best != "base") %>%
+  mutate(mod_best_spline = str_replace_all(mod_best, "_s08", "_sesplines_s08"),
+         mod_best_spline = str_replace_all(mod_best_spline, "_cs", "_cc"))
+# Read in samples plot
+datpl_sam <- readRDS(file = glue("{dirs$modres}/asel_samplespl.rds"))
+datpl_sam_rug <- readRDS(file = glue("{dirs$modres}/asel_samplerugspl.rds"))
+```
+
+# Read rhats spline models  
+```{r}
+rhats <- pomp::bake(glue("{dirs$modres}/modres_splines/all_rhats.rds"), dir = "", {
+  bind_rows(lapply(list.files(glue("{dirs$modres}/modres_splines/modres_rhats"), full.names = TRUE), readRDS)) %>%
+  group_by(mod) %>%
+  filter(Rhat == max(Rhat)) %>%
+  mutate(Rhat = round(Rhat, digits = 1), Rhat_cond = Rhat == 1) %>%
+  select(mod, Rhat_cond) %>%
+  ungroup()
+})
+
+rhats %>%
+  filter(Rhat_cond == FALSE)
+# Everything converged 
+```
+
+# Read posterior smooths best model splines version 
+```{r}
+possmo_l <- sapply(waic_best$mod_best_spline, simplify = FALSE,
+                 function(x) readRDS(glue("{dirs$modres}/modres_splines/modres_possmo/possmo_{x}")))
+
+possmo_sum <- possmo_l %>%
+  lapply(function(x) {
+    # rename reg_* -> clu if present
+    reg_col <- names(x)[startsWith(names(x), "reg_")]
+    if (length(reg_col) == 1) {
+      x <- dplyr::rename(x, clu = dplyr::all_of(reg_col))
+    }
+    x %>%
+      group_by(across(-c(vac_week_v1, sam_spline, pi_vac_week_v1))) %>%
+      mutate(mean_spline = mean(sam_spline)) %>%
+      group_by(across(-c(sam_no, sam_spline, mean_spline))) %>%
+      summarise(
+        mu = mean(sam_spline/mean_spline),
+        lo = quantile(sam_spline/mean_spline, 0.025),
+        hi = quantile(sam_spline/mean_spline, 0.975),
+        .groups = "drop")
+  })
+
+possmo_sum_df <- bind_rows(possmo_sum, .id = "mod_best_spline") %>%
+  left_join(waic_best, by = join_by(mod_best_spline)) %>%
+  mutate(clu = str_remove_all(clu, " ")) %>%
+  left_join(tidy_names_clu, by = join_by(clu)) %>%
+  left_join(datpl_sam %>%
+              mutate(mod_best = mod) %>%
+              distinct(mod_best, clu, pat_tidy, phi_mean_shift), by = join_by(clu, mod_best)) %>%
+  filter(!is.na(pat_tidy)) %>%
+  group_by(pat, clu)
+```
+
+```{r}
+# Plot samples 
+supfig_4 <- datpl_sam %>%
+  filter(pat %in% pat_sel, mod %in% waic_best$mod_best, dat == "s08") %>%
+  ggplot(aes(x = vac_week_v1, y = sam_estimate, group = sam_no)) + 
+  geom_line(alpha = 0.1, color = "black") + 
+  scale_x_continuous("Week of vaccination", breaks = c(1,18,35,52), limits = c(1,52), expand = c(0,0)) + 
+  scale_y_continuous("Conditional effect", expand = c(0.2,0)) + 
+  geom_line(data = possmo_sum_df, aes(x = vac_week_v1, y = mu, group = 1), color = "red") + 
+  geom_ribbon(data = possmo_sum_df, aes(y = mu, ymin = lo, ymax = hi, group = 1), color = "transparent", 
+              fill = "red", alpha = 0.5) + 
+  geom_point(data = filter(datpl_sam_rug, pat %in% pat_sel, mod %in% waic_best$mod_best, dat == "s08"),
+             aes(y = -Inf), group = 1, shape = "|", size = 3) +
+  ggh4x::facet_nested_wrap(~clu_tidy+reorder(pat_tidy, phi_mean_shift), scales = "free_y", nest_line = TRUE,
+                           solo_line = TRUE, ncol = 7) +
+  theme(legend.position = "none")
+
+# Save the plot
+ggsave(supfig_4, file = "../figures/figsup4.pdf", width = 10, height = 7)
+```
+
+# WE NEED TO TAKE OUT THE SPLINE MODELS FROM THE MODRES SCRIPTS OF BEFORE 
+
+####################################################################################################
+# END
+####################################################################################################

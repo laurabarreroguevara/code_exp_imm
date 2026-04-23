@@ -20,17 +20,16 @@ theme_set(theme_classic() + theme(strip.background = element_blank()))
 ```{r}
 # Read in the waic (only models that converged)
 waic_df <- readRDS(glue("{dirs$modres}/all_waic.rds"))
-waic_best <- readRDS(glue("{dirs$modres}/all_waicbest.rds"))
 # Define models converging that have a sine function 
 df_converged <- filter(waic_df, dat %in% c("s08", "semeth_s08", "seallsero_s08"), 
-                       mod_out == "imm", str_detect(mod_name, "cs"))
+                       mod_out == "imm")
 ```
 
 # Extract mean cos and sin coefficients of the sine wave ===========================================
 ```{r}
 all_coefcosine <- pomp::bake(file = glue("{dirs$modres}/all_coefcosine.rds"), dir = "", {
   # Read in the coeficients 
-  sapply(df_converged$mod, function(x) {
+  sapply(str_subset(df_converged$mod, "cs"), function(x) {
     readRDS(glue("{dirs$coef}/coef_{x}"))$fixed %>%
       rownames_to_column(var = "parameter") %>%
       # Coefficients of the intercepts, cos and sin
@@ -152,38 +151,45 @@ all_coefre <- pomp::bake(file = glue("{dirs$modres}/all_coefre.rds"), dir = "", 
 # Extract correlation matrix =======================================================================
 
 ```{r}
-# all_coefrescor <- pomp::bake(file = glue("{dirs$modres}/all_coefrescor.rds"), dir = "", {
-#   test <- sapply(str_subset(df_converged$mod, "multi"), function(x) {
-#     # Read in the coefficients
-#     readRDS(glue("{dirs$coef}/coef_{x}"))$rescor_pars %>%
-#       rownames_to_column(var = "parameter")
-#   }, simplify = FALSE) %>%
-#     bind_rows(.id = "mod") %>%
-#     rename_with(tolower) %>%
-#     rename(rescor = estimate,
-#            rescor_se = est.error,
-#            rescor_ci95lo = 'l-95% ci',
-#            rescor_ci95up = 'u-95% ci') %>%
-#     select(mod, parameter, starts_with("rescor")) 
-#   
-#   test %>%
-#     # From mod to variables (pat, mod_out, mod_name, dat, vac, gauss, pat_tidy, reg, multi) ----------
-#     left_join(select(df_converged, -c(patuni, patuni_tidy, imm_name)), by = join_by(mod)) %>%
-#     # From param to variables (imm_name1, imm_name2, clu) --------------------------------------------
-#     mutate(parameter = str_remove_all(parameter, "rescor|anti|immvals1|\\(|\\)")) %>%
-#     separate(parameter, into = c("imm_name1", "imm_name2"), sep = ",") %>%
-#     # From imm_name1 to patuni names and tidy ------------------------------------------------------
-#     left_join(patmvn_uvn,  by = join_by(pat == pat, imm_name1 == imm_name)) %>%
-#     rename(patuni1 = patuni) %>%
-#     left_join(patmvn_uvn,  by = join_by(pat == pat, imm_name2 == imm_name)) %>%
-#     rename(patuni2 = patuni) %>%
-#     left_join(rename(tidy_names_pat, patuni1 = pat, patuni_tidy1 = pat_tidy), by = join_by(patuni1)) %>%
-#     left_join(rename(tidy_names_pat, patuni2 = pat, patuni_tidy2 = pat_tidy), by = join_by(patuni2))
-# })
+df_converged_multi <- filter(waic_df, dat %in% c("s08", "semeth_s08", "seallsero_s08"), 
+                       mod_out == "imm", multi = TRUE)
+
+all_coefrescor <- pomp::bake(file = glue("{dirs$modres}/all_coefrescor.rds"), dir = "", {
+  sapply(str_subset(df_converged_multi$mod, "multi"), function(x) {
+    # Read in the coefficients
+    readRDS(glue("{dirs$coef}/coef_{x}"))$rescor_pars %>%
+      rownames_to_column(var = "parameter")
+  }, simplify = FALSE) %>%
+    bind_rows(.id = "mod") %>%
+    rename_with(tolower) %>%
+    rename(rescor = estimate,
+           rescor_se = est.error,
+           rescor_ci95lo = 'l-95% ci',
+           rescor_ci95up = 'u-95% ci') %>%
+    select(mod, parameter, starts_with("rescor")) %>%
+    # From mod to variables (pat, mod_out, mod_name, dat, vac, gauss, pat_tidy, reg, multi) ----------
+    left_join(df_converged, by = join_by(mod)) %>%
+    # From param to variables (imm_name1, imm_name2, clu) --------------------------------------------
+    mutate(parameter = str_remove_all(parameter, "rescor|anti|immvals1|\\(|\\)")) %>%
+    separate(parameter, into = c("patuni1", "patuni2"), sep = ",") %>%
+    mutate(across(c(patuni1, patuni2), ~ case_when(
+      pat %in% c("multi_dtpa", "multi_pertua") & .x == "pertupt" ~ "pertuapt",
+      pat == "multi_dtpw" & .x == "pertupt" ~ "pertuwpt",
+      pat == "multi_ipv" & .x == "polio1" ~ "ipv1",
+      pat == "multi_ipv" & .x == "polio2" ~ "ipv2",
+      pat == "multi_ipv" & .x == "polio3" ~ "ipv3",
+      pat == "multi_opv" & .x == "polio1" ~ "opv1",
+      pat == "multi_opv" & .x == "polio2" ~ "opv2",
+      pat == "multi_opv" & .x == "polio3" ~ "opv3",
+      pat == "multi_pertua" & .x == "pertufha" ~ "pertuafha",
+      pat == "multi_pertua" & .x == "pertuprn" ~ "pertuaprn", 
+      .default = .x
+    ))) %>%
+    # From imm_name1 to patuni names and tidy ------------------------------------------------------
+    left_join(rename(tidy_names_pat, patuni1 = pat, patuni_tidy1 = pat_tidy), by = join_by(patuni1)) %>%
+    left_join(rename(tidy_names_pat, patuni2 = pat, patuni_tidy2 = pat_tidy), by = join_by(patuni2))
+})
 ```
-
-
-
 
 # Extract draws from the posterior for covars coefficients factors =================================
 (to make the differences we want)
@@ -247,7 +253,7 @@ all_samplescovarsfct <- pomp::bake(file = glue("{dirs$modres}/all_samplescovarsf
 ```{r}
 all_samplescosine <- pomp::bake(file = glue("{dirs$modres}/all_samplescosine.rds"), dir = "", {
   # Read in the coeficients 
-  sapply(df_converged$mod, function(x) {
+  sapply(str_subset(df_converged$mod, "cs"), function(x) {
     readRDS(glue("{dirs$samples}/samples_{x}")) %>%
       mutate(sam_no = row_number()) %>%
       pivot_longer(-sam_no, names_to = "parameter", values_to = "Estimate") %>%
@@ -325,6 +331,27 @@ all_samplescosine <- pomp::bake(file = glue("{dirs$modres}/all_samplescosine.rds
     # Add clu tidy names ---------------------------------------------------------------------------
     left_join(tidy_names_clu, by = join_by(clu))
   })
+```
+
+```{r}
+all_samplesshape <- pomp::bake(file = glue("{dirs$modres}/all_samplesshape.rds"), dir = "", {
+  sam_diff <- map_dfr(
+    df_converged$mod, \(m)
+      readRDS(glue("{dirs$samples}/samples_{m}")) %>%
+        mutate(sam_no = row_number(), mod = m) %>%
+        pivot_longer(-c(sam_no, mod), names_to = "parameter", values_to = "estimate") %>%
+        # Coefficients of the intercepts, regions and vaccine names 
+        filter(str_detect(parameter, "shape"))) %>%
+  # From mod to variables (pat, mod_out, mod_name, dat, vac, gauss, pat_tidy, reg, multi) --------
+    left_join(df_converged, by = join_by(mod)) %>%
+  # From param to variables (imm_name, param, param_i) -------------------------------------------
+    mutate(param = parameter) %>%
+    select(-parameter) %>%
+    select(mod, param, everything())
+  return(sam_diff)
+})
+
+all_samplesshape
 ```
 
 

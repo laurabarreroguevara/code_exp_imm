@@ -28,6 +28,10 @@ dose <- case_when(
 ```{r}
 args_dat <- glue("data_brms_{args_pat}_{dose}_s08.rds")
 dat <- readRDS(file = glue("{dirs$modfit}/{args_dat}"))
+
+# max(dat$pi_vac_week_v1)
+# 1 * (2*pi/52)
+# 52 * (2*pi/52)
 ```
 
 # Retrieve your model formula from the command line arguments (in server script ) ------------------
@@ -48,7 +52,7 @@ crit <- FALSE
 ```{r}
 mod <- brm(formula = l_formula[[args_fo]],
              data = dat, family = Gamma(link = "log"),
-             warmup = 1000, iter = args_iter, chains = 1,
+             warmup = 1000, iter = args_iter, chains = 1, knots = list(pi_vac_week_v1 = c(1*(2*pi/52), 52*(2*pi/52))),
              init = 0, control = list(adapt_delta = 0.95), save_pars = save_pars(all = TRUE))
 
 if(crit == TRUE) mod <- add_criterion(mod, criterion = c("waic"))

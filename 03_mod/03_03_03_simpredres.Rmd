@@ -6,8 +6,8 @@ output: html_document
 ---
 
 ################################################################################ 
-
-Purpose of script: To fit brms models to all the studies \################################################################################
+Purpose of script: To fit brms models to all the studies 
+################################################################################
 
 # Set up
 
@@ -17,43 +17,38 @@ source("../00_pck.R")
 source("fun_ampphi.R")
 library(ggridges)
 library(tidybayes)
+library(ggrepel)
 theme_set(theme_classic() + theme(strip.background = element_blank()))
 dirs$figures <- "../figures"
 ```
 
 # Read in data
-
 ```{r}
 # Read best waic
+waiccomb_best <- readRDS(glue("{dirs$modres}/all_waiccombbest.rds"))
 waic_best <- readRDS(glue("{dirs$modres}/all_waicbest.rds"))
+waic_best_all <- bind_rows(waic_best, waiccomb_best)
+```
 
-# Read simulations data of the bests models
-sim_dat <- pomp::bake(glue("{dirs$simcosres}/simcos_dat.rds"), dir = "", {
-  sapply(
-  list.files(glue("{dirs$simcosfit}")), 
-  function(x) as.data.frame(readRDS(glue("{dirs$simcosfit}/{x}"))[,1]),
-  simplify = FALSE) %>%
-  bind_rows() 
-}) %>%
-  filter(mod %in% waic_best$mod_best)
-# Read the gaps
-all_datagaps <- readRDS(glue("{dirs$modres}/all_datagaps.rds")) %>%
-  filter(mod %in% waic_best$mod_best)
+# Read in coefficients of the observed data 
+```{r}
 all_samplescosine <- readRDS(glue("{dirs$modres}/all_samplescosine.rds")) %>%
-  filter(mod %in% waic_best$mod_best)
+  filter(mod %in% waic_best_all$mod_best)
 ```
 
 # Check convergence (Rhats) of the models ==========================================================
 
 ```{r}
 # Check that Rhats == 1
-sim_rhats <- pomp::bake(glue("{dirs$simcosres}/simcos_rhats.rds"), dir = "", {
-  bind_rows(lapply(list.files(glue("{dirs$simcos_rhats}"), full.names = TRUE), readRDS)) %>%
-  group_by(mod) %>%
-  filter(Rhat == max(Rhat)) %>%
-  mutate(Rhat = round(Rhat, digits = 1),
-         Rhat_cond = Rhat == 1) %>%
-  select(mod, Rhat_cond)
+sim_rhats <- pomp::bake(glue("{dirs$simpredres}/simpred_rhats.rds"), dir = "", {
+  list.files(glue("{dirs$simpred_rhats}"), full.names = TRUE) %>%
+    lapply(readRDS) %>%
+    bind_rows() %>%
+    group_by(mod) %>%
+    filter(Rhat == max(Rhat)) %>%
+    mutate(Rhat = round(Rhat, digits = 1),
+           Rhat_cond = Rhat == 1) %>%
+    select(mod, Rhat_cond)
 })
 filter(sim_rhats, Rhat_cond == FALSE)
 ```
@@ -65,10 +60,10 @@ filter(sim_rhats, Rhat_cond == FALSE)
 df_converged <- filter(sim_rhats, Rhat_cond == TRUE)
 
 # Read in the coefficients
-sim_coef <- pomp::bake(glue("{dirs$simcosres}/simcos_coef.rds"), dir = "", {
+sim_coef <- pomp::bake(glue("{dirs$simpredres}/simpred_coef.rds"), dir = "", {
   sapply(df_converged$mod, function(x) {
     # Read in the coeficients 
-    coef <- readRDS(glue("{dirs$simcos_coef}/coef_{x}"))
+    coef <- readRDS(glue("{dirs$simpred_coef}/coef_{x}"))
     # Obtain fixed coefficients
     fe <- coef$fixed[ , "Estimate"] 
     names(fe) <- row.names(coef$fixed)
@@ -102,14 +97,13 @@ sim_coef <- pomp::bake(glue("{dirs$simcosres}/simcos_coef.rds"), dir = "", {
   }, simplify = FALSE) %>%
     bind_rows(.id = "mod") %>%
     mutate(pat = str_extract(mod, "(?<=s08_).*?(?=_cs)"),
-           sim = str_extract(mod, "(?<=simcos_).*?(?=_bmv)"),
+           sim = str_extract(mod, "(?<=simpred_).*?(?=_bmv)"),
            type = "sim") %>%
     select(sim, pat, clu, mod, everything())
 })
 ```
 
 # Combine data and simulations coefficients ========================================================
-
 ```{r}
 # Read in all the samples
 tog_coef <- all_samplescosine %>%
@@ -121,28 +115,7 @@ tog_coef <- all_samplescosine %>%
   rename_with(~gsub("_mean", "", .x)) %>%
   rename_with(~gsub("sam_", "", .x)) %>%
   bind_rows(select(sim_coef, -shape)) %>%
-  mutate(mod = sub("^modsimcos_\\d+_", "", mod))
-```
-
-# Check model fit ==================================================================================
-```{r}
-plfit_l <- sapply(unique(sim_dat$mod), function(x) {
-  # Plot the simulation
-  pl <- filter(sim_dat, mod == x) %>%
-    distinct(mod, pat, clu, imm_name, vac_week_v1, pi_vac_week_v1, funcos) %>%
-    left_join(filter(tog_coef, sim %in% c("true", as.character(1:40))),
-              relationship = "many-to-many", by = join_by(mod, pat, clu)) %>%
-    mutate(modcos = int + (p_cos*cos(pi_vac_week_v1)) + (p_sin*sin(pi_vac_week_v1))) %>%
-    ggplot(aes(x = vac_week_v1, y = funcos, group = sim)) +
-      geom_line(aes(y = exp(modcos)), color = "black", alpha = 0.2) + 
-      geom_point(color = "blue") +
-      facet_wrap(pat~clu, scales = "free_y")
-  # Save plot
-  ggsave(pl, width = 6, height = 4,
-         file = paste0("../figures/simres/fit_", x, ".pdf"))
-  return(pl)
-}, simplify = FALSE)
-plfit_l
+  mutate(mod = sub("^modsimpred_\\d+_", "", mod))
 ```
 
 # Check bias =======================================================================================
@@ -189,8 +162,12 @@ tog_coef %>%
 ## Calculate bias
 ```{r}
 bias_df <- tog_coef %>%
-  left_join(distinct(waic_best %>% rename(mod = mod_best), mod, dat), by = join_by(mod)) %>%
+  left_join(waic_best_all %>%
+              rename(mod = mod_best) %>%
+              distinct(mod, dat),  
+    by = join_by(mod)) %>%
   select(sim, type, pat, clu, mod, dat, reg, phi, amp) %>%
+  filter(str_detect(mod, "multi", negate = TRUE)) %>%
   group_by(pat, clu, mod, reg) %>%
   # Obtain true values
   mutate(
@@ -221,6 +198,7 @@ bias_df <- tog_coef %>%
 # Plot the bias from the true values
 ```{r}
 bias_df %>%
+  filter(mod %in% waic_best_all$mod_best) %>%
   left_join(tidy_names_clu) %>%
   group_split(dat) %>%
   lapply(function(x) {
@@ -247,10 +225,9 @@ bias_df %>%
 # Define selection criteria ========================================================================
 ```{r}
 biassumm_df <- bias_df %>%
-  distinct(type, pat, clu, mod, dat, reg, mean_amp_bias, mean_phi_bias, mean_amp_bias_75lo, mean_amp_bias_75up,
-           mean_phi_bias_75lo, mean_phi_bias_75up) %>%
-  left_join(distinct(all_datagaps, mod, clu, checkgaps_all), by = join_by(clu, mod)) %>%
-  mutate(included = !(mean_amp_bias > 0.2 | mean_phi_bias > 7))
+  distinct(type, pat, clu, mod, dat, reg, mean_amp_bias, mean_phi_bias, 
+           mean_amp_bias_75lo, mean_amp_bias_75up, mean_phi_bias_75lo, mean_phi_bias_75up) %>%
+  mutate(included = !(mean_amp_bias > 0.20 | mean_phi_bias > 9))
 ```
 
 # Save selection criteria 
@@ -261,38 +238,49 @@ all_datagapssim <- biassumm_df %>%
 saveRDS(all_datagapssim, glue("{dirs$modres}/all_datagapssim.rds"))
 ```
 
-# Supplementary figure XX ==========================================================================
+# Supplementary figure 03 ==========================================================================
 ```{r}
-library(ggrepel)
+pat_sel <- c("rota", "vzv", "measl", "rubel","ipv1", "hib", "strep04",
+             "pertuwpt", "hav", "dipht", "mumps", "menc", "tetan", "hbv")
 
 pldf_bias <- biassumm_df %>%
+  #filter(filter(waic_best))
   left_join(tidy_names_pat, by = join_by(pat)) %>%
   left_join(tidy_names_clu, by = join_by(clu)) %>%
   mutate(
     included_tidy = if_else(included, "Included", "Excluded"),
-    dat = case_when(dat == "s08" ~ "Main analyses",
-                    dat == "semeth_s08" ~ "Sensitivity analyses: \nSerological methods",
-                    dat == "seallsero_s08" ~ "Sensitivity analyses: \nAll serological data rotavirus"))
+    dat = case_when(
+      dat == "s08" & pat %in% pat_sel & mod %in% waic_best$mod_best ~ "Main analyses",
+      dat == "semeth_s08" ~ "Sensitivity analyses: \nSerological methods",
+      dat == "seallsero_s08" ~ "Sensitivity analyses: \nAll serological data rotavirus",
+      .default = "Sensitivity analyses: \nAdditional antigenic measurements"
+      ))
 
-supfig4 <- filter(pldf_bias, included_tidy == "Included") %>%
+
+supfig3 <- filter(pldf_bias, included_tidy == "Included") %>%
   ggplot(aes(x = mean_phi_bias, y = mean_amp_bias)) + 
-  geom_hline(aes(yintercept = 0.2), color = "grey") + 
-  geom_vline(aes(xintercept = 7), color = "grey") + 
+  geom_hline(aes(yintercept = 0.20), color = "grey") + 
+  geom_vline(aes(xintercept = 9), color = "grey") + 
   geom_point(aes(x = mean_phi_bias, y = mean_amp_bias), color = "orange") + 
   geom_point(data = filter(pldf_bias, included_tidy == "Excluded"), color = "grey20") + 
   geom_label_repel(data = filter(pldf_bias, included_tidy == "Excluded"),
-                   aes(label = paste0(pat_tidy, ": ", clu_tidy)), max.overlaps = Inf, nudge_x = 2, 
-                   nudge_y = 0.1, size = 3, label.size = 0.2,
-                   direction = "y", hjust = "left", key_glyph="point") + 
-  scale_x_continuous("Peak timing mean absolute bias", limits = c(0,20)) + 
+                   aes(label = paste0(pat_tidy, ": ", clu_tidy)), 
+                   max.overlaps = Inf, 
+                   nudge_x = 8, nudge_y = 0.05, 
+                   size = 3, 
+                   label.size = 0.1, 
+                   force = 10,
+                   direction = "y", hjust = "middle", vjust = "middle",
+                   key_glyph="point") + 
+  scale_x_continuous("Peak timing mean absolute bias", limits = c(0,25)) + 
   scale_y_continuous("Amplitude mean absolute bias", limits = c(0,1)) + 
   guides(label = "none") + 
   facet_wrap(~dat, ncol = 2, scales = "free")
 
-supfig4
+supfig3
 
 # Save the plot
-ggsave(glue("{dirs$figures}/figsup4.pdf"), supfig4, width = 9, height = 9)
+ggsave(glue("{dirs$figures}/figsup3.pdf"), supfig3, width = 14, height = 13)
 ```
 
 ####################################################################################################

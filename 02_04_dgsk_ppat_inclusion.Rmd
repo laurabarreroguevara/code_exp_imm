@@ -126,7 +126,8 @@ stu_perpat_included <- stu_perpat_included %>%
     .default = FALSE)) %>%
   arrange(study)
 
-filter(stu_perpat_included, included == TRUE)
+filter(stu_perpat_included, included == TRUE) %>%
+  distinct()
 
 saveRDS(stu_perpat_included, file = glue("{dirs$processed}/stu_included_perpat.rds"))
 ```
