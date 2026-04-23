@@ -25,12 +25,13 @@ Output (for each study):
 # Load packages, themes, directories, and functions
 ```{r}
 rm(list = ls())
-source("00_pck.R")
-source("fun_data/fun_dgsk_readdfs.R")
-source("fun_data/fun_dgsk_exceptions.R")
-source("fun_data/fun_dgsk_tidynames.R")
-source("fun_data/fun_dgsk_tidydfs.R")
-source("fun_data/fun_dgsk_tidydates.R")
+source("../00_pck.R")
+source("../00_dirs.R")
+source("../fun_data/fun_dgsk_readdfs.R")
+source("../fun_data/fun_dgsk_exceptions.R")
+source("../fun_data/fun_dgsk_tidynames.R")
+source("../fun_data/fun_dgsk_tidydfs.R")
+source("../fun_data/fun_dgsk_tidydates.R")
 
 # Function to check the percentage of missing values (NAs) per column, and to verify the number of 
 # participants and duplicated rows

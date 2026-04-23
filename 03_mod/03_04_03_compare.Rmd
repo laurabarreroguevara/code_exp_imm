@@ -12,6 +12,7 @@ Purpose of script: To check the model results and plot it
 ```{r}
 rm(list = ls())
 source("../00_pck.R")
+source("../00_dirs.R")
 theme_set(theme_classic() + theme(strip.background = element_blank()))
 ```
 
@@ -84,21 +85,6 @@ test %>%
 
 # Compare phases 
 ```{r}
-# test <- sel_samplescosine %>%
-#   filter(!is.na(reg)) %>%
-#   select(sam_no, pat, mod, clu, sam_phi) %>%
-#   mutate(sam_phi = circular::circular(sam_phi * ((2*pi)/52), units = "radians", modulo = "2pi")) %>%
-#   pivot_wider(names_from = clu, values_from = sam_phi, names_prefix = "clu_") %>%
-#   mutate(diff = clu_2_Subtropical - clu_1_Temperate)
-# 
-# test %>%
-#   group_by(pat, mod) %>%
-#   summarise(sum_mean = as.numeric(mean(diff)),
-#             sum_qlo = as.numeric(quantile(diff, probs = 0.025, na.rm = TRUE)), 
-#             sum_qup = as.numeric(quantile(diff, probs = 0.975, na.rm = TRUE))) %>%
-#   mutate(across(starts_with("sum"), round, digits = 2))
-# # Polio, Rubella, 2.17	1.41	3.02
-
 test %>%
   ggplot(aes(x = diff)) +
   geom_histogram() +

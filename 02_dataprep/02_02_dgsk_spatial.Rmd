@@ -21,13 +21,14 @@ Output (for each study):
 # Load packages, themes, directories, and functions
 ```{r}
 rm(list = ls())
-source("00_pck.R")
-source("fun_data/fun_data_coord1lv.R")
+source("../00_pck.R")
+source("../00_dirs.R")
+source("../fun_data/fun_data_coord1lv.R")
 library(tidyverse)
 library(glue)
 
 # Define api google
-api <- "AIzaSyA-1SIsXtVR-SoIPazBFnxiON6zwRS6Bhc"
+api
 ```
 
 # Load the data frame containing studies and country names

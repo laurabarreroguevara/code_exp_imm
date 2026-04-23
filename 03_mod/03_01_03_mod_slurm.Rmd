@@ -22,7 +22,8 @@ outputs/slurmsh:
 ```{r}
 rm(list = ls())
 source("../00_pck.R")
-source("fun_slurmsh.R")
+source("../00_dirs.R")
+source("../fun_mod/fun_slurmsh.R")
 
 # Define the list of pathogens for which the scripts will be created
 pat_l <- list.files(glue("{dirs$modfit}")) %>%

@@ -14,8 +14,9 @@ spatial and climate data. The output includes three types of data frames:
 # Load packages, themes, directories, and functions
 ```{r}
 rm(list = ls())
-source("00_pck.R")
-source("fun_data/fun_dgsk_modpat.R")
+source("../00_pck.R")
+source("../00_dirs.R")
+source("../fun_data/fun_dgsk_modpat.R")
 ```
 
 # Load the list of data frames per pathogen
@@ -228,78 +229,3 @@ bind_rows(pat_df_l[str_subset(names(pat_df_l), "kgc", negate = TRUE)], .id = "da
 ####################################################################################################
 # END
 ####################################################################################################
-
-# Sensitivity analysis only temperate data =========================================================
-# Check if the models are not better just because there is data of other than the temperate regions (
-# which do not have enough data eg. tropical regions)
-# # Load packages, themes, directories, and functions
-# ```{r}
-# rm(list = ls())
-# source("00_pck.R")
-# ```
-# 
-# # Read in the data (only s08 data)
-# ```{r}
-# dat_l <- lapply(str_subset(list.files(glue("{dirs$modfit}"), full.names = TRUE), "s08.rds"), readRDS)
-# names(dat_l) <- sub(".*brms_(.*?)_(vl|v1)_s08.*", "\\1", 
-#                     str_subset(list.files(glue("{dirs$modfit}")), "s08.rds"))
-# 
-# ```
-# 
-# # Try sensitivity analysis, only temperate data 
-# # pertuwpt, pertuapt, pertuaprn, pertuafha
-# # strep01, strep03, strep04, strep05, strep06a, strep06b, strep07f, strep09v, strep14, strep18c,
-# # strep19a, strep19f, strep23f
-# # hbv
-# ```{r}
-# datsens1_l <- lapply(dat_l[c("pertuwpt", "pertuapt", "pertuaprn", "pertuafha", "strep01", "strep03", 
-#                              "strep04", "strep05", "strep06a", "strep06b", "strep07f", "strep09v", 
-#                              "strep14", "strep18c", "strep19a", "strep19f", "strep23f", "hbv")],
-#                      filter, reg_6 == "1_Temperate")
-# datsens1_l
-# 
-# walk(names(datsens1_l), function(x) {
-#   dose <- if(x %in% c("vzv", "measl", "mumps", "rubel", 
-#                       "hav", "multi_mmr-vzv", "multi_mmr")) "v1" else "vl"
-#   saveRDS(datsens1_l[[x]], glue("{dirs$outputs}/modfit/dataseonlytemp_brms_{x}_{dose}_s08.rds"))
-# })
-#```
-
-# Sensitivity analysis only seropositive data rotavirus ============================================
-# Check if the models are better when using only seropositive data for rotavirus 
-
-# Load packages, themes, directories, and functions
-# ```{r}
-# rm(list = ls())
-# source("00_pck.R")
-# ```
-
-# Read in the data (only s08 data)
-# ```{r}
-# dat_l <- readRDS(glue("{dirs$modfit}/data_brms_rota_vl_s08.rds"))
-# ```
-
-# Compare histograms and datapoints per region 
-# ```{r}
-# # Filter the data for only seropositive individuals
-# datsens_l <- filter(dat_l, censored == 0)
-# 
-# # Histogram
-# bind_rows(list(all = dat_l, sens = datsens_l), .id = "sens") %>%
-#   ggplot(aes(x = imm_val_s1, color = reg_6)) + 
-#   geom_density() +
-#   scale_x_continuous(trans = "log10") + 
-#   facet_grid(~sens)
-# 
-# # Per week data
-# bind_rows(list(all = dat_l, sens = datsens_l), .id = "sens") %>%
-#   ggplot(aes(x = vac_week_v1)) + 
-#   geom_histogram(color = "white", bins = 52) +
-#   scale_x_continuous() + 
-#   facet_wrap(sens~reg_6, scales = "free_y", ncol = 5)
-# ```
-
-# Filter the data and save it
-# ```{r}
-# saveRDS(datsens_l, glue("{dirs$outputs}/modfit/dataseonlyseropos_brms_rota_vl_s08.rds"))
-# ```

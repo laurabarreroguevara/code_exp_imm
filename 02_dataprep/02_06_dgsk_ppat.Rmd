@@ -25,9 +25,10 @@ excluded per criteria.
 # Load packages, themes, directories, and functions
 ```{r}
 rm(list = ls())
-source("00_pck.R")
-source("fun_data/fun_dgsk_vacconco.R")
-source("fun_data/fun_dgsk_vacimm.R")
+source("../00_pck.R")
+source("../00_dirs.R")
+source("../fun_data/fun_dgsk_vacconco.R")
+source("../fun_data/fun_dgsk_vacimm.R")
 ```
 
 # 1. Load preliminary data =========================================================================
@@ -573,79 +574,6 @@ bind_rows(patdf_row_l, .id = "pat") %>%
 
 length(unique(bind_rows(patdf_row_l, .id = "pat")$study))
 ```
-
-# Check the immunogenicity cut-offs: 
-```{r}
-# Function to plot the immunogenicity cut-offs
-fun_plcutoff <- function(pat = "dipht", method = "elisa", cut_off = 0.1, ncol_pat = 3,
-                         sero_spe = NULL, stu_spe = NULL) {
-  
-  if(!is.null(sero_spe)) {dat <- filter(patdf_row_l[[pat]], imm_sero_s1 == sero_spe) } else {
-    dat <- patdf_row_l[[pat]]
-  }
-  if(!is.null(stu_spe)) dat <- filter(dat, study %in% c(stu_spe))
-  
-pl_s1 <- dat %>%
-  filter(imm_met_s1 == method) %>%
-  filter(imm_val_s1 < cut_off) %>%
-  ggplot(aes(x = imm_val_s1)) + 
-  geom_histogram() + 
-  facet_wrap(study~., ncol = ncol_pat, strip.position = "right", scales = "free_y") + 
-  geom_vline(aes(xintercept = cut_off), color = "red")
-return(pl_s1)
-}
-
-# Diphtheria
-fun_plcutoff(pat = "dipht", method = "elisa", cut_off = 0.1, ncol_pat = 3)
-fun_plcutoff(pat = "dipht", method = "prnt", cut_off = 0.016, ncol_pat = 2)
-# HAV
-fun_plcutoff(pat = "hav", method = "elisa", cut_off = 15, ncol_pat = 2)
-# HBV
-fun_plcutoff(pat = "hbv", method = "elisa", cut_off = 10, ncol_pat = 2)
-# fun_plcutoff(pat = "hbv", method = "clia", cut_off = 10, ncol_pat = 2)
-# HIB
-fun_plcutoff(pat = "hib", method = "elisa", cut_off = 0.15, ncol_pat = 4)
-# Measles
-fun_plcutoff(pat = "measl", method = "elisa", cut_off = 150, ncol_pat = 4)
-# Men 
-fun_plcutoff(pat = "men", method = "bac", cut_off = 8, ncol_pat = 4, sero_spe = "anti_men_c")
-fun_plcutoff(pat = "men", method = "elisa", cut_off = 0.3, ncol_pat = 4, sero_spe = "anti_men_c")
-# Men 
-fun_plcutoff(pat = "men", method = "bac", cut_off = 8, ncol_pat = 4, sero_spe = "anti_men_a")
-fun_plcutoff(pat = "men", method = "elisa", cut_off = 0.3, ncol_pat = 4, sero_spe = "anti_men_a")
-# Pertussis
-fun_plcutoff(pat = "pertu", method = "elisa", cut_off = 5, ncol_pat = 4, sero_spe = "anti_pertu_fha")
-fun_plcutoff(pat = "pertu", method = "elisa", cut_off = 5, ncol_pat = 4, sero_spe = "anti_pertu_prn")
-fun_plcutoff(pat = "pertu", method = "elisa", cut_off = 15, ncol_pat = 4, sero_spe = "anti_pertu_pt")
-fun_plcutoff(pat = "pertu", method = "elisa", cut_off = 5, ncol_pat = 4, sero_spe = "anti_pertu_pt")
-# Polio 
-fun_plcutoff(pat = "polio", method = "prnt", cut_off = 8, ncol_pat = 4, sero_spe = "anti_polio_1")
-fun_plcutoff(pat = "polio", method = "prnt", cut_off = 8, ncol_pat = 4, sero_spe = "anti_polio_2")
-fun_plcutoff(pat = "polio", method = "prnt", cut_off = 8, ncol_pat = 4, sero_spe = "anti_polio_3")
-# Rota
-fun_plcutoff(pat = "rota", method = "elisa", cut_off = 20, ncol_pat = 3)
-# Rubella
-fun_plcutoff(pat = "rubel", method = "elisa", cut_off = 4, ncol_pat = 3)
-# Streptococcus
-strep_pl <- sapply(unique(patdf_row_l[["strep"]]$imm_sero_s1), function(x) {
-  fun_plcutoff(pat = "strep", method = "elisa", cut_off = 0.05, ncol_pat = 3, sero_spe = x)
-}, simplify = FALSE)
-fun_plcutoff(pat = "strep", method = "elisa", cut_off = 0.05, ncol_pat = 3)
-fun_plcutoff(pat = "strep", method = "opa", cut_off = 8, ncol_pat = 3)
-# Tetanus
-fun_plcutoff(pat = "tetan", method = "elisa", cut_off = 0.1, ncol_pat = 3)
-# Varicella
-fun_plcutoff(pat = "vzv", method = "elisa", cut_off = 50, ncol_pat = 3)
-fun_plcutoff(pat = "vzv", method = "fama", cut_off = 4, ncol_pat = 2)
-fun_plcutoff(pat = "vzv", method = "ifa", cut_off = 4, ncol_pat = 3)
-# Mumps
-fun_plcutoff(pat = "mumps", method = "elisa", cut_off = 231, ncol_pat = 4)
-fun_plcutoff(pat = "mumps", method = "elisa_ppd", cut_off = 231, ncol_pat = 4)
-fun_plcutoff(pat = "mumps", method = "prnt", cut_off = 28, ncol_pat = 2)
-fun_plcutoff(pat = "mumps", method = "prnt_unenhanced", cut_off = 2.5, ncol_pat = 2)
-```
-# HBV 113994: clia prefered over elisa (but this will depend on when the serology date) -> clia and elisa the same
-
 ####################################################################################################
 # END
 ####################################################################################################

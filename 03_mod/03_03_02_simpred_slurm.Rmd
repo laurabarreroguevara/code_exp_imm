@@ -22,7 +22,8 @@ outputs/slurm_sh:
 ```{r}
 rm(list = ls())
 source("../00_pck.R")
-source("fun_slurmshsimpred.R")
+source("../00_dirs.R")
+source("../fun_mod/fun_slurmshsimpred.R")
 
 # Read in the best models 
 pat_l <- readRDS(glue("{dirs$modres}/all_waicbest.rds")) %>%

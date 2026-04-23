@@ -28,8 +28,9 @@ outputs/modfit 4 files:
 # Load packages, themes, directories, and functions
 ```{r}
 rm(list = ls())
-source("00_pck.R")
-source("fun_data/fun_dgsk_modpat.R")
+source("../00_pck.R")
+source("../00_dirs.R")
+source("../fun_data/fun_dgsk_modpat.R")
 ```
 
 # Load the list of data frames per pathogen
@@ -378,12 +379,6 @@ lapply(pat_df_l, function(x) { distinct(x, vac_name_v1, across(starts_with("vac_
     #filter(n() == 1)
   }) %>%
   bind_rows(.id = "name_df") 
-
-# Pertu and men include only vac_conc
-# Polio and strep include only vac_name_v1
-# Ipv and opv do not include any 
-# multi_dtp include only vac_name_v1
-# multi_dtpa, multi_dtpw, multi_hib-men, multi_mmr, multi_mmr-vzv
 ```
 
 # Check the climate threshold, currently 0.8

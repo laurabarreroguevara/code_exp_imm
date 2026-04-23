@@ -14,12 +14,12 @@ Purpose of script: To fit brms models to all the studies
 ```{r}
 rm(list = ls())
 source("../00_pck.R")
-source("fun_ampphi.R")
+source("../00_dirs.R")
+source("../fun_mod/fun_ampphi.R")
 library(ggridges)
 library(tidybayes)
 library(ggrepel)
 theme_set(theme_classic() + theme(strip.background = element_blank()))
-dirs$figures <- "../figures"
 ```
 
 # Read in data
@@ -120,45 +120,6 @@ tog_coef <- all_samplescosine %>%
 
 # Check bias =======================================================================================
 
-# Plot simulations vs true value 
-```{r}
-tog_coef %>%
-  left_join(distinct(waic_best %>% rename(mod = mod_best), mod, dat), by = join_by(mod)) %>%
-  select(sim, type, pat, clu, mod, dat, reg, phi, amp, amp_ci95lo, amp_ci95up, phi_ci95lo, phi_ci95up) %>%
-  mutate(phi_ci95lo1 = phi_ci95lo,
-         phi_ci95up1 = case_when(phi_ci95lo >= phi_ci95up ~ 52, .default = phi_ci95up),
-         phi_ci95lo2 = case_when(phi_ci95lo >= phi_ci95up ~ 0),
-         phi_ci95up2 = case_when(phi_ci95lo >= phi_ci95up ~ phi_ci95up)) %>%
-  mutate(phi_ci95up1 = case_when(phi_ci95lo >= phi_ci95up ~ 52.5, .default = phi_ci95up),
-         phi_ci95lo2 = case_when(phi_ci95lo >= phi_ci95up ~ -0.5)) %>%
-  group_split(dat) %>%
-  lapply(function(x) {
-    filter(x, type == "sim") %>%
-      ggplot(aes(x = amp, y = pat)) +
-      geom_point(alpha = 0.2, color = "grey20") +
-      geom_point(data = filter(x, type == "true"), color = "orange") + 
-      geom_segment(data = filter(x, type == "true"), 
-                   aes(x = amp_ci95lo, xend = amp_ci95up), color = "orange") + 
-      facet_grid(reg+clu~., scales = "free", space = "free") + 
-      scale_x_continuous("Amplitude") + 
-      scale_y_discrete("") + 
-      theme(strip.text = element_blank()) + 
-      ggtitle(paste(x$dat[[1]])) + 
-    filter(x, type == "sim") %>%
-      ggplot(aes(x = phi, y = pat)) +
-      geom_segment(data = filter(x, type == "true"), 
-                   aes(x = phi_ci95lo1, xend = phi_ci95up1), color = "orange") + 
-      geom_segment(data = filter(x, type == "true"), 
-                   aes(x = phi_ci95lo2, xend = phi_ci95up2), color = "orange") + 
-      geom_point(alpha = 0.2, color = "grey20") +
-      geom_point(data = filter(x, type == "true"), color = "orange") + 
-      facet_nested(reg+clu~., scales = "free", space = "free", nest_line = TRUE, solo_line = TRUE) +
-      scale_x_continuous("Peak timing") + 
-      scale_y_discrete("") + 
-      theme(strip.text.y = element_text(angle = 0)) 
-  })
-```
-
 ## Calculate bias
 ```{r}
 bias_df <- tog_coef %>%
@@ -193,33 +154,6 @@ bias_df <- tog_coef %>%
     mean_phi_bias_75up = quantile(phi_bias, 0.875),
     ) %>%
   ungroup()
-```
-
-# Plot the bias from the true values
-```{r}
-bias_df %>%
-  filter(mod %in% waic_best_all$mod_best) %>%
-  left_join(tidy_names_clu) %>%
-  group_split(dat) %>%
-  lapply(function(x) {
-    ggplot(x, aes(x = amp_bias, y = pat)) +
-      geom_point(alpha = 0.2, color = "grey20") +
-      geom_point(aes(x = mean_amp_bias), color = "orange") + 
-      geom_segment(aes(x = mean_amp_bias_75lo, xend = mean_amp_bias_75up), color = "orange") +
-      facet_grid(reg+clu_tidy~., scales = "free", space = "free") + 
-      scale_x_continuous("Amplitude absolute bias") + 
-      scale_y_discrete("") + 
-      theme(strip.text = element_blank()) + 
-      ggtitle(paste(x$dat[[1]])) + 
-    ggplot(x, aes(x = phi_bias, y = pat)) +
-      geom_point(alpha = 0.2, color = "grey20") +
-      geom_point(aes(x = mean_phi_bias), color = "orange") + 
-      geom_segment(aes(x = mean_phi_bias_75lo, xend = mean_phi_bias_75up), color = "orange") +
-      facet_nested(reg+clu_tidy~., scales = "free", space = "free", nest_line = TRUE, solo_line = TRUE) + 
-      scale_x_continuous("Peak timing absolute bias") + 
-      scale_y_discrete("") + 
-      theme(strip.text.y = element_text(angle = 0)) 
-  })
 ```
 
 # Define selection criteria ========================================================================
@@ -280,7 +214,7 @@ supfig3 <- filter(pldf_bias, included_tidy == "Included") %>%
 supfig3
 
 # Save the plot
-ggsave(glue("{dirs$figures}/figsup3.pdf"), supfig3, width = 14, height = 13)
+ggsave(glue("../{dirs$figures}/figsup3.pdf"), supfig3, width = 14, height = 13)
 ```
 
 ####################################################################################################

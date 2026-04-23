@@ -34,10 +34,11 @@ Additionally, a combined figure for the manuscript is saved as:
 # Load packages, themes, directories, and functions
 ```{r}
 rm(list = ls())
-source("00_pck.R")
-source("fun_figures/fun_breaks.R")
-source("fun_figures/fun_limits.R")
-source("fun_figures/fun_figures.R")
+source("../00_pck.R")
+source("../00_dirs.R")
+source("../fun_figures/fun_breaks.R")
+source("../fun_figures/fun_limits.R")
+source("../fun_figures/fun_figures.R")
 library(colorspace)
 theme_set(theme_classic())
 
@@ -78,8 +79,8 @@ tbl_stu <- bind_rows(dat_l, .id = "pat") %>%
   group_by(pat, imm_sero_s1, imm_met_s1, study) %>%
   summarise(tot_study = n_distinct(study), tot = n())
 
-write.table(tbl_tot, "tables/tbl_tot_final.txt")
-write.table(tbl_stu, "tables/tbl_studies_final.txt")
+write.table(tbl_tot, "../_tables/tbl_tot_final.txt")
+write.table(tbl_stu, "../_tables/tbl_studies_final.txt")
 # CONSIDERING OPV MENY STREP MULTIES 11 AND 13
 ```
 
@@ -169,7 +170,7 @@ fig1_l$fb <- fig1_l$fb1[[1]] + fig1_l$fb2[[1]] + (fig1_l$fb3[[1]] + theme(legend
 ## Patch plots together 
 fig1_l$fg <- free(fig1_l$fa) + fig1_l$fb_leg + fig1_l$fb + plot_layout(nrow = 3, heights  = c(1.5,0.2,2))
 # Save the plot 
-ggsave(glue("{dirs$figures}/fig1.pdf"), fig1_l$fg, width = 10.1, height = 11.2)
+ggsave(glue("../{dirs$figures}/fig1.pdf"), fig1_l$fg, width = 10.1, height = 11.2)
 ```
 
 # Supplementar figure 2: Week of vaccination =======================================================
@@ -197,7 +198,7 @@ figsup2_l$fg <- figsup2_l$df %>%
 figsup2_l$fg
 
 # Save the plot 
-ggsave(plot = figsup2_l$fg, glue("{dirs$figures}/figsup2.pdf"), width = 7, height = 10)
+ggsave(plot = figsup2_l$fg, glue("../{dirs$figures}/figsup2.pdf"), width = 7, height = 10)
 ```
 
 # Supplementar figure 5: Descriptive of other pathogens ============================================
@@ -277,7 +278,7 @@ figsup5_l$fb <- figsup5_l$fb1[[1]] + figsup5_l$fb2[[1]] + (figsup5_l$fb3[[1]] + 
 ## Patch plots together 
 figsup5_l$fg <- free(figsup5_l$fa) + fig1_l$fb_leg + figsup5_l$fb + plot_layout(nrow = 3, heights  = c(1.5,0.2,2))
 # Save the plot 
-ggsave(glue("{dirs$figures}/figsup5.pdf"), figsup5_l$fg, width = 10.1, height = 15)
+ggsave(glue("../{dirs$figures}/figsup5.pdf"), figsup5_l$fg, width = 10.1, height = 15)
 ```
 
 # Supplementar figure 8: Descriptive of other methods ============================================
@@ -384,7 +385,7 @@ figsup8_l$fb <- figsup8_l$fb1[[1]] + figsup8_l$fb2[[1]] + (figsup8_l$fb3[[1]] + 
 ## Patch plots together 
 figsup8_l$fg <- free(figsup8_l$fa) + fig1_l$fb_leg + figsup8_l$fb + plot_layout(nrow = 3, heights  = c(1.5,0.2,2))
 # Save the plot 
-ggsave(glue("{dirs$figures}/figsup8.pdf"), figsup8_l$fg, width = 12, height = 14)
+ggsave(glue("../{dirs$figures}/figsup8.pdf"), figsup8_l$fg, width = 12, height = 14)
 ```
 
 # Other plots ======================================================================================
@@ -427,48 +428,6 @@ bind_rows(dat_l, .id = "pat") %>%
   geom_point(aes(x = year_max)) + 
   geom_segment(aes(x = year_min, xend = year_max)) +
   scale_x_continuous(breaks = 1998:2018)
-```
-
-# Tables ===========================================================================================
-```{r}
-# # Load metadata sourced from GSK
-# stu_meta_gsk <- readRDS(glue("/Volumes/ExternalSSD_LABG_Work/_seas_imm_backup/data/processed/stu_meta_gsk.rds"))
-# # Load metadata sourced from protocols
-# stu_meta_pro <- readRDS(glue("/Volumes/ExternalSSD_LABG_Work/_seas_imm_backup/data/processed/stu_meta_pro.rds")) %>%
-#   rename(excluded = exclusion)
-# 
-# included <- bind_rows(dat_l, .id = "pat") %>%
-#   filter(str_detect(pat, "multi", negate = TRUE)) %>%
-#   filter(!(pat %in% c("meny", "opv1", "opv2", "opv3"))) %>%
-#   distinct(study, pat) %>%
-#   group_by(study) %>%
-#   summarise(pat = str_c(pat, collapse = ", "))
-# 
-# test <- stu_meta_gsk %>%
-#   select(study, stu_tit, nctid, tri_link.gov) %>%
-#   left_join(stu_meta_pro) %>%
-#   select(study, stu_tit, nctid, tri_link.gov, study_main, excluded, reason) %>%
-#   left_join(included) %>%
-#   arrange(pat, excluded, reason) 
-# 
-# test %>%
-#   filter(!is.na(pat))
-# 
-# write.table(test, "tables/studies.txt")
-```
-
-```{r}
-# bind_rows(dat_l, .id = "pat") %>%
-#   filter(str_detect(pat, "multi", negate = TRUE)) %>%
-#   filter(!(pat %in% c("meny", "opv1", "opv2", "opv3"))) %>%
-#   distinct(pat, imm_met_s1, imm_sero_s1, imm_cutoff_s1)
-# 
-# readRDS(glue("/Volumes/ExternalSSD_LABG_Work/_seas_imm_backup/data/processed/stu_tidynames_seronames.rds")) %>%
-#   #distinct(method_tidy) %>%
-#   #distinct(seroname_tidy) %>%
-#   distinct(method_tidy, seroname_tidy, unit, cut_off) %>%
-#   arrange(cut_off) %>%
-#   filter(seroname_tidy == "anti_vzv")
 ```
 
 ####################################################################################################

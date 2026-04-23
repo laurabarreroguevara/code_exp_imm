@@ -19,8 +19,9 @@ RCT group, and country.
 # Load packages, themes, directories, and functions
 ```{r}
 rm(list = ls())
-source("00_pck.R")
-source("fun_data/fun_dgsk_vacconc.R")
+source("../00_pck.R")
+source("../00_dirs.R")
+source("../fun_data/fun_dgsk_vacconc.R")
 ```
 
 # Load data 

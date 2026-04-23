@@ -12,7 +12,8 @@ Purpose of script: To check the model results and plot it
 ```{r}
 rm(list = ls())
 source("../00_pck.R")
-source("fun_ampphi.R")
+source("../00_dirs.R")
+source("../fun_mod/fun_ampphi.R")
 theme_set(theme_classic() + theme(strip.background = element_blank()))
 ```
 

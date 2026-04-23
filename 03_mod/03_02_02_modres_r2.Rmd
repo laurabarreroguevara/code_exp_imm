@@ -12,6 +12,7 @@ Purpose of script: To check the R2 of the best models
 ```{r}
 rm(list = ls())
 source("../00_pck.R")
+source("../00_dirs.R")
 ```
 
 # Read in the data of the models 

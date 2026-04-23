@@ -14,6 +14,7 @@ Purpose of script: This script demonstrates running a single Bayesian regression
 ```{r}
 rm(list = ls())
 source("../00_pck.R")
+source("../00_dirs.R")
 
 # Define pathogen
 args_pat <- "rota"
@@ -28,10 +29,6 @@ dose <- case_when(
 ```{r}
 args_dat <- glue("data_brms_{args_pat}_{dose}_s08.rds")
 dat <- readRDS(file = glue("{dirs$modfit}/{args_dat}"))
-
-# max(dat$pi_vac_week_v1)
-# 1 * (2*pi/52)
-# 52 * (2*pi/52)
 ```
 
 # Retrieve your model formula from the command line arguments (in server script ) ------------------
@@ -57,15 +54,6 @@ mod <- brm(formula = l_formula[[args_fo]],
 
 if(crit == TRUE) mod <- add_criterion(mod, criterion = c("waic"))
 ```
-
-# Check it -----------------------------------------------------------------------------------------
-```{r}
-plot(mod)
-conditional_effects(mod)
-mod
-stancode(mod)
-```
-
 ####################################################################################################
 END
 ####################################################################################################

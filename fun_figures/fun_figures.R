@@ -1,5 +1,5 @@
 ####################################################################################################
-# Function to plot 
+# Functions for descriptive plots
 ####################################################################################################
 
 ## Figure 1a.1: Histogram showing the number of participants per study for each pathogen

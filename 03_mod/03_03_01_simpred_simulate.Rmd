@@ -13,8 +13,9 @@ Purpose of script: To check how the models simulate using posterior_predict
 ```{r}
 rm(list = ls())
 source("../00_pck.R")
-source("fun_ampphi.R")
-source("fun_checkgaps.R")
+source("../00_dirs.R")
+source("../fun_mod/fun_ampphi.R")
+source("../fun_mod/fun_checkgaps.R")
 ```
 
 # Read in the data  

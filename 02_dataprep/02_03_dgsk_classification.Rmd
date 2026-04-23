@@ -1,0 +1,146 @@
+---
+title: "Classification GSK studies data"
+author: "Laura Andrea Barrero Guevara"
+date: '2022-08-31'
+---
+
+####################################################################################################
+Purpose: This script processes spatial data from various GSK studies to define latitude-based
+classifications for each location. It then aggregates this data to assign a dominant (unique) 
+classification to each country in each study.
+
+Classifications considered: 
+- reg_2: Latitude, north and south-hemisphere
+- reg_3: Latitude, temperate north, tropics, and temperate south
+- reg_4: Latitude, temperate north, tropics north, tropics south, and temperate south 
+- reg_6: Latitude, temperate north, subtropical north, tropics north, tropics south, subtropical 
+  south, and temperate south
+
+Output (for each study): 
+- `stu_kgc_{stu_id}.rds`: Processed KGC classification data frame for the study.
+- `stu_clusters_{stu_id}.rds`: Processed data frame containing classifications based on KGC and 
+  latitude for all locations in the study and the selected classification for each country in the 
+  study. 
+- `stu_clusters.rds`: Final aggregated data frame containing classification information for all 
+  studies and countries. 
+####################################################################################################
+
+# Load packages, themes, directories, and functions
+```{r}
+rm(list = ls())
+source("../00_pck.R")
+source("../00_dirs.R")
+source("../fun_data/fun_data_kgc.R")
+library(nasapower)
+library(tidygeocoder)
+dirs$processed_clim <- glue("{dirs$processed}/03_stu_climate")
+```
+
+# Load the spatial data for included studies
+```{r}
+stu_included <- readRDS(glue("{dirs$processed}/stu_included.rds")) %>%
+  filter(included == TRUE)
+
+stu_spatial <- sapply(stu_included$study, function(x) {
+  readRDS(glue("{dirs$processed}/02_stu_spatial/stu_spat_{x}.rds"))}, simplify = F)
+```
+
+# Extract KGC classification for each location in each study =======================================
+```{r}
+stu_kgc <- sapply(stu_included$study, function(x) {
+  pomp::bake(file = glue("{dirs$processed_clim}/stu_kgc_{x}.rds"), 
+             dir = getOption("pomp_archive_dir", dirs$pomp), {
+    fun_data_kgc(dat = stu_spatial[[x]])
+  })}, simplify = F)
+# Please note that using the kgc package creates conflicts with tidyverse, best to restart session.
+
+bind_rows(stu_kgc)
+```
+
+# Assign clusters ==================================================================================
+First assign clusters for each location (kgc and latitude) and then select dominant (unique) 
+classification for each country
+
+```{r}
+stu_clusters <- sapply(stu_included$study, function(x) {
+  pomp::bake(file = glue("{dirs$processed_clim}/stu_clusters_{x}.rds"), 
+             dir = getOption("pomp_archive_dir", dirs$pomp), {
+    
+    # Assign clusters based on KGC classification --------------------------------------------------
+    stu_kgc[[x]] %>%
+      mutate(
+        # Extract first character for a broad classification
+        kgc_1 = str_sub(ClimateZ, 1,1),
+        # Extract first two characters for a finer classification
+        kgc_2 = str_sub(ClimateZ, 1,2),
+        # Use full ClimateZ for the most detailed classification
+        kgc_3 = ClimateZ) %>%
+      
+    # Assign clusters based on latitude data -------------------------------------------------------
+      # Define 6 latitude-based groups (merging Arctic and temperate zones into a single 
+      # temperate group)
+      mutate(reg_6 = case_when(
+        lat > 35 ~ "1_Temperate",
+        lat <= 35 & lat > 23.5 ~ "2_Subtropical",
+        lat <= 23.5 & lat > 0 ~ "3_Tropical",
+        lat <= 0 & lat > -23.5 ~ "4_Tropical south",
+        lat <= -23.5 & lat > -35 ~ "5_Subtropical south",
+        lat <= -35 ~ "6_Temperate south")) %>%
+      # Define 4 latitude-based groups (merging Arctic, temperate, and subtropical into a single 
+      # temperate group)
+      mutate(reg_4 = case_when(
+        lat > 23.5 ~ "1_Temperate",
+        lat <= 23.5 & lat > 0 ~ "2_Tropical",
+        lat <= 0 & lat > -23.5 ~ "3_Tropical south",
+        lat <= -23.5 ~ "4_Temperate south")) %>%
+      # Define 3 latitude-based groups (distinguishing temperate from tropical regions)
+      mutate(reg_3 = case_when(
+        lat > 23.5 ~ "1_Temperate",
+        lat <= 23.5 & lat > -23.5 ~ "2_Tropical",
+        lat <= -23.5 ~ "3_Temperate south")) %>%
+      # Define 2 latitude-based groups (north and south)
+      mutate(reg_2 = case_when(
+        lat > 0 ~ "1_North",
+        lat <= 0 ~ "2_South")) %>%
+      
+    # Aggregate classification data at the country level -------------------------------------------
+      select(study, country, llid, starts_with("kgc"), starts_with("reg")) %>%
+      pivot_longer(cols = c(starts_with("kgc"), starts_with("reg")), 
+                   names_to = "cluvar", values_to = "cluvar_name_i") %>%
+      arrange(study, country, cluvar, cluvar_name_i) %>%
+      # Calculate the total number of centers per country and classification variable
+      group_by(study, country, cluvar) %>%
+      mutate(country_tot = n()) %>%
+      # Calculate the number and proportion of centers per classification within a country
+      group_by(study, country, cluvar, cluvar_name_i) %>%
+      mutate(cluvar_tot_i = n(),
+             cluvarp_i = cluvar_tot_i/country_tot) %>%
+      # Identify the classification with the highest proportion within each country
+      group_by(study, country, cluvar) %>%
+      mutate(cluvarp = max(cluvarp_i),
+             cluvar_name = cluvar_name_i[which.max(cluvarp_i)]) %>%
+      ungroup()
+  })}, simplify = F)
+```
+
+# Combine cluster for all studies and countries into a single data frame and save as RDS
+```{r}
+stu_clusters <- bind_rows(stu_clusters) %>%
+  distinct(study, country, cluvar, cluvar_name, cluvarp) %>%
+  # Add median longitude and latitude for each country
+  left_join(group_by(bind_rows(stu_spatial), study, country) %>%
+              summarise(lon_med = median(lon), lat_med = median(lat), .groups = "drop"),
+            by = join_by(study, country)) %>%
+  rename(c = cluvar_name, p = cluvarp) %>%
+  # Reshape data to have separate columns for each classification variable and proportion
+  pivot_wider(names_from = cluvar, values_from = c(c, p), 
+              names_glue = "{cluvar}_{.value}", names_vary = "slowest") %>%
+  rename_all(~str_remove_all(., "_c"))
+
+# Save the clusters data as RDS 
+saveRDS(stu_clusters, glue("{dirs$processed_clim}/stu_clusters.rds"))
+```
+
+####################################################################################################
+# END
+####################################################################################################

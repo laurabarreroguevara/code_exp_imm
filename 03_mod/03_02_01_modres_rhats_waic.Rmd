@@ -13,6 +13,7 @@ Purpose of script: To check the convergence and WAIC of the models
 ```{r}
 rm(list = ls())
 source("../00_pck.R")
+source("../00_dirs.R")
 source("../fun_figures/fun_figures_waic.R")
 library(ggh4x)
 theme_set(theme_classic() + theme(strip.background = element_blank()))
@@ -177,15 +178,6 @@ waic_df %>%
   arrange(pat, waic_best) %>%
   filter(pat %in% filter(waic_df, dat == "semeth_s08")$pat) %>%
   filter(dat == "semeth_s08")
-
-# Diphteria s08 2     - base
-# Mena          cs    - base/cs
-# Menc          cs    - 2
-# Meny          base  - base/cs
-# Multi-men     cs    - base
-# Mumps         cs    - base/cs
-# strep 04      6     - 2
-# vzv           6     - 4
 ```
 
 # Check waic table birth week ----------------------------------------------------------------------
