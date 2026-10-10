@@ -27,20 +27,22 @@ names(dat_l) <- sub(".*brms_(.*?)_(vl|v1|v3)_s08.*", "\\1",
                            "datase", negate = TRUE))
 
 waic_df <- readRDS(glue("{dirs$modres}/all_waic.rds")) %>% 
-  filter(dat %in% c("s08", "semeth_s08", "seallsero_s08"))
+  filter(dat %in% c("s08", "semeth_s08", "seallsero_s08", "se2_s08", "semeth2_s08"))
 ```
 
 # Read in data and assess gaps and missing data ====================================================
 ```{r}
 all_datagaps <- pomp::bake(file = glue("{dirs$modres}/all_datagaps.rds"), dir = "", {
   # Define models converging that have a sine function
-  df_converged <- filter(waic_df, dat %in% c("s08", "semeth_s08", "seallsero_s08"),
+  df_converged <- filter(waic_df, dat %in% c("s08", "semeth_s08", "seallsero_s08", "se2_s08", "semeth2_s08"),
                        mod_out == "imm", str_detect(mod_name, "cs"))
   # Per model
   sapply(df_converged$mod, function(x) {
     # Select the model
     dat_mod <- filter(df_converged, mod == x)
     sens <- case_when(dat_mod$dat == "semeth_s08" ~ "semeth",
+                      dat_mod$dat == "semeth2_s08" ~ "semeth2",
+                      dat_mod$dat == "se2_s08" ~ "se2",
                       dat_mod$dat == "seallsero_s08" ~ "seallsero",
                       .default = "")
     # Read in data

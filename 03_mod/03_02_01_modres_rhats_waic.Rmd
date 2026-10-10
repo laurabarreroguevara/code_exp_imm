@@ -17,7 +17,7 @@ source("../00_dirs.R")
 source("../fun_figures/fun_figures_waic.R")
 library(ggh4x)
 theme_set(theme_classic() + theme(strip.background = element_blank()))
-dirs$figures <- "../figures"
+dirs$figures <- "../_figures"
 ```
 
 # Translate mod name to corresponding variables 
@@ -26,6 +26,7 @@ df_modtovar <- data.frame(mod = list.files(glue("{dirs$rhats}"))) %>%
   mutate(mod = str_remove_all(mod, "rhats_"),
          modtemp = str_remove_all(mod, ".rds"),
          vac = case_when(str_detect(modtemp, "bmvl") ~ "l", 
+                         str_detect(modtemp, "bmv2") ~ "2", 
                          str_detect(modtemp, "bmv3") ~ "3", 
                          str_detect(modtemp, "bmv1") ~ "1"),
          modtemp = str_remove_all(modtemp, paste0("bmv",vac,"_")),
@@ -37,6 +38,8 @@ df_modtovar <- data.frame(mod = list.files(glue("{dirs$rhats}"))) %>%
                          str_detect(modtemp, "seallsero_s08") ~ "seallsero_s08",
                          str_detect(modtemp, "seonlyseropos_s08") ~ "seonlyseropos_s08",
                          str_detect(modtemp, "sebirth_s08") ~ "sebirth_s08",
+                         str_detect(modtemp, "se2_s08") ~ "se2_s08",
+                         str_detect(modtemp, "semeth2_s08") ~ "semeth2_s08",
                          .default = "s08"),
          modtemp = str_remove_all(modtemp, paste0(dat, "_")),
          gauss = case_when(str_detect(modtemp, "gauss") ~ "gauss", 
@@ -56,6 +59,8 @@ df_modtovar <- data.frame(mod = list.files(glue("{dirs$rhats}"))) %>%
          ) %>%
   select(mod, pat, mod_out, mod_name, reg, dat, vac, gauss, multi) %>%
   left_join(tidy_names_pat, by = join_by(pat))
+
+saveRDS(df_modtovar, paste0(dirs$modres, "/tidy_modtovar.rds"))
 ```
 
 # Check convergence (Rhats) of the photoperiod models ==============================================
@@ -129,7 +134,13 @@ waic_df <- pomp::bake(glue("{dirs$modres}/all_waic.rds"), dir = "", {
   return(waic_df)
 })
 
-filter(waic_df, pat == "rota")
+filter(waic_df, vac == 2, pat == "vzv") %>%
+  select(mod, waic)
+# measles
+# mumps
+# mumps semeth2
+# rubel
+# vzv semeth2 
 ```
 
 # Check best model per pathogen and analysis
@@ -139,8 +150,10 @@ waic_best <- pomp::bake(glue("{dirs$modres}/all_waicbest.rds"), dir = "", {
     rename(mod_best = mod, mod_name_best = mod_name) %>%
     select(pat, mod_out, dat, mod_name_best, mod_best)
 })
-waic_best
-```
+waic_best %>%
+  filter(pat %in% c("measl", "mumps", "rubel", "vzv")) %>%
+  filter(str_detect(dat, "2"))
+``` 
 
 # Check best model same as other models 
 ```{r}
@@ -153,9 +166,11 @@ waic_df %>%
   arrange(mod_name) %>%
   pivot_wider(names_from = mod_name, values_from = waic_under2) %>%
   arrange(waic_best) %>%
-  filter(pat %in% c("mumps", "vzv", "dipht", "mena", "menc", "meny",
-                    "strep01", "strep03", "strep04", "strep05", "strep06a", "strep06b", "strep07f", 
-                    "strep09v", "strep14", "strep18c", "strep19a", "strep19f", "strep23f")) %>%
+  # filter(pat %in% c("mumps", "vzv", "dipht", "mena", "menc", "meny",
+  #                   "strep01", "strep03", "strep04", "strep05", "strep06a", "strep06b", "strep07f", 
+  #                   "strep09v", "strep14", "strep18c", "strep19a", "strep19f", "strep23f")) %>%
+  filter(pat %in% c("measl", "mumps", "rubel", "vzv")) %>%
+  filter(str_detect(dat, "2")) %>%
   arrange(pat)
 ```
 
@@ -271,7 +286,7 @@ waic_pldf <- waic_df %>%
 
 # Prepare predictions data for the plot 
 ```{r}
-pred_pldf <- filter(waic_best, str_detect(pat, "multi|opv|meny", negate = TRUE), 
+pred_pldf <- filter(waic_best, str_detect(pat, "multi|opv|meny", negate = TRUE),
                     mod_out == "imm")$mod_best %>%   
   map_dfr(function(mod_id) { 
     # Model metadata
@@ -280,7 +295,9 @@ pred_pldf <- filter(waic_best, str_detect(pat, "multi|opv|meny", negate = TRUE),
     # Read in the real data  
     dat_name <- case_when(
       str_detect(mod_id, "seonlytemp") ~ glue("dataseonlytemp_brms_{waic_mod$pat}_v{waic_mod$vac}_s08.rds"), 
-      str_detect(mod_id, "semeth") ~ glue("datasemeth_brms_{waic_mod$pat}_v{waic_mod$vac}_s08.rds"),
+      str_detect(mod_id, "semeth_") ~ glue("datasemeth_brms_{waic_mod$pat}_v{waic_mod$vac}_s08.rds"),
+      str_detect(mod_id, "semeth2_") ~ glue("datasemeth2_brms_{waic_mod$pat}_v{waic_mod$vac}_s08.rds"),
+      str_detect(mod_id, "se2_") ~ glue("datase2_brms_{waic_mod$pat}_v{waic_mod$vac}_s08.rds"),
       str_detect(mod_id, "seonlyseropos") ~ glue("dataseonlyseropos_brms_v{waic_mod$pat}_{waic_mod$vac}_s08.rds"),
       str_detect(mod_id, "seallsero") ~ glue("dataseallsero_brms_{waic_mod$pat}_v{waic_mod$vac}_s08.rds"),
       str_detect(mod_id, "sebirth") ~ glue("data_brms_{waic_mod$pat}_v{waic_mod$vac}_s08.rds"),
@@ -468,7 +485,7 @@ predcomb_pldf <- waiccomb_best$mod_best %>%
       mutate(mod_reg = if_else(str_detect(mod_name, "reg"), str_remove_all(mod_name, "csi_"), NA))
     # Read in the real data  
     dat_name <- case_when(
-      str_detect(mod_id, "semeth") ~ glue("datasemeth_brms_{waic_mod$pat}_v{waic_mod$vac}_s08.rds"),
+      str_detect(mod_id, "semeth_") ~ glue("datasemeth_brms_{waic_mod$pat}_v{waic_mod$vac}_s08.rds"),
       str_detect(mod_id, "sebirth") ~ glue("data_brms_{waic_mod$pat}_v{waic_mod$vac}_s08.rds"),
       .default = glue("data_brms_{waic_mod$pat}_v{waic_mod$vac}_s08.rds"))
     dat <- readRDS(glue("{dirs$modfit}/{dat_name}"))
@@ -496,6 +513,7 @@ predcomb_pldf <- waiccomb_best$mod_best %>%
   mutate(clu = str_remove_all(reg, " ")) %>%
   left_join(tidy_names_clu, by = join_by(clu)) %>%
   mutate(clu_tidy = replace_na(clu_tidy, "No latitude")) 
+
 ```
 
 # Supplementary figure 6 ---------------------------------------------------------------------------
@@ -526,21 +544,21 @@ ggsave(glue("{dirs$figures}/figsup6.pdf"), figsup6_l$fab, width = 8, height = 10
 # Read in raw semeth data 
 dati_l <- list()
 dati_l$semeth_s08 <- lapply(str_subset(str_subset(str_subset(
-  list.files(glue("{dirs$modfit}"), full.names = TRUE), "s08.rds"), "semeth"), "multi|vzv", 
+  list.files(glue("{dirs$modfit}"), full.names = TRUE), "s08.rds"), "semeth_"), "multi", 
   negate = TRUE), readRDS)
 names(dati_l$semeth_s08) <- sub(
   ".*brms_(.*?)_(vl|v1|v2|v3)_s08.*", "\\1", str_subset(str_subset(str_subset(
-  list.files(glue("{dirs$modfit}"), full.names = TRUE), "s08.rds"), "semeth"), "multi|vzv", negate = TRUE))
+  list.files(glue("{dirs$modfit}"), full.names = TRUE), "s08.rds"), "semeth_"), "multi", negate = TRUE))
 
 patsemeth_sel <- names(dati_l$semeth_s08)
 
 # Read in corresponding mean analyses data 
 dati_l$s08 <- lapply(str_subset(str_subset(str_subset(
     list.files(glue("{dirs$modfit}"), full.names = TRUE), 
-    "s08.rds"), "datase|multi|vzv", negate = TRUE), paste(patsemeth_sel, collapse = "|")), readRDS)
+    "s08.rds"), "datase|multi", negate = TRUE), paste(patsemeth_sel, collapse = "|")), readRDS)
 names(dati_l$s08) <- sub(
   ".*brms_(.*?)_(vl|v1|v2|v3)_s08.*", "\\1", str_subset(str_subset(str_subset(
-    list.files(glue("{dirs$modfit}")), "s08.rds"), "datase|multi|vzv", negate = TRUE), 
+    list.files(glue("{dirs$modfit}")), "s08.rds"), "datase|multi", negate = TRUE), 
     paste(patsemeth_sel, collapse = "|")))
 
 # Identify semeth, method and correponding mono data
@@ -553,7 +571,7 @@ pat_meth <- lapply(dati_l, bind_rows, .id = "pat") %>%
 # Plot for semeth sensitivity analyses 
 ```{r}
 figsup9_l <- list()
-figsup9_l$dfwaic <- filter(waic_pldf, pat %in% c("mumps", "dipht"), dat %in% c("semeth_s08")) %>%
+figsup9_l$dfwaic <- filter(waic_pldf, pat %in% c("mumps", "dipht", "vzv"), dat %in% c("semeth_s08")) %>%
   mutate(patcomb = pat, patcomb_tidy = pat_tidy) %>%
   bind_rows(filter(waiccomb_df, dat %in% c("semeth_s08"))) %>%
   left_join(pat_meth, by = join_by(pat, dat)) %>%
@@ -563,7 +581,7 @@ figsup9_l$dfwaic <- filter(waic_pldf, pat %in% c("mumps", "dipht"), dat %in% c("
     .default = imm_met_s1_tidy)) %>%
   mutate(patcomb_tidy = factor(paste0(patcomb_tidy, " (", imm_met_s1_tidy, ")"), levels = c("Diphteria (PRNT)", "Mumps (PRNT)", "VZV (ELISA)", "N. men (BAC)", "S. pn (OPA)"))) 
 
-figsup9_l$dfpred <- filter(pred_pldf, pat %in% c("mumps", "dipht"), dat %in% c("semeth_s08")) %>%
+figsup9_l$dfpred <- filter(pred_pldf, pat %in% c("mumps", "dipht", "vzv"), dat %in% c("semeth_s08")) %>%
   mutate(patcomb = pat, patcomb_tidy = pat_tidy) %>%
   bind_rows(filter(predcomb_pldf, dat %in% c("semeth_s08"))) %>%
   left_join(pat_meth, by = join_by(pat, dat)) %>%
@@ -579,11 +597,91 @@ figsup9_l$fa <- figsup9_l$dfwaic %>% fun_figwaiccomb()
 figsup9_l$fb <- figsup9_l$dfpred %>% fun_figpredcomb()
 
 # Patch plots together 
-figsup9_l$fab <- figsup9_l$fa + free(figsup9_l$fb) + plot_layout(ncol = 1, heights = c(1,9))
+figsup9_l$fab <- figsup9_l$fa + free(figsup9_l$fb) + plot_layout(ncol = 1, heights = c(3,9))
 
 # Save the plot
 ggsave(glue("{dirs$figures}/figsup9.pdf"), figsup9_l$fab, width = 8, height = 10)
 ```
+
+# Supplementary figure XX --------------------------------------------------------------------------
+
+```{r}
+figsup14_l <- list()
+figsup14_l$dfwaic <- filter(waic_pldf, pat %in% c("measl", "mumps", "rubel", "vzv"), dat %in% c("se2_s08", "semeth2_s08")) %>%
+  mutate(patcomb = pat, patcomb_tidy = pat_tidy) %>%
+  left_join(pat_meth %>% mutate(dat = ifelse(dat == "semeth_s08", "semeth2_s08", "se2_s08")), by = join_by(pat, dat)) %>%
+  mutate(imm_met_s1_tidy = case_when(
+    pat == "rubel" ~ "ELISA",
+    pat == "measl" ~ "ELISA",
+    .default = imm_met_s1_tidy)) %>%
+  mutate(pat_tidy = factor(paste0(pat_tidy, " (", imm_met_s1_tidy, ")")),
+         col_g = if_else(dat == "se2_s08", "1", "2")) %>%
+  group_split(col_g)
+
+figsup14_l$dfpred <- filter(pred_pldf, pat %in% c("measl", "mumps", "rubel", "vzv"), dat %in% c("se2_s08", "semeth2_s08")) %>%
+  mutate(patcomb = pat, patcomb_tidy = pat_tidy) %>%
+  left_join(pat_meth %>% mutate(dat = ifelse(dat == "semeth_s08", "semeth2_s08", "se2_s08")), by = join_by(pat, dat)) %>%
+  mutate(imm_met_s1_tidy = case_when(
+    pat == "rubel" ~ "ELISA",
+    pat == "measl" ~ "ELISA",
+    .default = imm_met_s1_tidy))  %>%
+  mutate(pat_tidy = factor(paste0(pat_tidy, " (", imm_met_s1_tidy, ")"))) %>%
+  mutate(imm_cutoff_s1 = if_else(pat == "mumps", 64, imm_cutoff_s1),
+         col_g = if_else(dat == "se2_s08", "1", "2")) %>%
+  group_split(col_g)
+```
+
+
+```{r}
+# WAIC plot
+figsup14_l$fa <- lapply(figsup14_l$dfwaic, fun_figwaic)
+figsup14_l$fb <- lapply(figsup14_l$dfpred, fun_figpred)
+
+figsup14_l$fb_forleg <- filter(pred_pldf, type == "2data", 
+                               pat %in% c("measl", "mumps", "rubel", "vzv"), 
+                               dat %in% c("se2_s08", "semeth2_s08")) %>%
+  ggplot(aes(x = value, group = name_draw, color = clu_tidy)) + 
+    geom_line(stat = "ecdf") + 
+    scale_color_manual("Latitudinal\nclassification", values = col_clu) + 
+    guides(color = guide_legend(nrow = 2, byrow = TRUE)) + 
+    theme(legend.position = "top")
+
+design <- "
+ABCD
+AB##
+"
+
+# Patch plots together 
+figsup14_l$fa_leg <- fig2_l$fa_leg
+figsup14_l$fb_leg <- cowplot::get_plot_component(figsup14_l$fb_forleg, "guide-box", return_all = TRUE)[[4]] %>%
+  cowplot::ggdraw()
+
+figsup14_l$fab <- (figsup14_l$fa[[1]] + theme(legend.position = "none")) + (figsup14_l$fb[[1]]) + 
+                  (figsup14_l$fa[[2]] + theme(legend.position = "none")) + (figsup14_l$fb[[2]]) + 
+                  plot_layout(design = design, widths = c(0.7, 1, 0.7, 1), heights = c(1, 1))
+
+figsup14_l$fg <- free(figsup14_l$fa_leg + figsup14_l$fb_leg) + figsup14_l$fab + plot_layout(nrow = 2, heights = c(1,8))
+
+# Save the plot
+ggsave(glue("{dirs$figures}/figsup14.pdf"), figsup14_l$fg, width = 10, height = 6)
+```
+
+
+```{r}
+figsupXX_l$fa <- figsupXX_l$dfwaic %>% fun_figwaic() + 
+    guides(color = guide_legend(nrow = 2)) 
+figsupXX_l$fb <- figsupXX_l$dfpred %>% fun_figpred() + 
+    guides(color = guide_legend(nrow = 2, byrow = TRUE)) + 
+    theme(legend.position = "top")
+
+figsupXX_l$fg <- (figsupXX_l$fa) + (figsupXX_l$fb) + plot_layout(ncol = 2, widths = c(0.7,1))
+
+# Save the plot
+ggsave(glue("{dirs$figures}/figsupXXw.pdf"), figsupXX_l$fg , width = 10, height = 5)
+```
+
+
+
 
 ###################################################################################################
 # END 

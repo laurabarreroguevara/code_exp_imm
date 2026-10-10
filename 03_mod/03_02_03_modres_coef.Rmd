@@ -22,7 +22,7 @@ theme_set(theme_classic() + theme(strip.background = element_blank()))
 # Read in the waic (only models that converged)
 waic_df <- readRDS(glue("{dirs$modres}/all_waic.rds"))
 # Define models converging that have a sine function 
-df_converged <- filter(waic_df, dat %in% c("s08", "semeth_s08", "seallsero_s08"), 
+df_converged <- filter(waic_df, dat %in% c("s08", "semeth_s08", "seallsero_s08", "se2_s08", "semeth2_s08"), 
                        mod_out == "imm")
 ```
 
@@ -351,8 +351,6 @@ all_samplesshape <- pomp::bake(file = glue("{dirs$modres}/all_samplesshape.rds")
     select(mod, param, everything())
   return(sam_diff)
 })
-
-all_samplesshape
 ```
 
 

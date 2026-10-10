@@ -124,10 +124,11 @@ fun_figmap <- function(x, x_agg) {
   bind_rows(lapply(unique(x$pat), function(pat_x) {
     mutate(world, 
            pat = pat_x,
+           pat_tidy = distinct(x, pat, pat_tidy) %>% filter(pat == pat_x) %>% pull(pat_tidy),
            dat = case_when(region %in% (filter(x, pat == pat_x))$country ~ TRUE, .default = FALSE)
     )})) %>%
     # Add tidy names for the pathogens 
-    left_join(tidy_names_pat, by = join_by(pat)) %>%
+    #left_join(tidy_names_pat, by = join_by(pat)) %>%
     # Plot 
     ggplot(aes(x = long, y = lat, group = group, fill = dat)) +
     facet_grid(pat_tidy~.) +

@@ -28,9 +28,12 @@ source("../fun_mod/fun_slurmshsimpred.R")
 # Read in the best models 
 pat_l <- readRDS(glue("{dirs$modres}/all_waicbest.rds")) %>%
   bind_rows(readRDS(glue("{dirs$modres}/all_waiccombbest.rds"))) %>%
-  filter(dat %in% c("s08", "semeth_s08", "seallsero_s08"), mod_name_best != "base") %>%
+  filter(dat %in% c("s08", "semeth_s08", "semeth2_s08", "se2_s08", "seallsero_s08"), mod_name_best != "base") %>%
   distinct(pat, mod_best) 
-pat_l
+# Note that the semeth2_s08 did not work 
+
+pat_l %>%
+  filter(str_detect(mod_best, "cs.rds"))
 ```
 
 # Loop over each pathogen in the defined list
@@ -59,7 +62,9 @@ walk(l_formula, function(args_fo) {
                    TRUE ~ "")
   dat_name <- case_when(
     str_detect(args_fo, "seonlytemp") ~ glue("dataseonlytemp_brms_{pathogen}_{vac}_s08{dfk}.rds"), 
-    str_detect(args_fo, "semeth") ~ glue("datasemeth_brms_{pathogen}_{vac}_s08{dfk}.rds"),
+    str_detect(args_fo, "semeth_") ~ glue("datasemeth_brms_{pathogen}_{vac}_s08{dfk}.rds"),
+    str_detect(args_fo, "semeth2_") ~ glue("datasemeth2_brms_{pathogen}_{vac}_s08{dfk}.rds"),
+    str_detect(args_fo, "se2_") ~ glue("datase2_brms_{pathogen}_{vac}_s08{dfk}.rds"),
     str_detect(args_fo, "seonlyseropos") ~ 
       glue("dataseonlyseropos_brms_{pathogen}_{vac}_s08{dfk}.rds"),
     str_detect(args_fo, "seallsero") ~ glue("dataseallsero_brms_{pathogen}_{vac}_s08{dfk}.rds"),
@@ -80,6 +85,19 @@ for (i in list.files(glue("{dirs$outputs}/slurmsh"))) {
  print(glue("sbatch ~/projects/_seas_imm/runsh/{i}"))
 }
 ```
+
+sbatch ~/projects/_seas_imm/runsh/runsimpred_mod_bmv1_s08_mumps_cs.sh		
+sbatch ~/projects/_seas_imm/runsh/runsimpred_mod_bmv3_s08_mena_cs.sh			
+sbatch ~/projects/_seas_imm/runsh/runsimpred_mod_bmv3_s08_menc_cs.sh		
+
+sbatch ~/projects/_seas_imm/runsh/runsimpred_mod_bmv3_s08_opv3_cs.sh
+sbatch ~/projects/_seas_imm/runsh/runsimpred_mod_bmv3_semeth_s08_strep06a_cs.sh
+
+sbatch ~/projects/_seas_imm/runsh/runsimpred_sim_bmv1_s08_mumps_cs.sh			
+sbatch ~/projects/_seas_imm/runsh/runsimpred_sim_bmv3_s08_mena_cs.sh			
+sbatch ~/projects/_seas_imm/runsh/runsimpred_sim_bmv3_s08_menc_cs.sh			
+sbatch ~/projects/_seas_imm/runsh/runsimpred_sim_bmv3_s08_opv3_cs.sh
+sbatch ~/projects/_seas_imm/runsh/runsimpred_sim_bmv3_semeth_s08_strep06a_cs.sh
 
 ####################################################################################################
 # END

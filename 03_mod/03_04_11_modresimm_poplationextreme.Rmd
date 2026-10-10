@@ -1,0 +1,203 @@
+---
+title: "BRMS Predict population immunogenicity under extreme covariates"
+author: "Laura Andrea Barrrero Guevara"
+date: "2026-07-30"
+output: html_document
+---
+
+####################################################################################################
+Purpose of script: To estimate immunogenicity under different vaccination ages and combinations 
+of minimum, maximum, and median vaccine concentration and dose intervals
+####################################################################################################
+
+# Set up
+
+```{r}
+rm(list = ls())
+source("../00_pck.R")
+source("../00_dirs.R")
+
+theme_set(theme_classic() + theme(strip.background = element_blank()))
+```
+
+# Define main analyses
+
+```{r}
+pat_sel <- c("rota", "hav", "hbv", "dipht", "tetan", "pertuwpt", "ipv1",
+             "hib", "menc", "strep04", "measl", "mumps", "rubel", "vzv")
+```
+
+# Read in data
+
+```{r}
+# Obtain best models according to waic 
+waic_best <- readRDS(glue("{dirs$outputs}/modres/all_waicbest.rds"))
+waiccomb_best <- readRDS(glue("{dirs$modres}/all_waiccombbest.rds"))
+waic_best_all <- bind_rows(waiccomb_best, waic_best)
+
+waic_best_all %>% ungroup() %>% distinct(pat) %>% arrange(pat)
+
+# Obtain inclusion/exclusion from simulations
+all_datagapssim <- readRDS(glue("{dirs$modres}/all_datagapssim.rds"))
+
+# Obtain model to variables 
+tidy_modtovar <- readRDS(paste0(dirs$modres, "/tidy_modtovar.rds"))
+
+```
+
+# Obtain model information
+
+```{r}
+dat_mod <- waic_best_all %>%
+  filter(dat != "sebirth_s08", mod_name_best != "base", str_detect(mod_best, "multi|opv", negate = TRUE), 
+         dat %in% c("s08", "semeth_s08")) %>%
+  left_join(tidy_modtovar %>% rename(mod_best = mod), by = join_by(pat, mod_out, dat, mod_best)) %>%
+  ungroup()
+```
+
+# Prepare fixed covariates and assay information
+
+```{r}
+# Obtain median for quantitative variables and unique values for qualitative variables 
+dat_fixed <- map_dfr(seq_len(nrow(dat_mod)), function(x) {
+  readRDS(paste0(dirs$modres, "/modres_ve/fixed_", dat_mod$mod_best[x]))
+})
+
+# Add dose interval variables when they are not part of the model
+if (!"vac_conc" %in% names(dat_fixed)) dat_fixed <- mutate(dat_fixed, vac_conc = NA)
+if (!"time_v1_v2" %in% names(dat_fixed)) dat_fixed <- mutate(dat_fixed, time_v1_v2 = NA)
+if (!"time_v2_v3" %in% names(dat_fixed)) dat_fixed <- mutate(dat_fixed, time_v2_v3 = NA)
+
+# Obtain methods for each model 
+dat_method <- map_dfr(seq_len(nrow(dat_mod)), function(x) {
+  readRDS(glue("{dirs$modfit}/data", str_remove_all(dat_mod$dat[x], "_|s08"), "_brms_", 
+               dat_mod$pat[x], "_v", dat_mod$vac[x], "_s08.rds")) %>%
+    distinct(imm_met_s1, imm_sero_s1) %>%
+    mutate(mod_best = dat_mod$mod_best[x], pat = dat_mod$pat[x])}) 
+
+# Combine fixed values and assay information   
+dat_cov_all <- distinct(dat_fixed) %>% 
+  mutate(
+    age_fixed = if_else(age < 12, 8, 52),
+    time_v1_v2_fixed = if_else(time_v1_v2 < 40, 30, 30),
+    time_v2_v3_fixed = if_else(time_v2_v3 < 40, 30, 30),
+    time_vl_s1_fixed = 30,
+    time_v2_v3_fixed = if_else(pat == "rota", 60, time_v2_v3_fixed)) %>%
+  left_join(distinct(dat_method), by = join_by(mod_best, pat)) %>% 
+  select(pat, mod_best, everything())
+```
+
+# Filter only selected pathogen, data, and assay 
+```{r}
+# Keep the same assay/model choices as VE, without requiring an accepted threshold
+dat_cov <- dat_cov_all %>%
+  filter(pat %in% pat_sel, 
+         !(str_detect(pat, "strep") & imm_met_s1 != "elisa"),
+         !(pat == "strep04" & mod_best != "bmv3_s08_strep04_csi_reg_6.rds"))
+
+# Check selected pathogen, data, and assay
+select(dat_cov, pat, mod_best, imm_met_s1, imm_sero_s1)
+
+dir.create(glue("{dirs$modres}/modresimm_populationextreme"), recursive = TRUE, showWarnings = FALSE)
+
+saveRDS(dat_cov, glue("{dirs$modres}/modresimm_populationextreme/dat_cov.rds"))
+```
+
+# Estimate immunogenicity for selected ages and all vaccination weeks 
+
+# Range of ages 
+```{r}
+sim_ndraws <- 1000
+
+df_age <- data.frame(age_ini = 38, delay = c(0, seq(5, 26, by = 4))) %>%
+  crossing(pat = c("measl", "mumps", "rubel", "vzv")) %>%
+  rbind(data.frame(age_ini = 6, delay = 0:8) %>%
+          crossing(pat = str_subset(pat_sel, "measl|mumps|rubel|vzv|hav", negate = TRUE))) %>%
+  rbind(data.frame(age_ini = 51, delay = c(0, seq(5, 26, by = 4))) %>%
+          crossing(pat = "hav")) %>%
+  mutate(age = age_ini + delay) %>%
+  distinct(pat, age)
+```
+
+```{r}
+source("../fun_mod/fun_venewdata.R")
+imm_files <- map_chr(seq_len(nrow(dat_cov)), function(x) {
+  # For each model 
+  datmod_x <- filter(dat_mod, mod_best == dat_cov$mod_best[x]) %>% slice(1)
+  
+  # Define vaccination ages ========================================================================
+  vacage_x <- df_age %>% filter(pat == dat_cov$pat[x]) %>% pull(age)
+  
+  # Define paths (model_age_delay_draws)  ==========================================================
+  path_imm <- as.character(glue(
+    "{dirs$modres}/modresimm_populationextreme/imm_{str_remove(dat_cov$mod_best[x], '[.]rds$')}_",
+    "draw{sim_ndraws}.rds"))
+  path_mod <- file.path("/Volumes/ExternalSSD_LABG_Work/_seas_imm_backup/outputs/models",
+                        datmod_x$pat[1], datmod_x$mod_best[1])
+  path_dat <- paste0(dirs$modfit, "/data", str_remove_all(datmod_x$dat[1], "_|s08"), "_brms_", 
+                     datmod_x$pat[1], "_v", datmod_x$vac[1], "_s08.rds")
+  
+  # Obtain immunogenicity =============================================================================
+  imm <- pomp::bake(path_imm, dir = "", {
+    message(glue("Estimating immunogenicity: {dat_cov$mod_best[x]}"))
+    
+    # Gather the data 
+    mod <- readRDS(path_mod)
+    dat <- readRDS(path_dat)
+    datcov_x <- dat_cov[x, ]
+      
+    # Create new data for vaccination ages before and after the delay ------------------------------
+    clu_name <- str_remove_all(datmod_x$mod_name_best[1], "csi_")
+    age_pred <- c(vacage_x)
+    
+    # This new data has each individual times the different factors and for each age selected 
+    newdat <- fun_venewdat(dat, datcov_x, clu_name) %>%
+      filter(age == datcov_x$age_fixed[[1]]) %>%
+      select(-any_of(c("age", "vac_conc", "time_v1_v2", "time_v2_v3"))) %>%
+      crossing(
+        age = age_pred,
+        vac_conc = c(datcov_x$vac_conc_min, datcov_x$vac_conc_max, datcov_x$vac_conc),
+        time_v1_v2 = c(datcov_x$time_v1_v2_min, datcov_x$time_v1_v2_max, datcov_x$time_v1_v2),
+        time_v2_v3 = c(datcov_x$time_v2_v3_min, datcov_x$time_v2_v3_max, datcov_x$time_v2_v3)) %>%
+      relocate(age, .after = sex)
+    
+    # Filter new data to keep just one vac_name_v1, doses, and only included clusters 
+    if (datmod_x$pat[1] == "dipht" & "vac_name_v1" %in% names(newdat)) {
+      newdat <- filter(newdat, vac_name_v1 != "dtpa") }
+    if (str_detect(datmod_x$pat[1], "strep") &
+        "vac_name_v1" %in% names(newdat)) {
+      newdat <- filter(newdat, vac_name_v1 == "strep10") }
+    if (datmod_x$pat[1] == "rota" & "doses" %in% names(newdat)) {
+      newdat <- filter(newdat, doses != "3") }
+    if (clu_name != "cs") {
+      clu_included <- all_datagapssim %>%
+        filter(mod == datmod_x$mod_best[1], included == TRUE) %>%
+        pull(clu)
+      newdat <- filter(newdat, str_remove_all(as.character(.data[[clu_name]]), " ") %in% clu_included) }
+    
+    # Obtain a sample of posterior draws
+    draw_id <- sample(seq_len(ndraws(mod)), min(sim_ndraws, ndraws(mod)))
+      
+    # Obtain expected immunogenicity on the response scale ----------------------------------------
+    mu <- posterior_epred(mod, newdata = newdat, re_formula = NA, draw_ids = draw_id)
+    imm_mat <- t(mu)
+    colnames(imm_mat) <- paste0("draw_", draw_id)
+      
+    # Keep posterior draws for the population simulation
+    imm_draws <- newdat %>%
+      bind_cols(as_tibble(imm_mat)) %>%
+      pivot_longer(starts_with("draw_"), names_to = "draw", values_to = "imm") %>%
+      mutate(draw = as.integer(str_remove(draw, "draw_")))
+      
+    # Add clu variable 
+    if (clu_name != "cs") imm_draws <- rename(imm_draws, clu = all_of(clu_name))
+    if (!"clu" %in% names(imm_draws)) imm_draws <- mutate(imm_draws, clu = NA)
+    
+    imm_draws %>%
+      mutate(clu = str_replace_all(clu, " ", ""),
+             mod_best = datmod_x$mod_best[1],
+             pat = datmod_x$pat[1])
+  })
+  return(path_imm)
+})
+```

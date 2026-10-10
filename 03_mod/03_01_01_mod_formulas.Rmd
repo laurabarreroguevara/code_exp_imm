@@ -33,7 +33,7 @@ source("../fun_mod/fun_formula.R")
 # Read in the data
 ```{r}
 dat_l <- lapply(str_subset(list.files(glue("{dirs$modfit}"), full.names = TRUE), "s08.rds"), readRDS)
-names(dat_l) <- sub(".*brms_(.*?)_(vl|v1|v3)_s08.*", "\\1", 
+names(dat_l) <- sub(".*brms_(.*?)_(vl|v2|v1|v3)_s08.*", "\\1", 
                     str_subset(list.files(glue("{dirs$modfit}")), "s08.rds"))
 ``` 
 
@@ -42,8 +42,8 @@ names(dat_l) <- sub(".*brms_(.*?)_(vl|v1|v3)_s08.*", "\\1",
 # Verify that each pathogen (pat) and vaccine name (vac_name_v1) combination has multiple levels of 
 # vaccine concentration (vac_conc).
 bind_rows(dat_l[str_subset(names(dat_l), "multi", negate = TRUE)], .id = "pat") %>%
-  distinct(pat, vac_name_v1, vac_conc) %>%
-  group_by(pat, vac_name_v1) %>%
+  distinct(pat, doses, vac_name_v1, vac_conc) %>%
+  group_by(pat, doses, vac_name_v1) %>%
   summarise(tot_conc = n(), .groups = "drop") 
 
 # Count the number of unique countries per region (reg_6) for each pathogen.
@@ -352,6 +352,46 @@ for (x in unique(patuni_photo_df_sesplines$pat)) {
 patuni_photo_formula_l$rota
 ```
 
+# Second dose 
+```{r}
+patuni_photo_df_se2 <- patuni_photo_df %>%
+  filter(pat %in% c("measl", "mumps", "rubel", "vzv")) %>%
+  # Fix doses
+  mutate(doses = "d2")
+
+for (x in unique(patuni_photo_df_se2$pat)) {
+  for (i in which(patuni_photo_df_se2$pat == x)) {
+    patuni_photo_formula_l[[x]] <- fun_formula_add(omit_exp = TRUE,
+      patuni_photo_formula_l[[x]], fun_formula(
+        pathogen = patuni_photo_df_se2[i,"pat"][[1]], 
+        data = "se2_s08", 
+        doses = patuni_photo_df_se2[i,"doses"][[1]], 
+        model_nm = patuni_photo_df_se2[i,"model_nm"][[1]], 
+        others = patuni_photo_df_se2[i,"others"][[1]][[1]],
+        varname = patuni_photo_df_se2[i,"varname"][[1]]))
+    }
+}
+
+patuni_photo_df_semeth2 <- patuni_photo_df %>%
+  filter(pat %in% c("mumps", "vzv")) %>%
+  # Fix doses
+  mutate(doses = "d2")
+
+for (x in unique(patuni_photo_df_semeth2$pat)) {
+  for (i in which(patuni_photo_df_semeth2$pat == x)) {
+    patuni_photo_formula_l[[x]] <- fun_formula_add(omit_exp = TRUE,
+      patuni_photo_formula_l[[x]], fun_formula(
+        pathogen = patuni_photo_df_semeth2[i,"pat"][[1]], 
+        data = "semeth2_s08", 
+        doses = patuni_photo_df_semeth2[i,"doses"][[1]], 
+        model_nm = patuni_photo_df_semeth2[i,"model_nm"][[1]], 
+        others = patuni_photo_df_semeth2[i,"others"][[1]][[1]],
+        varname = patuni_photo_df_semeth2[i,"varname"][[1]]))
+    }
+}
+
+patuni_photo_formula_l$vzv
+```
 
 # Save them ========================================================================================
 ```{r}

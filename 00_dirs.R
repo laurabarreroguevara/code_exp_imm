@@ -7,7 +7,9 @@ dirs <- list()
 dirs$server_save_kramer <- "/Volumes/public-dom/kramer/gsk_data"
 
 # To Barrero Guevaras's server main 
-dirs$seas_imm_server  <- "/Volumes/public-dom/barrero-guevara/_seas_imm_server"
+#dirs$seas_imm_server  <- "/Volumes/public-dom/barrero-guevara/_seas_imm_server"
+dirs$seas_imm_server  <- "/Volumes/ExternalSSD_LABG_Work/_seas_imm_backup/"
+
 # To Barrero Guevaras's server "saved zipped" data 
 dirs$server_save_bg   <- paste0(dirs$seas_imm_server, "/gsk_raw/gsk_data_save")
 # To Barrero Guevaras's server "working unzipped" data 

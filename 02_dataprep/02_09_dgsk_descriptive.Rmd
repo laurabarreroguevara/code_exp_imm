@@ -57,6 +57,10 @@ names(dat_l) <- sub(".*brms_(.*?)_(vl|v1|v3)_s08.*", "\\1",
 dat_l$dipht %>%
   filter(str_detect(vac_name_conco_v1, "strep|men")) %>%
   distinct(study)
+
+dat_l$vzv %>%
+  group_by(reg_6) %>%
+  summarise(mean(imm_val_s1))
 ```
 
 # Summary Statistics: Basic checks on participants, studies, and countries
@@ -286,11 +290,11 @@ ggsave(glue("../{dirs$figures}/figsup5.pdf"), figsup5_l$fg, width = 10.1, height
 # Read in the data (only s08 data)
 ```{r}
 datsemeth_l <- lapply(str_subset(str_subset(str_subset(
-  list.files(glue("{dirs$modfit}"), full.names = TRUE), "s08.rds"), "semeth"), "vzv|multi|meny", 
+  list.files(glue("{dirs$modfit}"), full.names = TRUE), "s08.rds"), "semeth_"), "multi|meny", 
   negate = TRUE), readRDS)
 names(datsemeth_l) <- sub(
   ".*brms_(.*?)_(vl|v1|v2|v3)_s08.*", "\\1", str_subset(str_subset(str_subset(
-  list.files(glue("{dirs$modfit}"), full.names = TRUE), "s08.rds"), "semeth"), "vzv|multi|meny", negate = TRUE))
+  list.files(glue("{dirs$modfit}"), full.names = TRUE), "s08.rds"), "semeth_"), "multi|meny", negate = TRUE))
 
 bind_rows(datsemeth_l, .id = "pat") %>%
   group_by(pat, imm_sero_s1, imm_met_s1) %>%
@@ -320,7 +324,7 @@ figsup8_l$dfa <- bind_rows(lapply(datsemeth_l, distinct, study, pid, sex, age, i
 # Figure a Plots: Participants, Age, and Sex Ratio
 ```{r}
 ## Figure a.1: Histogram showing the number of participants per study for each pathogen
-figsup8_l$fa1 <- fun_figpar(figsup8_l$dfa, xlim = c(0, 7500))
+figsup8_l$fa1 <- fun_figpar(figsup8_l$dfa, xlim = c(0, 8000))
 ## Figure a.2: Plot showing age at first vaccination (in months) by pathogen
 figsup8_l$fa2 <- fun_figage(figsup8_l$dfa, xlim = c(0,24))
 ## Figure a.3: Stacked bar plot showing the sex ratio by pathogen
@@ -386,6 +390,137 @@ figsup8_l$fb <- figsup8_l$fb1[[1]] + figsup8_l$fb2[[1]] + (figsup8_l$fb3[[1]] + 
 figsup8_l$fg <- free(figsup8_l$fa) + fig1_l$fb_leg + figsup8_l$fb + plot_layout(nrow = 3, heights  = c(1.5,0.2,2))
 # Save the plot 
 ggsave(glue("../{dirs$figures}/figsup8.pdf"), figsup8_l$fg, width = 12, height = 14)
+```
+
+# Supplementar figure 13: Descriptive of second doses ==============================================
+
+# Read in the data (only s2 data)
+```{r}
+datse2_l <- lapply(str_subset(str_subset(str_subset(
+  list.files(glue("{dirs$modfit}"), full.names = TRUE), "s08.rds"), "se2_|semeth2_"), "multi|meny", 
+  negate = TRUE), readRDS)
+names(datse2_l) <- sub(
+  ".*brms_(.*?)_(vl|v1|v2|v3)_s08.*", "\\1", str_subset(str_subset(str_subset(
+  list.files(glue("{dirs$modfit}"), full.names = TRUE), "s08.rds"), "se2_|semeth2_"), "multi|meny", negate = TRUE))
+
+bind_rows(datse2_l, .id = "pat") %>%
+  group_by(pat, imm_sero_s1, imm_met_s1) %>%
+  summarise(tot_study = n_distinct(study), tot = n())
+```
+
+# Prepare the data 
+```{r}
+# Prepare data for Figure 
+figsup13_l <- list()
+figsup13_l$dfa <- bind_rows(lapply(datse2_l, distinct, study, pid, sex, age, imm_met_s1, time_v1_v2), .id = "pat") %>%
+  left_join(tidy_names_pat, by = join_by(pat)) %>%
+  mutate(pat_tidy = paste0(pat_tidy, " (", toupper(imm_met_s1), ")"),
+         pat_tidy = factor(pat_tidy, levels = c(
+           "Measles (ELISA)", "Mumps (ELISA)", "Rubella (ELISA)", "VZV (IFA)",
+           "Mumps (PRNT)", "VZV (ELISA)"))) %>%
+  mutate(age_2 = age + (time_v1_v2)) %>%
+  pivot_longer(cols = c(age, age_2), names_to = "Dose", values_to = "age") %>%
+  mutate(Dose = if_else(Dose == "age", "1", "2"))
+```
+
+# Figure a Plots: Participants, Age, and Sex Ratio
+```{r}
+## Figure a.1: Histogram showing the number of participants per study for each pathogen
+figsup13_l$fa1 <- fun_figpar(figsup13_l$dfa %>% filter(Dose == "2"), xlim = c(0, 7000))
+## Figure a.2: Plot showing age at first vaccination (in months) by pathogen
+figsup13_l$fa2 <- figsup13_l$dfa %>%
+  # Obtain age in weeks 
+  mutate(age = round((age*7)/30, digits = 0)/12) %>%
+  # Obtain number of individuals per age  
+  group_by(pat_tidy, pat, Dose, age) %>%
+  summarise(tot = n(), .groups = "drop") %>%
+  group_by(pat_tidy, Dose, pat) %>%
+  mutate(prop = tot/sum(tot)) %>%
+  # Plot
+  ggplot(aes(x = age, y = fct_rev(pat_tidy), size = prop, color = Dose)) +
+  geom_point(alpha = 0.5) + 
+  scale_size("Proportion individuals\nper age") +
+  scale_x_continuous("Age at first vaccination (Years)", trans = "log2") + 
+  scale_color_manual(values = c("grey", "black")) + 
+  scale_y_discrete("") + 
+  theme(legend.position = "top",
+        axis.title.y = element_blank(),
+        axis.text.y = element_blank(),
+        axis.ticks.y = element_blank(),
+        axis.line.y = element_blank(),
+        panel.grid.major.y = element_line())
+## Figure a.3: Stacked bar plot showing the sex ratio by pathogen
+figsup13_l$fa3 <- fun_figsex(figsup13_l$dfa %>% filter(Dose == "2")) 
+## Patch plots together 
+figsup13_l$fa <- figsup13_l$fa1 + figsup13_l$fa2 + figsup13_l$fa3 + plot_layout(widths = c(2,4,0.5))
+```
+
+# Figure sup 8b: Maps and additional density plots for selected pathogen -------------------------------
+
+# Prepare data for the plot 
+```{r}
+## Prepare data for two groups of selected pathogens, merging tidy names and 
+## standardizing country names (e.g., "United States" to "USA")
+figsup13_l$dfb <- bind_rows(datse2_l, .id = "pat") %>%
+  left_join(tidy_names_pat, by = join_by(pat)) %>%
+  mutate(pat_tidy = paste0(pat_tidy, " (", toupper(imm_met_s1), ")"),
+         pat_tidy = factor(pat_tidy, levels = c(
+           "Measles (ELISA)", "Mumps (ELISA)", "Rubella (ELISA)", "VZV (IFA)",
+           "Mumps (PRNT)", "VZV (ELISA)")),
+         pat = paste0(pat, imm_met_s1)) %>%
+  mutate(country = case_when(country == "United States" ~ "USA", .default = country),
+         col_g = if_else(pat_tidy %in% levels(figsup13_l$dfa$pat_tidy)[1:4], "1", "2")) %>%
+  group_split(col_g)
+
+## Aggregate location data across all selected pathogens for mapping purposes
+figsup13_l$dfb_agg <- bind_rows(lapply(datse2_l, function(x) {
+  distinct(x, pid, country, reg_6, lat_med, lon_med, imm_met_s1) %>%
+    group_by(country, reg_6, imm_met_s1) %>%
+    summarise(tot = n(),
+              lat_med = mean(lat_med),
+              lon_med = mean(lon_med), 
+              .groups = "drop")
+  }), .id = "pathogen") %>%
+  mutate(clu = str_remove_all(reg_6, " ")) %>%
+  # Add tidy names for the pathogens 
+  left_join(tidy_names_pat, by = join_by(pathogen == pat)) %>%
+  mutate(pat_tidy = paste0(pat_tidy, " (", toupper(imm_met_s1), ")"),
+         pat_tidy = factor(pat_tidy, levels = c(
+           "Measles (ELISA)", "Mumps (ELISA)", "Rubella (ELISA)", "VZV (IFA)",
+           "Mumps (PRNT)", "VZV (ELISA)")),
+         pathogen = paste0(pathogen, imm_met_s1)) %>%
+  # Add tidy clu
+  left_join(tidy_names_clu, by = join_by(clu)) %>%
+  # Rename countries to match world map
+  mutate(country = case_when(country == "United States" ~ "USA", .default = country))
+```
+
+## Figure 8b
+```{r}
+## Figure b.1: Time-series plots of vaccination weeks per region
+figsup13_l$fb1 <- lapply(figsup13_l$dfb, fun_figvacc)
+# Figure b.2: Density plots of immunogenicity results per region
+figsup13_l$fb2 <- lapply(figsup13_l$dfb, fun_figimm) 
+# Figure b.3: Maps of study locations for each subgroup of pathogens
+figsup13_l$fb3 <- lapply(figsup13_l$dfb, fun_figmap, x_agg = figsup13_l$dfb_agg) 
+
+design <- "
+ABCDEF
+ABC###
+"
+
+## Patch plots together 
+figsup13_l$fb <- figsup13_l$fb1[[1]] + figsup13_l$fb2[[1]] + (figsup13_l$fb3[[1]] + theme(legend.position = "none")) + 
+                figsup13_l$fb1[[2]] + figsup13_l$fb2[[2]] + (figsup13_l$fb3[[2]] + theme(legend.position = "none")) + 
+                plot_layout(design = design, widths = c(0.75, 0.75, 2, 0.75, 0.75, 2), heights = c(1, 1))
+```
+
+# Figure supplementary 8
+```{r}
+## Patch plots together 
+figsup13_l$fg <- free(figsup13_l$fa) + fig1_l$fb_leg + figsup13_l$fb + plot_layout(nrow = 3, heights  = c(1.4,0.2,2))
+# Save the plot 
+ggsave(glue("../{dirs$figures}/figsup13.pdf"), figsup13_l$fg, width = 12, height = 9)
 ```
 
 # Other plots ======================================================================================

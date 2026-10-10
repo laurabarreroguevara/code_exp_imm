@@ -78,7 +78,7 @@ all_samplescosine %>%
 ```{r}
 datpl_phi <- all_samplescosine %>%
   # Filter the region and pathogens
-  filter(mod %in% waic_best_all$mod_best, included == TRUE) %>%
+  filter(mod %in% waic_best_all$mod_best, included == TRUE | dat %in% c("se2_s08")) %>%
   # Round the phase (from 0 to 52) and create dummy shifted for organizing the plots
   group_by(mod, pat, clu, clu_tidy, dat) %>%
   mutate(sam_phi = round(sam_phi),
@@ -112,7 +112,7 @@ saveRDS(datpl_phisumm, file = glue("{dirs$modres}/wbest_phisumm.rds"))
 ```{r}
 datpl_amp <- all_samplescosine %>%
   # Filter the region and pathogens
-  filter(mod %in% waic_best_all$mod_best, included == TRUE) %>%
+  filter(mod %in% waic_best_all$mod_best, included == TRUE | dat %in% c("se2_s08")) %>%
   # Create dummy shifted for organizing the plots
   group_by(mod, pat, clu, clu_tidy, dat) %>%
   mutate(phi_mean_shift = (phi_mean + 3) %% 52)
@@ -131,12 +131,16 @@ datpl_ampsumm <- distinct(datpl_amp, across(-c(sam_no, p_cos, p_sin, int, sam_am
                                       .default = sam_phi_ci95up),
           sam_phi_ci95lo2 = case_when(sam_phi_ci95lo >= sam_phi_ci95up ~ -0.5))
 saveRDS(datpl_ampsumm, file = glue("{dirs$modres}/wbest_ampsumm.rds"))
+
+datpl_ampsumm %>%
+  filter(pat == "vzv") %>%
+  select(clu, sam_amp_mean, sam_phi_mean)
 ```
 
 # Prepare data for the samples plot: 
 ```{r}
 datpl_sam <- all_samplescosine %>%
-  filter(mod %in% waic_best_all$mod_best, included == TRUE, sam_no <= 100) %>%
+  filter(mod %in% waic_best_all$mod_best, included == TRUE | dat %in% c("se2_s08"), sam_no <= 100) %>%
   crossing(vac_week_v1 = seq(from = 0, to = 2*pi, length = 53)) %>%
   mutate(sam_estimate = exp(int + p_cos*cos(vac_week_v1) + p_sin*sin(vac_week_v1)) / mu_ns,
          vac_week_v1 = round((52*vac_week_v1)/(2*pi))) %>%
@@ -232,8 +236,9 @@ fig3 <- (fig3_l$amp + theme(strip.text.y = element_blank(), axis.title.y = eleme
   fig3_l$phi + theme(axis.title.y = element_blank(), axis.text.y = element_blank())) / fig3_l$sam
 
 # Save the plot
-ggsave(fig3, file = "../figures/fig3.pdf", width = 10, height = 12)
+ggsave(fig3, file = "../_figures/fig3.pdf", width = 10, height = 12)
 ```
+
 # Supplementary figure: extra pathogens ============================================================
 ```{r}
 waic_extrapath <- bind_rows(waiccomb_best, waic_best) %>%
@@ -325,11 +330,17 @@ supfig7 <-  (
   plot_layout(heights = c(4, 1))
 
 # Save the plot
-ggsave(supfig7, file = "../figures/figsup7.pdf", width = 10, height = 9)
+ggsave(supfig7, file = "../_figures/figsup7.pdf", width = 10, height = 10)
 ```
 
 # Supplementary figure: extra methods ==============================================================
 ```{r}
+waic_extrapath <- bind_rows(waiccomb_best, waic_best) %>%
+  group_by(pat, dat) %>%
+  slice(1) %>%
+  filter(!(pat %in% c("rota", "hav", "hbv", "dipht", "tetan", "pertuwpt", 
+                  "hib", "measl", "mumps", "rubel")))
+
 supfig10_l <- list()
 
 supfig10_l$phi <- datpl_phi %>%
@@ -382,7 +393,10 @@ supfig10_l$amp <- datpl_amp %>%
 supfig10_l$sam <- datpl_sam %>%
   filter(dat == "semeth_s08", mod %in% waic_extrapath$mod_best) %>%
   left_join(distinct(waiccomb_best, dat, pat, patcomb, patcomb_tidy), by = join_by(pat, dat)) %>%
-  mutate(sam_fil = if_else(patcomb == "men", 70, 20)) %>%
+  mutate(patcomb_tidy = ifelse(pat == "vzv", "VZV", patcomb_tidy)) %>%
+  mutate(sam_fil = case_when(patcomb == "men" ~ 70, 
+                             pat == "vzv" ~ 500,
+                             .default = 20)) %>%
   filter(sam_no <= sam_fil) %>%
   ggplot(aes(x = vac_week_v1, y = sam_estimate, group = paste0(pat, sam_no), color = phi_mean)) + 
   geom_line(alpha = 0.1) + 
@@ -393,8 +407,8 @@ supfig10_l$sam <- datpl_sam %>%
                                     rev(viridis(100, begin = 0, option = "C"))),
                         guide = guide_colorbar(title.position = "top", title.hjust = 0.5, barheight = 0.8)) +
   geom_point(data = filter(datpl_sam_rug, dat == "semeth_s08", mod %in% waic_extrapath$mod_best) %>%
-          left_join(distinct(waiccomb_best, dat, pat, patcomb, patcomb_tidy), by = join_by(pat, dat))
-               , 
+          left_join(distinct(waiccomb_best, dat, pat, patcomb, patcomb_tidy), by = join_by(pat, dat)) %>%
+                      mutate(patcomb_tidy = ifelse(pat == "vzv", "VZV", patcomb_tidy)), 
              aes(y = -Inf), group = 1, shape = "|", size = 3) +
   ggh4x::facet_nested_wrap(~clu_tidy+patcomb_tidy, scales = "free_y", nest_line = TRUE,
                            solo_line = TRUE, ncol = 6) +
@@ -413,7 +427,7 @@ supfig10 <-  (
   plot_layout(heights = c(3, 1))
 
 # Save the plot
-ggsave(supfig10, file = "../figures/figsup10.pdf", width = 10, height = 8)
+ggsave(supfig10, file = "../_figures/figsup10.pdf", width = 10, height = 8)
 ```
 
 # Supplementary figure: allsero rota ===============================================================
@@ -507,7 +521,86 @@ supfig12 <-  (
   plot_layout(heights = c(1, 1))
 
 # Save the plot
-ggsave(supfig12, file = "../figures/figsup12.pdf", width = 10, height = 6)
+ggsave(supfig12, file = "../_figures/figsup12.pdf", width = 10, height = 6)
+```
+
+# Supplmentary figure 15
+```{r}
+supfig15_l <- list()
+
+# Plot phase
+supfig15_l$phi <- datpl_phi %>%
+  filter(pat %in% pat_sel, mod %in% waic_best$mod_best, dat == "se2_s08") %>%
+  select(-clu_tidy) %>%
+  left_join(tidy_names_clu) %>%
+  ggplot(aes(x = sam_phi, y = reorder(pat_tidy, -phi_mean_shift), fill = phi_mean)) +
+  geom_tile(aes(alpha = tot), color = "white") + 
+  geom_point(data = filter(datpl_phisumm, pat %in% pat_sel, mod %in% waic_best$mod_best, dat == "se2_s08"), 
+             aes(x = sam_phi_median), size = 0.5) + 
+  geom_segment(data = filter(datpl_phisumm, pat %in% pat_sel, mod %in% waic_best$mod_best, dat == "se2_s08"), 
+               aes(x = sam_phi_ci95lo1, xend = sam_phi_ci95up1), size = 0.4) + 
+  geom_segment(data = filter(datpl_phisumm, pat %in% pat_sel, mod %in% waic_best$mod_best, dat == "se2_s08"), 
+               aes(x = sam_phi_ci95lo2, xend = sam_phi_ci95up2), size = 0.4) + 
+  geom_vline(aes(xintercept = 53), linewidth = 1) + 
+  facet_nested(clu_tidy~., space = "free", scales = "free") + 
+  scale_alpha_continuous("Proportion of phases", na.value = 0, range = c(0.01, 1),
+                         breaks = c(0.01, 0.1, 0.2, 0.3)) +
+  scale_fill_gradientn("Peak timing", breaks = c(1,18,35,52), limits = c(0,52),
+                       colours = c(viridis(100, begin = 0, option = "C"),
+                                   rev(viridis(100, begin = 0, option = "C")))) +
+  scale_x_continuous("Peak timing", breaks = c(1,18,35,52), expand = c(0,0)) +
+  scale_y_discrete("") + 
+  guides(alpha = guide_legend(order = 1, theme = theme(legend.text.position = "bottom",
+                                                       legend.key.width  = unit(0.37/16, "npc"),
+                                                       legend.key.height = unit(0.005, "npc"))), 
+         fill = guide_colorbar(order = 2, theme = theme(legend.key.width  = unit(0.37, "npc"),
+                                                        legend.key.height = unit(0.005, "npc")))) + 
+  theme(strip.text.y = element_text(angle = 0, hjust = 0),
+        legend.position = "top",
+        legend.justification = "right",
+        legend.box = "vertical",
+        legend.box.just = "right")
+
+# Plot amplitude
+supfig15_l$amp <- datpl_amp %>%
+  filter(pat %in% pat_sel, mod %in% waic_best$mod_best, dat == "se2_s08") %>%
+  ggplot(aes(x = sam_amp*100, y = reorder(pat_tidy, -phi_mean_shift))) +
+  geom_vline(aes(xintercept = 0), color = "grey", linetype = "dotted") + 
+  geom_point(alpha = 0.01, shape = "|", size = 4, color = "grey30") + 
+  geom_point(data = filter(datpl_ampsumm, pat %in% pat_sel, mod %in% waic_best$mod_best, dat == "se2_s08"), 
+             aes(x = sam_amp_median*100), size = 0.5, color = "black") + 
+  geom_segment(data = filter(datpl_ampsumm, pat %in% pat_sel, mod %in% waic_best$mod_best, dat == "se2_s08"),
+               aes(x = sam_amp_ci95lo*100, xend = sam_amp_ci95up*100), 
+               size = 0.4, color = "black") + 
+  scale_x_continuous("Amplitude (%)") + 
+  scale_y_discrete("") + 
+  facet_grid(clu_tidy~., space = "free", scales = "free") + 
+  theme(strip.text.y = element_text(angle = 0, hjust = 0),
+        axis.title.y = element_blank())
+
+# Plot samples 
+supfig15_l$sam <- datpl_sam %>%
+  filter(pat %in% pat_sel, mod %in% waic_best$mod_best, dat == "se2_s08") %>%
+  ggplot(aes(x = vac_week_v1, y = sam_estimate, group = sam_no, color = phi_mean)) + 
+  geom_line(alpha = 0.1) + 
+  scale_x_continuous("Week of vaccination", breaks = c(1,18,35,52), limits = c(1,52), expand = c(0,0)) + 
+  scale_y_continuous("Conditional effect", expand = c(0.2,0)) + 
+  scale_color_gradientn("Peak timing", breaks = c(1,18,35,52), limits = c(0,52), 
+                        colours = c(viridis(100, begin = 0, option = "C"), 
+                                    rev(viridis(100, begin = 0, option = "C"))),
+                        guide = guide_colorbar(title.position = "top", title.hjust = 0.5, barheight = 0.8)) +
+  geom_point(data = filter(datpl_sam_rug, pat %in% pat_sel, mod %in% waic_best$mod_best, dat == "se2_s08"),
+             aes(y = -Inf), group = 1, shape = "|", size = 3) +
+  ggh4x::facet_nested_wrap(~clu_tidy+reorder(pat_tidy, phi_mean_shift), scales = "free_y", nest_line = TRUE,
+                           solo_line = TRUE, ncol = 7) +
+  theme(legend.position = "none")
+
+# Bring plots together
+supfig15 <- (supfig15_l$amp + theme(strip.text.y = element_blank(), axis.title.y = element_blank()) + 
+  supfig15_l$phi + theme(axis.title.y = element_blank(), axis.text.y = element_blank())) / supfig15_l$sam
+
+# Save the plot
+ggsave(supfig15, file = "../_figures/figsup15s.pdf", width = 10, height = 6)
 ```
 
 ####################################################################################################

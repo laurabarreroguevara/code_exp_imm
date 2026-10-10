@@ -108,7 +108,11 @@ dat_comb_uni$unipat_multi <- lapply(stu_ppat[names(stu_ppat) != "strep"], functi
 
 dat_comb_uni <- bind_rows(dat_comb_uni, .id = "multi") %>%
   mutate(prefx = case_when(multi == "unipat_mono" ~ "", .default = "multi_"))
-```
+
+dat_comb_uni$unipat_mono %>%
+  filter(imm_met_s1 %in% c(dat_comb_uni$unipat_mono$imm_met_s1)) %>%
+  filter(pat_dat %in% c("measl", "mumps", "rubel", "vzv", "hav"))
+``` 
 
 # Multi-pathogen models ============================================================================
 Prepare data frames for multipathogen models

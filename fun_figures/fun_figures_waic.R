@@ -40,7 +40,7 @@ fun_figpred <- function(x) {
 }
 
 # Combined WAIC plot
-fun_figwaiccomb <- function(x) {
+fun_figwaiccomb <- function(x, plncol = 3) {
   x %>%
     # Create dummy variable for the order 
     mutate(mod_name_f = tidytext::reorder_within(mod_name_tidy, -waic_diff, patcomb_tidy)) %>%
@@ -51,7 +51,7 @@ fun_figwaiccomb <- function(x) {
     scale_x_continuous(expression(Delta*WAIC~"from best model")) +
     tidytext::scale_y_reordered() + 
     scale_color_viridis_d("Model", option = "rocket", end = 0.8) + 
-    facet_nested_wrap(patcomb_tidy~., ncol = 4, scales = "free") + 
+    facet_nested_wrap(patcomb_tidy~., ncol = plncol, scales = "free") + 
     guides(color = guide_legend(nrow = 2)) + 
     theme(legend.position = "top",
           strip.background = element_blank(),
@@ -59,13 +59,13 @@ fun_figwaiccomb <- function(x) {
 }
 
 # Combined predictions plot
-fun_figpredcomb <- function(x) {
+fun_figpredcomb <- function(x, plncol = 3) {
   filter(x, type == "1draw") %>%
     ggplot(aes(x = value, group = paste0(name_draw, pat_tidy), color = pat_tidy)) + 
     geom_vline(aes(xintercept = imm_cutoff_s1, color = pat_tidy), show.legend = FALSE) + 
     geom_line(stat = "ecdf", alpha = 0.1) + 
     geom_line(data = filter(x, type == "2data"), stat = "ecdf", linetype = "dashed") +  
-    facet_nested_wrap(patcomb_tidy+clu_tidy~., ncol = 2, scales = "free", nest_line = TRUE, solo_line = TRUE) + 
+    facet_nested_wrap(patcomb_tidy+clu_tidy~., ncol = plncol, scales = "free", nest_line = TRUE, solo_line = TRUE) + 
     scale_x_continuous("Immunogenicity", trans = "log10",
                        breaks = scales::trans_breaks("log10", function(x) 10^x),
                        labels = scales::trans_format("log10", scales::math_format(10^.x))) + 
