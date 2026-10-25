@@ -1,16 +1,38 @@
 # Repository for the project *“The immune response to childhood vaccines is seasonal”*
 
-This repository contains the R code required to reproduce the analyses presented in the paper *“The immune response to childhood vaccines is seasonal”*, by Laura Andrea Barrero Guevara, Gaelle Féghali, Sarah Kramer, and Matthieu Domenech de Cellès.
+This repository contains the R scripts used for data preparation, Bayesian modeling, sensitivity analyses, prediction, and figure generation for *“The immune response to childhood vaccines is seasonal”*, by Laura Andrea Barrero Guevara, Gaelle Féghali, Sarah Kramer, and Matthieu Domenech de Cellès.
 
-## Installation ##
-All analyses were conducted in R 4.3.1 (2024-06-14). Package versions were managed with `renv` (version 1.0.2) to ensure reproducibility. To restore the project environment:
-Brms package 2.20.1.
+## Quick start: synthetic demonstration
+A self-contained synthetic-data demonstration is available in [`demo/`](demo/). It is the recommended starting point for readers who do not have access to the restricted clinical-trial data.
 
-1. Open the R project `codes.proj`.
+The demonstration fits (i) a baseline Gamma regression with a log link and (ii) a model with region-specific seasonal sine/cosine terms, both using brms. It compares their WAIC and produces weekly predictions of mean antibody response and probability of exceeding an arbitrary illustrative threshold. The 320 simulated records and eight artificial studies are not observations from the paper. The demonstration does not reproduce the paper's quantitative results or its complete censored multilevel analysis.
+
+You can also use Rscript demo/run_demo.R in a terminal. The demo requires cmdstanr and a functioning CmdStan installation in addition to brms, loo, and posterior. It does not require access to the original data or an HPC cluster.
+
+Validated example execution: R 4.5.1 (Apple Silicon macOS, aarch64-apple-darwin20), with the cmdstanr backend; total elapsed time 0.9 minutes on one test run (including compilation in that session). The recorded demonstration results were WAIC 3006.868 (baseline) and 2734.023 (seasonal), so baseline minus seasonal WAIC was 272.8446. These values are from synthetic data deliberately constructed with seasonal patterns; they are not results from the manuscript. Times and results can differ across environments. See the [demo README](demo/README.md) for all expected outputs and limitations.
+
+## Software environment and installation ##
+The committed [`renv.lock`](renv.lock) records R 4.3.1, renv 1.0.2, and brms 2.20.1. These are the versions recorded for the archived project environment; they must not be confused with the separate R 4.5.1 demo test above. (R 4.3.1 was released on 2023-06-16.) Other package versions are recorded in the lockfile.
+
+1. Clone or download this repository and open `code_exp_imm.Rproj` in RStudio (or start R in the repository root).
 2. `renv` should automatically bootstrap itself by downloading and installing the appropriate version into the project library.
 3. Run: `r renv::restore()`
+4. For the demo, install/configure cmdstanr and CmdStan if they are not already available. This dependency is not included in the current renv.lock; see [`demo/README.md`](demo/README.md) for the additional commands.
 
-Typical installation time should take less than 30 minutes. 
+Compilation requires a suitable C++ toolchain. The full study pipeline also uses cluster-oriented SLURM scripts; an HPC cluster is not required for the demo. Installation time depends heavily on existing libraries, compilation toolchains, and downloads; a universal installation time has not been established. The observed 0.9-minute demo runtime is not the time required to install all dependencies from scratch.
+
+## Data access and full-analysis limitations ##
+Individual-level randomized clinical-trial data were provided by GlaxoSmithKline through ClinicalStudyDataRequest.com subject to third-party data-access restrictions. These data cannot be redistributed in this repository. Reproducing the full paper analyses requires independent authorization to access the source data, as well as accompanying study-specific inputs.
+
+## Full analysis workflow (restricted data required) ## 
+The primary processing steps are organized as follows:
+1. `01_metadata/`: check source-study files and gather metadata.
+2. `02_dataprep/`: read and harmonize source data, assign geographic groupings, apply inclusion criteria, and construct the analysis datasets.
+3. `03_mod/03_01_*`: define and fit the Bayesian regression models; SLURM scripts support cluster execution.
+4. `03_mod/03_02_*`–`03_mod/03_04_*`: assess convergence and WAIC, run simulation-based checks, extract seasonal amplitude/phase, covariate effects, and comparative results.
+5.` 03_mod/03_05_*` and `03_mod/03_06_*`: generate threshold predictions and simulated population vaccination-schedule scenarios.
+6. `03_mod/03_07_*`: spline-based sensitivity analyses.
+The paths and outputs depend on the preceding steps and unavailable restricted data; the list above is a workflow guide, not an automatically runnable script. Each .Rmd file describes its own inputs and outputs. For a fully executable example on public data, use [`demo/`](demo/).
 
 ## Repository overview ## 
 Files named `fun_XX` correspond to R functions and are stored in the folders `fun_data`, `fun_mod`, and `fun_figures`. The main scripts are organized into the folders `01_metadata`, `02_dataprep`, and `03_mod`.

@@ -1,52 +1,81 @@
 # Minimal synthetic-data demonstration
 
-This folder accompanies **“The immune response to childhood vaccines is seasonal.”** It provides a small, runnable example of the statistical workflow, without distributing restricted clinical trial data.
+This folder accompanies *“The immune response to childhood vaccines is seasonal.”* It provides a small, runnable example of part of the statistical workflow without distributing restricted clinical-trial data. **All 320 participant records are synthetic**, drawn from eight artificial studies (four per latitude group).
 
 ## Contents
 
-- `synthetic_vaccine_data.csv`: 320 **entirely synthetic** records from 8 artificial studies (4 assigned to each of two illustrative latitude groups), with vaccination week, age, sex, and antibody titers.
-- `run_demo.R`: fits a baseline and a region-specific seasonal Bayesian Gamma regression with a log link using `brms`, compares WAIC, and plots weekly predicted antibody concentrations and probabilities of exceeding an **arbitrary illustrative** threshold.
+- `synthetic_vaccine_data.csv`: invented age, sex, vaccination-week, latitude-group, study, and antibody-response values.
+- `run_demo.R`: fits a baseline and a seasonal-by-region Bayesian Gamma regression with a log link using `brms`; compares WAIC; and produces weekly predictions of expected response and probability of exceeding an arbitrary cutoff.
+- `output/`: created locally when the script runs; contains numerical summaries, figures, and runtime information. The user does not need pre-generated output files to run the demonstration.
 
-## Requirements
+## Requirements and installation
 
-- R and packages `brms`, `loo`, `posterior` (plus their dependencies) and a working Stan/C++ toolchain. These packages are managed using the repository's `renv.lock`; run `renv::restore()` from the project root.
-- No original clinical trial data or HPC cluster is required for **this demo**. The full paper pipeline uses additional files and cluster-oriented scripts.
-- The lockfile currently records R 4.3.1, `brms` 2.20.1 and `renv` 1.0.2; verify these against the actual environment used for the final paper before claiming them as the tested versions.
+- R; the demo was **tested using R 4.5.1** on Apple Silicon macOS (`aarch64-apple-darwin20`).
+- R packages `brms`, `loo`, `posterior`, and the **`cmdstanr` backend**; a working CmdStan installation and suitable C++ toolchain are required.
+- The repository [`renv.lock`](../renv.lock) records an older project environment (R 4.3.1, `brms` 2.20.1, `renv` 1.0.2). **It does not currently record `cmdstanr`.** The demo test under R 4.5.1 is distinct from the archived full-analysis package environment. Exact package versions used in the successful demo run can be obtained from `demo/output/session_info.txt`, or the R commands below. Do not assume the demo was tested under R 4.3.1.
+
+Open `code_exp_imm.Rproj` from the repository root. If necessary, restore the archived project R packages in the R console:
+
+```r
+renv::restore()
+```
+
+Install `cmdstanr` and CmdStan separately if they are not already installed in the active R project environment:
+
+```r
+install.packages("cmdstanr", repos = c("https://stan-dev.r-universe.dev", getOption("repos")))
+cmdstanr::check_cmdstan_toolchain()
+cmdstanr::install_cmdstan(cores = 2)
+cmdstanr::cmdstan_version()
+```
+
+CmdStan installation is a one-time setup. Installation time is **not** included in the demo's measured execution time. The full paper used additional software, inputs, and high-performance cluster scripts; no HPC cluster or restricted data are needed for this demonstration.
 
 ## Run
 
-1. Download or clone the repository and open `code_exp_imm.Rproj` in RStudio, or start a terminal in the repository root.
-2. Install/restore dependencies if necessary: in R, run `renv::restore()`.
-3. From the **repository root**, run:
+From the repository root, in the R console:
 
-   ```bash
-   Rscript demo/run_demo.R
-   ```
+```r
+source("demo/run_demo.R")
+```
 
-   Alternatively, from the R console in the repository root:
+Or from a terminal in the repository root:
 
-   ```r
-   source("demo/run_demo.R")
-   ```
+```bash
+Rscript demo/run_demo.R
+```
 
-The first run may need to compile two Stan models; subsequent runs may be faster. A working C++ compiler is needed. The exact runtime depends on the computer and was **not benchmarked** when preparing these files. The script records the measured runtime in `demo/output/runtime.txt`.
+The working directory must be the repository root because the script reads `demo/synthetic_vaccine_data.csv` using a relative path. The script compiles and samples two Stan models (2 chains, 1,000 iterations per chain, 500 warmup iterations per chain) and writes results to `demo/output/`.
 
 ## Expected output
 
-The script creates `demo/output/` containing:
+A successful run creates:
 
-- `waic_comparison.csv`: WAIC for the baseline and seasonal models, including a difference relative to baseline; lower WAIC indicates preferred predictive performance.
-- `weekly_predictions.csv`: predicted mean synthetic antibody titers and probability of exceeding the illustrative cutoff for 52 weeks in each latitude group.
-- `seasonal_mean_response.png`: fitted seasonal response curves for the two latitude groups, approximately opposite in phase because this pattern was **built into the synthetic data**.
-- `demo_threshold_probability.png`: threshold-crossing curves for an **arbitrary cutoff of 65 synthetic units**. These **do not estimate vaccine effectiveness or clinically validated seroprotection**.
-- `seasonal_model_summary.txt`, `session_info.txt`, `runtime.txt`.
+| File | Meaning |
+|---|---|
+| `output/waic_comparison.csv` | WAIC for baseline and seasonal models; difference is baseline WAIC minus seasonal WAIC. |
+| `output/weekly_predictions.csv` | Weekly expected synthetic antibody titers and probabilities above an arbitrary cutoff, for both latitude groups. |
+| `output/seasonal_mean_response.png` | Curves of mean synthetic response by vaccination week. |
+| `output/demo_threshold_probability.png` | Probability of exceeding **65 arbitrary synthetic units**; not a validated protection threshold. |
+| `output/seasonal_model_summary.txt` | `brms` summary of the seasonal model. |
+| `output/session_info.txt` | R version, platform, and loaded package versions. |
+| `output/runtime.txt` | Elapsed time from starting the script through saving outputs. |
 
-The example is designed to favor a seasonal model, but actual WAIC values and posterior predictions will vary with the MCMC run. Check diagnostic warnings and convergence before interpreting results. The demo is intentionally simplified: it does **not** reproduce the paper's datasets, figures, censored likelihood, full multilevel structure, multiple assays, or complete vaccine-scheduling simulations.
+### Verified test execution (2026-10-25)
 
-## Data restrictions
+The demonstration completed on **Apple Silicon macOS**, using **R 4.5.1** (`aarch64-apple-darwin20`) and `brms` with `backend = "cmdstanr"`. Both models compiled/sampled and the output files were generated.
 
-The actual individual-level clinical trial data were obtained through ClinicalStudyDataRequest.com under access restrictions. They are **not** present here, and cannot be redistributed through this repository. Full reproduction of the manuscript analyses requires separately approved data access and project-specific input-path configuration.
+The user-reported results were:
 
-## Verification status
+| Model | WAIC |
+|---|---:|
+| Baseline | 3006.868 |
+| Seasonal by region | 2734.023 |
 
-This demo's files and CSV data structure have been checked for consistency, but the R model fitting and runtime have **not** been executed in this preparation environment. Before marking the Nature checklist's demo, expected-output, and runtime boxes as complete, run `Rscript demo/run_demo.R` successfully on a machine with R and a Stan toolchain, and record the measured time and operating system here.
+**Baseline minus seasonal WAIC = 272.8446** (rounded); measured elapsed time **0.9 minutes**, including compilation in that run. The synthetic data were constructed with seasonal responses, so a strong preference for the seasonal model was expected. Results and runtimes can vary across installations.
+
+## Scope and restrictions
+
+The illustration covers Gamma-log Bayesian modeling, seasonal interaction terms, model comparison, and Gamma upper-tail probabilities. It deliberately omits the manuscript's restricted participant data, left-censoring, comprehensive multilevel hierarchy, multiple assays/pathogens, full latitude schemes, and vaccination-schedule simulations. **The predicted threshold probabilities are not estimates of vaccine effectiveness or clinically validated seroprotection.** The demo does not independently reproduce the manuscript's findings.
+
+The original data were supplied through [ClinicalStudyDataRequest.com](https://www.clinicalstudydatarequest.com/) under access restrictions. Researchers seeking full numerical reproduction must obtain the original datasets independently and configure the full pipeline's project-specific directories.
