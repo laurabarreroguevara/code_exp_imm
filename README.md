@@ -35,7 +35,8 @@ This folder contains scripts to prepare the RCT data for analysis.
 - `02_05_dgsk_ppat_vacconc`: Assign vaccine concentrations by study, RCT group, and country for the included studies across pathogens.
 - `02_06_dgsk_ppat`: Integrate and tidy all data by pathogen. This script combines processed participant, vaccination, and serology data with vaccine concentration, spatial, and climate data for all included studies, and then applies exclusions at the group and participant levels.
 - `02_07_dgsk_datmod`: Prepare the main analysis data sets, applying further exclusions based on spatial data.
-- `02_08_dgsk_datmod_sens`: Prepare data sets for sensitivity analyses, applying further exclusions based on spatial data.
+- `02_08_01_dgsk_datmod_sens`: Prepare data sets for sensitivity analyses, applying further exclusions based on spatial data.
+- `02_08_01_dgsk_datmod_sens_2`: Prepare data sets for sensitivity analyses with two doses, applying further exclusions based on spatial data.
 - `02_09_dgsk_descriptive`: Produce descriptive statistics and figures, including maps, histograms, and density plots, based on the final data sets. This script generates summaries of study participants, study locations, vaccination dates, immunogenicity measurements, and additional maps for selected pathogens.
 
 ##### 03_mod
@@ -54,6 +55,9 @@ This folder contains scripts for the statistical analyses.
 - `03_04_01_modres_ampphi`: Estimate and plot the amplitude and phase of the best-fitting models.
 - `03_04_02_modres_covars`: Extract and plot covariate effects.
 - `03_04_03_compare`: Compare model results across specifications.
+- `03_05_01_modres_ve`: To check the predicted seroprotection from the models 
+- `03_06_01_modresimm_population`: To estimate immunogenicity for different vaccination ages and all vaccination weeks, keeping posterior draws for the population scenarios
+- `03_06_02_modresimm_population_scenarions`:  To estimate population mean immunogenicity under different vaccination ages and a targeted delay during the valley season
 - `03_05_01_modres_splines`: Evaluate and plot results from spline-based sensitivity analyses.
 
 ## Functions and additional scripts ##
@@ -93,6 +97,7 @@ This folder contains functions for model fitting and result analysis.
 - `fun_formula_add`: Add a new formula to a list while ensuring that neither the formula nor its name is duplicated.
 - `fun_slurmsh`: Generate a SLURM shell script to run an R model-fitting job.
 - `fun_slurmshsimpred`: Generate a SLURM shell script to run simulation-based R model-fitting jobs.
+- `fun_venewdata`: Functions to obtain vaccine seroprotection new data.
 
 
 

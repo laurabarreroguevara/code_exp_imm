@@ -6,8 +6,7 @@ output: html_document
 ---
 
 #################################################################################################### 
-Purpose of script: To check the convergence and WAIC of the models
-
+Purpose of script: To check the predicted seroprotection from the models 
 ####################################################################################################
 
 # Set up
@@ -108,66 +107,7 @@ dat_cov <- distinct(dat_fixed) %>%
   select(pat, mod_best, everything())
 ```
 
-# Estimate probability above threshold
-
-```{r}
-# source("../fun_mod/fun_venewdata.R")
-# # For each dat_cov
-# prob_threshold_l <- purrr::map(1:nrow(dat_cov), function(x) {
-#   pomp::bake(paste0(dirs$modres, "/modres_ve/ve_", dat_cov$mod_best[x]), dir = "", {
-#   message(glue("Estimating probability above threshold: {dat_cov$mod_best[x]}"))
-#   
-#     # Gather the data 
-#     datmod_x <- filter(dat_mod, mod_best == dat_cov[x, "mod_best"]) %>% slice(1)
-#     mod <- readRDS(file.path("/Volumes/ExternalSSD_LABG_Work/_seas_imm_backup/outputs/models",
-#                              datmod_x$pat[1], datmod_x$mod_best[1]))
-#     dat <- readRDS(glue("{dirs$modfit}/data", str_remove_all(datmod_x$dat[1], "_|s08"), "_brms_", 
-#                         datmod_x$pat[1], "_v", datmod_x$vac[1], "_s08.rds")) 
-#     datcov_x <- dat_cov[x, ]
-#     
-#     # Create new data 
-#     clu_name <- str_remove_all(datmod_x$mod_name_best[1], "csi_")
-#     newdat <- fun_venewdat(dat, datcov_x, clu_name)
-#   
-#     # Obtain probability above from Gamma distribution 
-#     mu <- posterior_epred(mod, newdata = newdat, re_formula = NA)
-#     shape <- as_draws_df(mod)$shape[seq_len(nrow(mu))]
-#     prob_mat <- pgamma(q = datcov_x$threshold_protect[[1]], shape = shape, rate = shape / mu,
-#                        lower.tail = FALSE) %>% t()
-#     ## Summarise
-#     prob_ci <- matrixStats::rowQuantiles(prob_mat, probs = c(0.025, 0.5, 0.975), na.rm = TRUE)
-#     prob_draws <- newdat %>%
-#       bind_cols(tibble(
-#         prob_mean = matrixStats::rowMeans2(prob_mat, na.rm = TRUE),
-#         prob_med  = prob_ci[, 2],
-#         prob_cilo = prob_ci[, 1],
-#         prob_ciup = prob_ci[, 3]))
-#     
-#     # Add clu variable 
-#     if (clu_name != "cs") prob_draws <- rename(prob_draws, clu = all_of(clu_name))
-#     if (!"clu" %in% names(prob_draws)) prob_draws <- mutate(prob_draws, clu = NA_character_)
-#   
-#     prob_draws %>%
-#       mutate(clu = str_replace_all(clu, " ", ""),
-#              mod_best = datmod_x$mod_best[1]) %>%
-#       left_join(distinct(all_datagaps, mod_best = mod, vac_week_v1, clu, tot),
-#                 by = join_by(vac_week_v1, clu, mod_best)) %>%
-#       left_join(select(datcov_x, mod_best, pat, imm_met_s1, imm_sero_s1, threshold_assay, threshold_protect, 
-#                        threshold_status, threshold_evidence), by = join_by(mod_best)) %>%
-#       left_join(select(datmod_x, -c(patcomb, patcomb_tidy)), by = join_by(mod_best, pat)) %>%
-#       relocate(pat, pat_tidy, mod_best, clu, vac_week_v1, sex, age, imm_met_s1, imm_sero_s1, 
-#                threshold_assay, threshold_protect, threshold_status, threshold_evidence, tot)
-#   })
-# })
-# 
-# prob_threshold <- bind_rows(prob_threshold_l) %>%
-#   relocate(
-#     pat, pat_tidy, mod_best, clu, vac_week_v1, sex, age,
-#     imm_met_s1, imm_sero_s1, threshold_assay, threshold_protect,
-#     threshold_status, threshold_evidence, tot)
-```
-
-# With CIs per draws 
+# Estimate probability above threshold with CIs per draws 
 
 ```{r}
 source("../fun_mod/fun_venewdata.R")
@@ -270,8 +210,9 @@ prob_threshold <- map_df(prob_threshold_l, \(dat) dat$prob_threshold) %>%
     threshold_status, threshold_evidence, tot)
 ```
 
+# Figure 5a --------------------------------------------------------------------
 
-# Plot it
+# Prepare data for plot 
 ```{r}
 datpl_phisumm <- readRDS(file = glue("{dirs$modres}/wbest_phisumm.rds"))
 
@@ -292,44 +233,29 @@ dat_pl <- prob_threshold %>%
   left_join(datpl_phisumm %>% rename(mod_best = mod)) %>%
   filter(pat %in% pat_sel)
 
-plb <- dat_pl %>%
-  ggplot(aes(x = vac_week_v1, y = prob_med*100, color = age_f, linetype = age_f,
-             fill = age_f, group = age_f)) +
-  geom_ribbon(aes(ymin = prob_cilo*100, ymax = prob_ciup*100), alpha = 0.1, color = NA) +
-  geom_line() +
-  facet_nested_wrap(~clu_tidy+reorder(paste0(pat_tidy, " (", toupper(imm_met_s1), ")"), phi_mean_shift), scales = "free_y", nest_line = TRUE,
-                           solo_line = TRUE, ncol = 6) +
-  geom_point(data = dat_pl %>%
-               filter(!is.na(tot)), aes(y = -Inf), group = 1, color = "black", fill = "black", shape = "|", size = 3) + 
-  scale_color_manual("Age at first vaccination \n(weeks)", values = c("#7AD151FF", "#2A788EFF", "#440154FF", "#7AD151FF", "#2A788EFF", "#440154FF")) + 
-  scale_fill_manual("Age at first vaccination \n(weeks)", values = c("#7AD151FF", "#2A788EFF", "#440154FF", "#7AD151FF", "#2A788EFF", "#440154FF")) + 
-  scale_linetype_manual(name = "Age at first vaccination \n(weeks)", values = rep(c("solid", "dashed"), each = 3)) +
-  scale_x_continuous("Week of vaccination", breaks = c(1,18,35,52), limits = c(1,52), expand = c(0,0)) + 
-  scale_y_continuous("Seroprotection") + 
-  theme(legend.position = "top", legend.byrow = TRUE, legend.title = element_text(hjust = 1))
-```
-
-```{r}
 dat_sum <-  map_df(prob_threshold_l, \(dat) dat$dat_sum) %>%
-  left_join(distinct(all_datagapssim, mod_best = mod, clu, included)) %>%
+  left_join(distinct(all_datagapssim, mod_best = mod, clu, included), by = join_by(mod_best, clu)) %>%
   filter(included == TRUE) %>%
   filter(sex == "M") %>%
   filter(!(pat == "dipht" & vac_name_v1 == "dtpa")) %>%
-  #filter(!(pat == "rota" & doses == "3")) %>%
+  filter(!(pat == "rota" & doses == "3")) %>%
   filter(!(str_detect(pat, "strep") & imm_met_s1 != "elisa")) %>%
   filter(!(str_detect(pat, "strep") & vac_name_v1 != "strep10")) %>%
   filter(!(str_detect(pat, "strep04") & mod_best != "bmv3_s08_strep04_csi_reg_6.rds")) %>%
-  left_join(tidy_names_clu) %>%
+  left_join(tidy_names_clu, by = join_by(clu)) %>%
   mutate(age_f = factor(as.character(age), levels = c("4","6", "7","8","38","45","52"))) %>%
-  left_join(distinct(prob_threshold, mod_best, threshold_status, pat, )) %>%
+  left_join(distinct(prob_threshold, mod_best, threshold_status, pat), by = join_by(pat, mod_best)) %>%
   mutate(threshold_status = if_else(threshold_status == "accepted", "seroprotection", threshold_status)) %>%
   mutate(threshold_status = if_else(pat == "rota", "seroprotection", threshold_status)) %>%
   filter(threshold_status == "seroprotection") %>%
-  left_join(datpl_phisumm %>% rename(mod_best = mod)) %>%
+  left_join(datpl_phisumm %>% rename(mod_best = mod),
+            by = join_by(pat, pat_tidy, mod_best, clu, included, clu_tidy)) %>%
   filter(pat %in% pat_sel)
+```
 
-pl_sum <- ggplot(dat_sum%>%
-      filter(age_f %in% c(8, 52)) , aes(x = sum_mean, y = sum_diff)) +
+# Figure 5a and save it 
+```{r}
+Fig_5a <- ggplot(filter(dat_sum, age_f %in% c(8, 52)) , aes(x = sum_mean, y = sum_diff)) +
   geom_linerange(aes(xmin = sum_mean_cilo, xmax = sum_mean_ciup, color = reorder(pat_tidy, sum_mean)), alpha = 0.5) +
   geom_linerange(aes(ymin = sum_diff_cilo, ymax = sum_diff_ciup, color = reorder(pat_tidy, sum_mean)), alpha = 0.5) +
   geom_point(aes(color = reorder(pat_tidy, sum_mean))) + 
@@ -337,60 +263,43 @@ pl_sum <- ggplot(dat_sum%>%
   scale_x_continuous("Mean seroprotection (%)") + 
   scale_y_continuous("Seasonal variation in seroprotection (%)") + 
   theme(legend.position = "top", legend.byrow = TRUE, legend.title = element_text(hjust = 1))
-
-saveRDS(pl_sum, file = "../_figures/temp_figve.rds")
+Fig_5a
+saveRDS(Fig_5a, file = paste0(dirs$modres, "/figve_temp.rds"))
 ```
 
-
-
-
+# Supplementary Figure 17 --------------------------------------------------------------------
 ```{r}
-library(ggrepel)
+Supfig_15 <- dat_pl  %>%
+  ggplot(aes(x = vac_week_v1, y = prob_med*100, color = age_f, linetype = age_f,
+             fill = age_f, group = age_f)) +
+  geom_ribbon(aes(ymin = prob_cilo*100, ymax = prob_ciup*100), alpha = 0.1, color = NA) +
+  geom_line() +
+  facet_nested_wrap(~clu_tidy+reorder(pat_tidy, phi_mean_shift), 
+                    scales = "free_y", nest_line = TRUE, solo_line = TRUE, ncol = 6) +
+  geom_point(data = filter(dat_pl, !is.na(tot)), aes(y = -Inf), 
+             group = 1, color = "black", fill = "black", shape = "|", size = 3) + 
+  scale_color_manual("Age at first vaccination \n(weeks)", 
+                     values = c("#7AD151FF", "#2A788EFF", "#440154FF", "#7AD151FF", "#2A788EFF", "#440154FF")) + 
+  scale_fill_manual("Age at first vaccination \n(weeks)", 
+                    values = c("#7AD151FF", "#2A788EFF", "#440154FF", "#7AD151FF", "#2A788EFF", "#440154FF")) + 
+  scale_linetype_manual(name = "Age at first vaccination \n(weeks)", values = rep(c("solid", "dashed"), each = 3)) +
+  scale_x_continuous("Week of vaccination", breaks = c(1,18,35,52), limits = c(1,52), expand = c(0,0)) + 
+  scale_y_continuous("Seroprotection") + 
+  theme(legend.position = "top", legend.byrow = TRUE, legend.title = element_text(hjust = 1))
 
-dat_sum <- dat_pl %>%
+ggsave(Supfig_15, file = "../_figures/figsup17.pdf", width = 9, height = 9)
+```
+
+# Check results 
+```{r}
+dat_pl %>%
   group_by(pat, clu_tidy, pat_tidy, imm_met_s1, phi_mean_shift, mod_best, age_f) %>%
   summarise(sum_min = min(prob_med*100), sum_max = max(prob_med*100), sum_mean = mean(prob_med*100),
-            sum_diff = sum_max - sum_min)
-
-pla <- ggplot(dat_sum, aes(x = sum_mean, y = sum_diff)) +
-  geom_text_repel(
-    data = dat_sum %>%
-      filter(age_f %in% c(8, 52)) %>%
-      group_by(pat, clu_tidy, pat_tidy, imm_met_s1, phi_mean_shift, mod_best) %>%
-      summarise(sum_mean = mean(sum_mean), sum_diff = mean(sum_diff), age_f = age_f[2]),
-     aes(label = pat_tidy), color = "grey", max.overlaps = 100, show.legend = FALSE) + 
-  geom_point(aes(color = age_f, shape = age_f), alpha = 0.5, size = 3) + 
-  scale_color_manual(name = "Age at first vaccination \n(weeks)", values = c("#7AD151FF", "#2A788EFF", "#440154FF", "#7AD151FF", "#2A788EFF", "#440154FF")) + 
-  scale_shape_manual(name = "Age at first vaccination \n(weeks)", values = c(16, 16, 16, 17, 17, 17)) + 
-  scale_x_continuous("Mean seroprotection", limits = c(85, 110), breaks = c(85, 90, 95, 100)) + 
-  scale_y_continuous("Range seroprotection") + 
-  theme(legend.position = "top", legend.byrow = TRUE, legend.title = element_text(hjust = 1))
-
-pla <- ggplot(dat_sum%>%
-      filter(age_f %in% c(8, 52)) , aes(x = sum_mean, y = sum_diff)) +
-  # geom_text_repel(
-  #   data = dat_sum %>%
-  #     filter(age_f %in% c(8, 52)) %>%
-  #     group_by(pat, clu_tidy, pat_tidy, imm_met_s1, phi_mean_shift, mod_best) %>%
-  #     summarise(sum_mean = mean(sum_mean), sum_diff = mean(sum_diff), age_f = age_f[2]),
-  #    aes(label = pat_tidy), color = "grey", max.overlaps = 100, show.legend = FALSE) + 
-  geom_point(aes(color = reorder(pat_tidy, sum_mean), shape = clu_tidy), alpha = 0.5, size = 3) + 
-  #scale_color_manual(name = "Age at first vaccination \n(weeks)", values = c("orange", "red", "darkred", "orange", "red", "darkred")) + 
-  scale_color_viridis_d() + 
-  #scale_shape_manual(name = "Age at first vaccination \n(weeks)", values = c(16, 16, 16, 17, 17, 17)) + 
-  scale_x_continuous("Mean seroprotection", limits = c(85, 110), breaks = c(85, 90, 95, 100)) + 
-  scale_y_continuous("Range seroprotection") + 
-  theme(legend.position = "top", legend.byrow = TRUE, legend.title = element_text(hjust = 1))
-
-
-plb+pla + plot_layout(ncol = 1, heights = c(3,1))
-
-
-ggsave(plb, file = "../_figures/figsup15.pdf", width = 9, height = 9)
-
-dat_sum %>%
+            sum_diff = sum_max - sum_min) %>%
   filter(pat == "strep04") %>%
   arrange(-sum_diff)
 ```
 
-
+####################################################################################################
+# END
+####################################################################################################

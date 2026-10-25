@@ -119,6 +119,27 @@ datpl_l$fct %>%
   mutate(est = round(est*100, digits = 2), 
          est_ci95lo = round(est_ci95lo*100, digits = 2), 
          est_ci95up = round(est_ci95up*100, digits = 2))
+
+percent_change <- function(beta) {
+  100 * expm1(beta)
+}
+
+for (nm in c("nfct", "fct")) {
+  datpl_l[[nm]] <- datpl_l[[nm]] %>%
+    mutate(
+      est = percent_change(est),
+      est_ci95lo = percent_change(est_ci95lo),
+      est_ci95up = percent_change(est_ci95up)
+    )
+}
+
+datpl_l$nfct %>%
+  filter(param == "vac_conc", !is.na(sig)) %>%
+  select(pat, param_i, est, est_ci95lo, est_ci95up) %>%
+  mutate(est = round(est, 2), 
+         est_ci95lo = round(est_ci95lo, 2), 
+         est_ci95up = round(est_ci95up, 2)) %>%
+  arrange(est)
 ```
 
 
@@ -131,10 +152,10 @@ names(col_sig) <- c("pos", "neg")
 
 pl_cov_l <- sapply(c("age", "sex", "time_vl_s1", "time_v1_v2", "time_v2_v3", "vac_conc"), function(x) {
   filter(datpl_l$nfct, param == x) %>%
-    ggplot(aes(x = est*100, y = reorder(pat_tidy, est), color = sig)) +
+    ggplot(aes(x = est, y = reorder(pat_tidy, est), color = sig)) +
     geom_vline(xintercept = 0, linetype = "dotted", color = "grey") + 
     geom_point() +
-    geom_segment(aes(x = est_ci95lo*100, xend = est_ci95up*100)) + 
+    geom_segment(aes(x = est_ci95lo, xend = est_ci95up)) + 
     facet_grid(~param_tidy, scales = "free") + 
     scale_color_manual(values = col_sig) + 
     scale_x_continuous("Estimate (% change)") + 
@@ -151,10 +172,10 @@ pl_cov_l
 pl_cov_l$reg <- filter(datpl_l$fct, str_detect(param, "reg")) %>%
   left_join(rename(tidy_names_clu, param_i = clu, param_i_tidy = clu_tidy), by = join_by(param_i)) %>%
   mutate(param_i_tidy = factor(param_i_tidy, levels = rev(levels(param_i_tidy)))) %>%
-  ggplot(aes(x = est*100, y = param_i_tidy, color = sig)) +
+  ggplot(aes(x = est, y = param_i_tidy, color = sig)) +
     geom_vline(xintercept = 0, linetype = "dotted", color = "grey") + 
     geom_point() +
-    geom_segment(aes(x = est_ci95lo*100, xend = est_ci95up*100)) + 
+    geom_segment(aes(x = est_ci95lo, xend = est_ci95up)) + 
     facet_nested(param_tidy+reorder(pat_tidy, est)~"Region", scales = "free", space = "free",
                  nest_line = TRUE, solo_line = TRUE) + 
     scale_color_manual(values = col_sig) + 
@@ -170,10 +191,10 @@ pl_cov_l$vac_name_v1 <- filter(datpl_l$fct, str_detect(param, "vac_name_v1")) %>
                                labels = c("DTPw", "Pfizer-7","Pfizer-13",  "GSK-11"))) %>%
   mutate(param_tidy = case_when(param_i == "dtpw" ~ "Vaccine \n(DTPa)",
                                 str_detect(param_i, "strep") ~ "Vaccine \n(GSK-10)")) %>%
-  ggplot(aes(x = est*100, y = param_i_tidy, color = sig)) +
+  ggplot(aes(x = est, y = param_i_tidy, color = sig)) +
     geom_vline(xintercept = 0, linetype = "dotted", color = "grey") + 
     geom_point() +
-    geom_segment(aes(x = est_ci95lo*100, xend = est_ci95up*100)) + 
+    geom_segment(aes(x = est_ci95lo, xend = est_ci95up)) + 
     facet_nested(param_tidy+pat_tidy~"Vaccine", scales = "free", space = "free",
                nest_line = TRUE, solo_line = TRUE) + 
     scale_color_manual(values = col_sig) + 
@@ -310,7 +331,7 @@ fig4a  <- (pl_cov_l$age + pl_cov_l$sex + pl_cov_l$vac_conc + pl_cov_l$vac_name_v
 
 fig4 <- (free(fig4a) + free(pl_cov_l$mvn)) + plot_layout(ncol = 1, heights = c(1.3,1))
  
-ggsave(fig4, file = "../figures/fig4.pdf", width = 11.5, height = 12)
+ggsave(fig4, file = "../_figures/fig4.pdf", width = 11.5, height = 12)
 ```
 
 ####################################################################################################

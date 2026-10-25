@@ -14,7 +14,7 @@ fun_figpar <- function(x, xlim = c(0, 22500)) {
   mutate(tot_prop = tot/sum(tot)) %>%
   # Plot
   ggplot(aes(y = fct_rev(pat_tidy), x = tot, group = reorder(study,tot), fill = tot)) +
-  geom_bar(stat = "identity", color = "white", size = 0.1) + 
+  geom_bar(stat = "identity", color = "white", linewidth = 0.1) + 
   geom_label(data = distinct(x, pat_tidy, study, pid) %>%
                group_by(pat_tidy) %>%
                summarise(study_tot = length(unique(study)), tot = n()), 
@@ -25,7 +25,7 @@ fun_figpar <- function(x, xlim = c(0, 22500)) {
   scale_fill_viridis_c("Vaccinated individuals\nper study", option = "rocket", trans = "log10") + 
   theme(legend.position = "top",
         axis.title.y = element_blank(),
-        panel.grid.major.y = element_line())
+        panel.grid.major.y = element_line(color = "grey90"))
 }
 
 ## Figure 1a.2: Plot showing age at first vaccination (in months) by pathogen
@@ -51,7 +51,7 @@ fun_figage <- function(x, xbreaks = c(0, 2, 4, 6, 12, 18, 24, 36, 48, 60, 72, 84
         axis.text.y = element_blank(),
         axis.ticks.y = element_blank(),
         axis.line.y = element_blank(),
-        panel.grid.major.y = element_line())
+        panel.grid.major.y = element_line(color = "grey90"))
 }
 
 ## Figure 1a.3: Stacked bar plot showing the sex ratio by pathogen
@@ -120,16 +120,18 @@ fun_figimm <- function(x) {
 }
 
 # Figure 1b.3: Maps of study locations for each subgroup of pathogens
-fun_figmap <- function(x, x_agg) {
-  bind_rows(lapply(unique(x$pat), function(pat_x) {
+fun_figmap <- function(x, x_agg, tidynames = FALSE) {
+  datpl <- bind_rows(lapply(unique(x$pat), function(pat_x) {
     mutate(world, 
            pat = pat_x,
            pat_tidy = distinct(x, pat, pat_tidy) %>% filter(pat == pat_x) %>% pull(pat_tidy),
            dat = case_when(region %in% (filter(x, pat == pat_x))$country ~ TRUE, .default = FALSE)
-    )})) %>%
-    # Add tidy names for the pathogens 
-    #left_join(tidy_names_pat, by = join_by(pat)) %>%
-    # Plot 
+    )})) 
+  # Add tidy names for the pathogens 
+  if(tidynames) {datpl <- left_join(datpl, tidy_names_pat, by = join_by(pat))}
+  
+  # Plot 
+  datpl %>%
     ggplot(aes(x = long, y = lat, group = group, fill = dat)) +
     facet_grid(pat_tidy~.) +
     geom_polygon() +

@@ -101,10 +101,8 @@ supfig_4 <- datpl_sam %>%
   theme(legend.position = "none")
 
 # Save the plot
-ggsave(supfig_4, file = "../figures/figsup4.pdf", width = 10, height = 7)
+ggsave(supfig_4, file = "../_figures/figsup4.pdf", width = 10, height = 7)
 ```
-
-# WE NEED TO TAKE OUT THE SPLINE MODELS FROM THE MODRES SCRIPTS OF BEFORE 
 
 ####################################################################################################
 # END

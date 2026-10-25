@@ -1,5 +1,5 @@
 ---
-title: "BRMS Predict population immunogenicity under extreme scenarios"
+title: "BRMS Predict population immunogenicity under vaccination scenarios"
 author: "Laura Andrea Barrrero Guevara"
 date: "2026-07-30"
 output: html_document
@@ -7,7 +7,7 @@ output: html_document
 
 ####################################################################################################
 Purpose of script: To estimate population mean immunogenicity under different 
-vaccination ages and a targeted delay during the bad season
+vaccination ages and a targeted delay during the valley season
 ####################################################################################################
 
 # Set up
@@ -23,10 +23,11 @@ theme_set(theme_classic() + theme(strip.background = element_blank()))
 # Read in files 
 
 ```{r}
-imm_files <- list.files(glue("{dirs$modres}/modresimm_populationextreme"), full.names = TRUE) %>%
-  str_subset("/imm_.*_draw1000.rds")
+imm_files <- list.files(glue("{dirs$modres}/modresimm_population"), full.names = TRUE) %>%
+  str_subset("/imm_.*_age[0-9]+to[0-9]+_draw[0-9]+[.]rds$")
 
-dat_cov <- readRDS(glue("{dirs$modres}/modresimm_populationextreme/dat_cov.rds")) 
+dat_cov <- readRDS(glue("{dirs$modres}/modresimm_population/dat_cov.rds"))
+
 dat_phase <- readRDS(file = glue("{dirs$modres}/wbest_phisumm.rds")) %>%
   filter(mod %in% dat_cov$mod_best) %>%
   mutate(min_week = round(((phi_mean - 1 + 26) %% 52) + 1)) %>%
@@ -35,61 +36,26 @@ dat_phase <- readRDS(file = glue("{dirs$modres}/wbest_phisumm.rds")) %>%
   distinct()
 ```
 
-# Choose extreme
-
-Select the covariate combination with the lowest mean predicted immunogenicity across
-ages, weeks, clusters, sexes, and posterior draws, following the original script.
-Run `03_04_11_modresimm_poplationextreme.Rmd` first, and `03_04_10_modressimm_population_scenarios.Rmd`
-for the standard-covariate comparison.
-```{r}
-sim_extreme <- map_dfr(seq_len(nrow(dat_cov)), \(x) {
-  pomp::bake(paste0(dirs$modres, "/modresimm_populationextreme/sim_extreme_", dat_cov$mod_best[x]), dir = "", {
-    # Select on model 
-    mod_x <- dat_cov$mod_best[x]
-    message(glue("Estimating population immunogenicity: {mod_x}"))
-    # Immunogenicity 
-    dat_imm <- readRDS({
-      path_imm <- imm_files[str_starts(basename(imm_files),
-        fixed(paste0("imm_", str_remove(mod_x, "[.]rds$"), "_draw")))]
-      stopifnot(length(path_imm) == 1)
-      path_imm
-    })
-    
-    dat_imm %>% 
-      group_by(across(-c(draw, imm, vac_week_v1, pi_vac_week_v1, clu, age, sex))) %>%
-      summarise(imm = mean(imm), .groups = "drop") %>%
-      arrange(imm) %>%
-      ungroup() %>%
-      slice(1)
-  })
-})
-```
-
-
 # Baseline simulations 
 
 ```{r}
 sim_baseline <- map_dfr(seq_len(nrow(dat_cov)), \(x) {
-  pomp::bake(paste0(dirs$modres, "/modresimm_populationextreme/sim_baseline_", dat_cov$mod_best[x]), dir = "", {
+  pomp::bake(paste0(dirs$modres, "/modresimm_population/sim_baseline_", dat_cov$mod_best[x]), dir = "", {
     # Select on model 
     mod_x <- dat_cov$mod_best[x]
     message(glue("Estimating population immunogenicity: {mod_x}"))
     # Immunogenicity 
-    dat_imm <- readRDS({
-      path_imm <- imm_files[str_starts(basename(imm_files),
-        fixed(paste0("imm_", str_remove(mod_x, "[.]rds$"), "_draw")))]
-      stopifnot(length(path_imm) == 1)
-      path_imm
-    }) %>%
-      left_join(sim_extreme %>%
-                  select(-imm) %>%
-                  mutate(imm_inc = TRUE)) %>%
-      filter(imm_inc)
+    path_imm <- imm_files[str_starts(basename(imm_files),
+                                      fixed(paste0("imm_", str_remove(mod_x, "[.]rds$"), "_age")))]
+    stopifnot(length(path_imm) == 1)
+    dat_imm <- readRDS(path_imm)
+    stopifnot(all(is.finite(dat_imm$imm)), !anyNA(dat_imm$draw))
+    dat_phase_x <- dat_phase %>%
+      filter(mod_best == mod_x) %>%
+      semi_join(distinct(dat_imm, pat, mod_best, clu), by = join_by(pat, mod_best, clu))
     
     # Simulation baseline 
-    dat_pop <- dat_phase %>%
-      filter(mod_best == mod_x) %>%
-      semi_join(distinct(dat_imm, pat, mod_best, clu), by = join_by(pat, mod_best, clu)) %>%
+    dat_pop <- dat_phase_x %>%
       crossing(birth_week = c(1:52), age_ini = unique(dat_imm$age), sex = c("F", "M")) %>%
       mutate(vac_week_v1_ini = ((birth_week - 1 + age_ini) %% 52) + 1,
              n = 1000 / 2) %>%
@@ -111,58 +77,33 @@ sim_baseline <- map_dfr(seq_len(nrow(dat_cov)), \(x) {
                 .groups = "drop")
   })
 })
-
-sim_baseline_noextreme <- map_dfr(seq_len(nrow(dat_cov)), \(x) {
-  readRDS(paste0(dirs$modres, "/modresimm_population/sim_baseline_", dat_cov$mod_best[x]))
-})
-# 
-# df_age <- data.frame(age_ini = 38, delay = c(0, seq(5, 26, by = 4))) %>%
-#   crossing(pat = c("measl", "mumps", "rubel", "vzv")) %>%
-#   rbind(data.frame(age_ini = 6, delay = 0:8) %>%
-#           crossing(pat = str_subset(pat_sel, "measl|mumps|rubel|vzv|hav", negate = TRUE))) %>%
-#   rbind(data.frame(age_ini = 51, delay = c(0, seq(5, 26, by = 4))) %>%
-#           crossing(pat = "hav")) %>%
-#   mutate(age = age_ini + delay) %>%
-#   distinct(pat, age)
-
-rbind(sim_baseline %>% mutate(extreme = TRUE), sim_baseline_noextreme %>% mutate(extreme = FALSE)) %>%
-  group_by(pat) %>%
-  filter((pat %in% c("measl", "mumps", "rubel", "vzv") & age_ini == 38) |
-           (!(pat %in% c("measl", "mumps", "rubel", "vzv", "hav")) & age_ini == 6) | 
-           (pat %in% c("hav") & age_ini == 51)) %>%
-  ggplot(aes(y = clu, x = imm_pop_mean, color = extreme)) +
-  geom_point() + 
-  geom_linerange(aes(xmin = imm_pop_cilo, xmax = imm_pop_ciup)) + 
-  facet_grid(pat ~., scales = "free", space = "free")
-
-rbind(sim_baseline %>% mutate(extreme = TRUE), sim_baseline_noextreme %>% mutate(extreme = FALSE))
 ```
 
 # 12 Weeks more simulations
 
+The targeted period includes the minimum week and the following 12 weeks.
+Immunogenicity is the population-weighted mean expected antibody response, in the model response units.
+Absolute differences retain these units; ratios and percentage increases are calculated within posterior draws.
+
 ```{r}
 sim_delay12more <- map_dfr(seq_len(nrow(dat_cov)), \(x) {
-  pomp::bake(paste0(dirs$modres, "/modresimm_populationextreme/sim_delay12more_ratio_", dat_cov$mod_best[x]), dir = "", {
+  pomp::bake(paste0(dirs$modres, "/modresimm_population/sim_delay12more_ratio_", dat_cov$mod_best[x]), dir = "", {
     # Select on model 
     mod_x <- dat_cov$mod_best[x]
     message(glue("Estimating population immunogenicity: {mod_x}"))
     
     # Immunogenicity 
-    dat_imm <- readRDS({
-      path_imm <- imm_files[str_starts(basename(imm_files),
-        fixed(paste0("imm_", str_remove(mod_x, "[.]rds$"), "_draw")))]
-      stopifnot(length(path_imm) == 1)
-      path_imm
-    }) %>%
-      left_join(sim_extreme %>%
-                  select(-imm) %>%
-                  mutate(imm_inc = TRUE)) %>%
-      filter(imm_inc)
+    path_imm <- imm_files[str_starts(basename(imm_files),
+                                      fixed(paste0("imm_", str_remove(mod_x, "[.]rds$"), "_age")))]
+    stopifnot(length(path_imm) == 1)
+    dat_imm <- readRDS(path_imm)
+    stopifnot(all(is.finite(dat_imm$imm)), !anyNA(dat_imm$draw))
+    dat_phase_x <- dat_phase %>%
+      filter(mod_best == mod_x) %>%
+      semi_join(distinct(dat_imm, pat, mod_best, clu), by = join_by(pat, mod_best, clu))
     
     # Baseline population --------------------------------------------------------------------------
-    dat_pop_baseline <- dat_phase %>%
-      filter(mod_best == mod_x) %>%
-      semi_join(distinct(dat_imm, pat, mod_best, clu), by = join_by(pat, mod_best, clu)) %>%
+    dat_pop_baseline <- dat_phase_x %>%
       crossing(birth_week = 1:52, age_ini = unique(dat_imm$age), sex = c("F", "M")) %>%
       mutate(vac_week_v1 = ((birth_week - 1 + age_ini) %% 52) + 1, 
              age = age_ini,
@@ -175,8 +116,8 @@ sim_delay12more <- map_dfr(seq_len(nrow(dat_cov)), \(x) {
       summarise(imm_pop_baseline = sum(n * imm) / sum(n), .groups = "drop")
     
     # Baseline recommended later immunogenicity for every posterior draw 
+    # Same later-age comparator as 03_04_06: 8 weeks for infants and 52 otherwise
     age_late_x <- if_else(dat_cov$age_fixed[x] == 8, 8, 52)
-    #stopifnot(age_late_x %in% dat_imm$age)
     
     imm_pop_late_draws <- imm_pop_base_draws %>%
       filter(age_ini == age_late_x) %>%
@@ -186,9 +127,7 @@ sim_delay12more <- map_dfr(seq_len(nrow(dat_cov)), \(x) {
     delay_l <- if(dat_cov$age_fixed[x] == 8) 1:8 else 1:26
     
     # Scenario population --------------------------------------------------------------------------
-    dat_pop <- dat_phase %>%
-      filter(mod_best == mod_x) %>%
-      semi_join(distinct(dat_imm, pat, mod_best, clu), by = join_by(pat, mod_best, clu)) %>%
+    dat_pop <- dat_phase_x %>%
       crossing(birth_week = c(1:52), age_ini = unique(dat_imm$age), sex = c("F", "M")) %>%
       mutate(vac_week_v1_ini = ((birth_week - 1 + age_ini) %% 52) + 1,
              n = 1000 / 2) %>%
@@ -200,8 +139,62 @@ sim_delay12more <- map_dfr(seq_len(nrow(dat_cov)), \(x) {
   
     # Immunogenicity -------------------------------------------------------------------------------
     imm_pop_draws <- map_dfr(delay_l, \(delay_x) {
-      dat_pop_x <- filter(dat_pop, delay == delay_x, (age_ini + delay_x) %in% dat_imm$age)
+      dat_pop_x <- filter(dat_pop, delay == delay_x, age_ini <= max(dat_imm$age) - delay_x)
 
+      # Immunogenicity only among targeted children
+      imm_target_delay <- dat_pop_x %>%
+        filter(bad_season) %>%
+        left_join(
+          dat_imm,
+          by = join_by(pat, mod_best, clu, sex, vac_week_v1, age),
+          relationship = "many-to-many"
+        ) %>%
+        group_by(pat, mod_best, clu, min_week, age_ini, draw, delay) %>%
+        summarise(
+          imm_target_delay = sum(n * imm) / sum(n),
+          .groups = "drop"
+        )
+      
+      imm_target_base <- dat_pop_x %>%
+        filter(bad_season) %>%
+        mutate(
+          vac_week_v1 = vac_week_v1_ini,
+          age = age_ini
+        ) %>%
+        left_join(
+          dat_imm,
+          by = join_by(pat, mod_best, clu, sex, vac_week_v1, age),
+          relationship = "many-to-many"
+        ) %>%
+        group_by(pat, mod_best, clu, min_week, age_ini, draw, delay) %>%
+        summarise(
+          imm_target_base = sum(n * imm) / sum(n),
+          .groups = "drop"
+        )
+        imm_target <- imm_target_delay %>%
+          left_join(
+            imm_target_base,
+            by = join_by(
+              pat, mod_best, clu, min_week,
+              age_ini, draw, delay
+            )
+          ) %>%
+          mutate(
+            increasepct_target =
+              100 * (imm_target_delay / imm_target_base - 1)
+          )
+        
+        imm_target_summ <- imm_target %>%
+          group_by(
+            pat, mod_best, clu, min_week,
+            age_ini, delay
+          ) %>%
+          summarise(
+            increasepct_target_mean = mean(increasepct_target, na.rm = TRUE),
+            increasepct_target_cilo = quantile(increasepct_target, 0.025, na.rm = TRUE),
+            increasepct_target_ciup = quantile(increasepct_target, 0.975, na.rm = TRUE),
+            .groups = "drop"
+          )
       # Immunogenicity under the delayed scenario by draw
       imm_pop_scenario_draws <- dat_pop_x %>%
         left_join(dat_imm, by = join_by(pat, mod_best, clu, sex, vac_week_v1, age),
@@ -234,7 +227,7 @@ sim_delay12more <- map_dfr(seq_len(nrow(dat_cov)), \(x) {
           ~ if_else(is.finite(.x), .x, NA_real_)))
       
       # Summarise posterior distributions
-      ratio_draws %>%
+      imm_pop_summ <- ratio_draws %>%
         group_by(scenario, pat, mod_best, clu, min_week, age_ini, delay) %>%
         summarise(
 
@@ -283,6 +276,10 @@ sim_delay12more <- map_dfr(seq_len(nrow(dat_cov)), \(x) {
           gapclosedpct_bls_cilo = quantile(gapclosedpct_bls_draw, 0.025, na.rm = TRUE),
           gapclosedpct_bls_ciup = quantile(gapclosedpct_bls_draw, 0.975, na.rm = TRUE),
           .groups = "drop")
+      
+      imm_pop_summ %>%
+        left_join(imm_target_summ, by = join_by(pat, mod_best, clu, min_week, age_ini, delay))
+      
     })
     
     return(imm_pop_draws)
@@ -297,18 +294,16 @@ sim_delay12more <- map_dfr(seq_len(nrow(dat_cov)), \(x) {
 ```{r}
 mod_x <- "bmv1_semeth_s08_vzv_csi_reg_4.rds"
 
-dat_imm <- readRDS({
-      path_imm <- imm_files[str_starts(basename(imm_files),
-        fixed(paste0("imm_", str_remove(mod_x, "[.]rds$"), "_draw")))]
-      stopifnot(length(path_imm) == 1)
-      path_imm
-    }) %>%
-  semi_join(sim_extreme %>% select(-imm))
+path_imm <- imm_files[str_starts(basename(imm_files), fixed(
+  paste0("imm_", str_remove(mod_x, "[.]rds$"), "_age")))]
+dat_imm <- readRDS(path_imm)
+
+dat_phase_x <- dat_phase %>%
+  filter(mod_best == mod_x) %>%
+  semi_join(distinct(dat_imm, pat, mod_best, clu), by = join_by(pat, mod_best, clu))
 delay_l <- 1:26
 
-dat_pop <- dat_phase %>%
-      filter(mod_best == mod_x) %>%
-      semi_join(distinct(dat_imm, pat, mod_best, clu), by = join_by(pat, mod_best, clu)) %>%
+dat_pop <- dat_phase_x %>%
   crossing(birth_week = c(1:52), age_ini = unique(dat_imm$age), sex = c("F", "M")) %>%
   mutate(vac_week_v1_ini = ((birth_week - 1 + age_ini) %% 52) + 1,
          n = 1000 / 2) %>%
@@ -320,9 +315,7 @@ dat_pop <- dat_phase %>%
 
 dat_pop_x <- filter(dat_pop, delay == 13)
 
-dat_pop_baseline <- dat_phase %>%
-      filter(mod_best == mod_x) %>%
-      semi_join(distinct(dat_imm, pat, mod_best, clu), by = join_by(pat, mod_best, clu)) %>%
+dat_pop_baseline <- dat_phase_x %>%
   crossing(birth_week = 1:52, age_ini = unique(dat_imm$age), sex = c("F", "M")) %>%
   mutate(vac_week_v1 = ((birth_week - 1 + age_ini) %% 52) + 1,
          age = age_ini,
@@ -352,170 +345,137 @@ test_baseline <- dat_pop_baseline %>%
   summarise(n = first(n),
             imm_up = quantile(imm, 0.975),
             imm_lo = quantile(imm, 0.025),
-            imm = mean(imm))
+            imm = mean(imm), .groups = "drop")
+```
 
+# Figure 5 ---------------------------------------------------------------------
+
+```{r}
+# Plot for figure 5b
 figimm_l <- list()
-
-figimm_l$a <- test_baseline %>%
+figimm_l$a1 <- test_baseline %>%
   ggplot(aes(x = vac_week_v1, y = imm, color = scenario)) +
-  geom_linerange(aes(ymin= imm_lo, ymax =imm_up), alpha = 0.2) +
   geom_point() +
   scale_x_continuous("Week of vaccination", breaks = c(1,18,35,52), limits = c(1,52), expand = c(0,0)) +
-  scale_y_continuous("Mean immunogenicity (model units)") +
+  scale_y_continuous("Mean immunogenicity") +
   scale_color_manual("Scenario", values = c("#21908CFF","grey", "#440154FF"), guide = guide_legend(nrow = 2)) +
   theme(legend.position = "none", axis.line.x = element_blank(), axis.title.x = element_blank(),
-        axis.text.x = element_blank(), axis.ticks.x = element_blank()) +
-  guides(
-    color = "none",
-    fill = "none",
-    shape = "none",
-    linetype = "none"
-  ) + 
-test_baseline %>%
-  mutate(scenario_y = as.numeric(factor(scenario, levels = c("Everyone later", "Everyone early", "Seasonally targeted delay")))) %>%
+        axis.text.x = element_blank(), axis.ticks.x = element_blank(), axis.title.y = element_blank()) +
+  guides(color = "none", fill = "none", shape = "none", linetype = "none")
+
+figimm_l$a2 <- test_baseline %>%
+  mutate(scenario_y = as.numeric(factor(
+    scenario, levels = c("Everyone later", "Everyone early", "Seasonally targeted delay")))) %>%
   ggplot(aes(x = vac_week_v1, y = scenario_y, fill = scenario)) +
   geom_tile(color = "white") +
   scale_x_continuous("Week of vaccination", breaks = c(1,18,35,52), limits = c(1,52), expand = c(0,0)) +
-  scale_y_continuous(breaks = 1:3, labels = NULL, sec.axis = dup_axis(name = NULL, breaks = 1:3, labels = c(
-    "Everyone later", "Everyone early", "Seasonally targeted delay")), expand = c(0, 0)) +
+  scale_y_continuous(breaks = 1:3, labels = c("Everyone later", "Everyone early", "Seasonally targeted delay"), 
+                     expand = c(0, 0)) +
   scale_fill_manual(values = c("#21908CFF", "grey", "#440154FF"), guide = guide_legend(nrow = 2)) +
-  theme(legend.position = "none", axis.line.y.left = element_line(), axis.text.y.left = element_blank(),
-        axis.ticks.y.left = element_blank(), axis.title.y.left = element_blank()) + 
-  guides(
-    color = "none",
-    fill = "none",
-    shape = "none",
-    linetype = "none"
-  ) + 
-  plot_layout(ncol = 1, heights = c(6,1))
+  theme(legend.position = "none", axis.title.y.left = element_blank(), 
+        panel.background = element_rect(fill = "transparent")) + 
+  guides(color = "none", fill = "none", shape = "none", linetype = "none") 
+
+figimm_l$a <- figimm_l$a1/ figimm_l$a2 + plot_layout(heights = c(6,1))
+
+figimm_l$a <- figimm_l$a1 /
+  patchwork::free(figimm_l$a2 , type = "space", side = "l") +
+  plot_layout(heights = c(6, 1))
 ```
 
+# Prepare data for plot 
 ```{r}
 pldat <- list()
 mmrv <- c("measl", "mumps", "rubel", "vzv")
-```
 
-```{r}
 pldat$baseline <- sim_baseline %>%
-  mutate(mmrvhav = case_when(
-      pat %in% mmrv ~ 1,
-      !(pat %in% c(mmrv, "hav")) ~ 2,
-      pat == "hav" ~ 3),
-    age_min = case_when(
-      mmrvhav == 1 ~ 38,
-      mmrvhav == 2 ~ 6,
-      mmrvhav == 3 ~ 51),
-    age_rec = case_when(
-      mmrvhav == 1 ~ 52,
-      mmrvhav == 2 ~ 8,
-      mmrvhav == 3 ~ 52)) %>%
+  mutate(mmrvhav = case_when(pat %in% mmrv ~ 1, !(pat %in% c(mmrv, "hav")) ~ 2, pat == "hav" ~ 3),
+    age_min = case_when(mmrvhav == 1 ~ 38, mmrvhav == 2 ~ 6, mmrvhav == 3 ~ 51),
+    age_rec = case_when(mmrvhav == 1 ~ 52, mmrvhav == 2 ~ 8, mmrvhav == 3 ~ 52)) %>%
   left_join(tidy_names_pat, by = join_by(pat)) %>%
   left_join(tidy_names_clu, by = join_by(clu)) 
-
-pldat$baseline_noextreme <- sim_baseline_noextreme %>%
-  mutate(mmrvhav = case_when(
-      pat %in% mmrv ~ 1,
-      !(pat %in% c(mmrv, "hav")) ~ 2,
-      pat == "hav" ~ 3),
-    age_min = case_when(
-      mmrvhav == 1 ~ 38,
-      mmrvhav == 2 ~ 6,
-      mmrvhav == 3 ~ 51),
-    age_rec = case_when(
-      mmrvhav == 1 ~ 52,
-      mmrvhav == 2 ~ 8,
-      mmrvhav == 3 ~ 52)) %>%
-  left_join(tidy_names_pat, by = join_by(pat)) %>%
-  left_join(tidy_names_clu, by = join_by(clu)) 
-
-pldat$baseline %>%
-  ggplot(aes(y = imm_pop_mean, x = age_ini)) +
-  geom_vline(aes(xintercept = age_min), color = "dodgerblue") + 
-  geom_vline(aes(xintercept = age_rec), color = "firebrick1") + 
-  geom_point() + 
-  geom_linerange(aes(ymin = imm_pop_cilo, ymax = imm_pop_ciup)) + 
-  facet_nested_wrap(~reorder(pat_tidy, mmrvhav)+clu_tidy, 
-                    scales = "free", nest_line =TRUE, solo_line = TRUE, ncol = 8)
-```
-
-
-```{r}
-
-```
-
-
-# Data delay12more
-```{r}
-sim_delay12more_noextreme <- map_dfr(seq_len(nrow(dat_cov)), \(x) {
-  readRDS(paste0(dirs$modres, "/modresimm_population/sim_delay12more_ratio_", dat_cov$mod_best[x]))
-})
 
 pldat$delay12more <- list()
 pldat$delay12more <- sim_delay12more %>%
   left_join(pldat$baseline %>% distinct(pat, age_min, age_rec, mmrvhav), by = join_by(pat)) %>%
   left_join(tidy_names_pat, by = join_by(pat)) %>%
   left_join(tidy_names_clu, by = join_by(clu)) %>%
-  filter(age_ini <= age_rec & age_ini >= age_min) %>%
-  mutate(extreme = TRUE) %>%
-  filter((mmrvhav == 1 & age_ini %in% c(38) & delay %in% seq(5, 26, by = 4)) | 
-         (mmrvhav == 2 & age_ini %in% c(6) & delay <= 8) |
-         (mmrvhav == 3 & age_ini %in% c(51) & delay %in% seq(5, 26, by = 4))) %>%
-  select(scenario, pat, mod_best, clu, min_week, age_ini, delay, starts_with("absdiff_bs"), starts_with("increasepct_bs"), starts_with("imm_pop"), pat_tidy, clu_tidy, extreme) %>%
-  mutate(pat_tidy = factor(pat_tidy, levels = c(
-    "VZV", "Measles", "Rubella", "HAV", "Rotavirus", "Diphteria", "Polio (I) 1", "H. inf B",  
-    "N. men C", "S. pn 04", "HBV", "Tetanus", "Pertu (W) PT", "Mumps")))
-
-pldat$delay12more_noextreme <- sim_delay12more_noextreme %>%
-  left_join(pldat$baseline_noextreme %>% distinct(pat, age_min, age_rec, mmrvhav), by = join_by(pat)) %>%
-  left_join(tidy_names_pat, by = join_by(pat)) %>%
-  left_join(tidy_names_clu, by = join_by(clu)) %>%
-  filter(age_ini <= age_rec & age_ini >= age_min) %>%
-  mutate(extreme = FALSE) %>%
-  filter((mmrvhav == 1 & age_ini %in% c(38) & delay %in% seq(5, 26, by = 4)) | 
-         (mmrvhav == 2 & age_ini %in% c(6) & delay <= 8) |
-         (mmrvhav == 3 & age_ini %in% c(51) & delay %in% seq(5, 26, by = 4))) %>%
-  select(scenario, pat, mod_best, clu, min_week, age_ini, delay, starts_with("absdiff_bs"), starts_with("increasepct_bs"), starts_with("imm_pop"), pat_tidy, clu_tidy, extreme) %>%
-  mutate(pat_tidy = factor(pat_tidy, levels = c(
-    "VZV", "Measles", "Rubella", "HAV", "Rotavirus", "Diphteria", "Polio (I) 1", "H. inf B",  
-    "N. men C", "S. pn 04", "HBV", "Tetanus", "Pertu (W) PT", "Mumps")))
+  filter(age_ini <= age_rec & age_ini >= age_min)
 ```
 
 # Plots
 ```{r}
-viridis(2, begin = 0, end = 0.5)
-pldat$delay12more %>%
-  bind_rows(pldat$delay12more_noextreme) %>%
-  filter(!(mod_best %in% c("bmv3_s08_menc_cs.rds", "bmv1_s08_vzv_csi_reg_6.rds"))) %>%
-  ggplot(aes(x = delay, y = imm_pop_med)) + 
-  geom_linerange(aes(ymin = imm_pop_cilo, ymax = imm_pop_ciup, color = extreme)) +
-  geom_point(aes(shape = reorder(as.factor(age_ini), age_ini), color = extreme)) + 
+figimm_l$b <- pldat$delay12more %>%
+  filter((mmrvhav == 1 & age_ini %in% c(38) & delay %in% seq(5, 26, by = 4)) | 
+         (mmrvhav == 2 & age_ini %in% c(6) & delay <= 8) |
+         (mmrvhav == 3 & age_ini %in% c(51) & delay %in% seq(5, 26, by = 4))) %>%
+  select(scenario, pat, mod_best, clu, min_week, age_ini, delay, starts_with("increasepct"), pat_tidy, clu_tidy) %>%
+  mutate(pat_tidy = factor(pat_tidy, levels = c(
+    "VZV", "Measles", "Rubella", "HAV", "Rotavirus", "Diphteria", "Polio (I) 1", "H. inf B",  
+    "N. men C", "S. pn 04", "HBV", "Tetanus", "Pertu (W) PT", "Mumps")))  %>%
+  filter(str_detect(mod_best, "semeth", negate = TRUE)) %>%
+  ggplot(aes(x = delay, y = increasepct_bs_mean)) + 
+  geom_point(aes(x = 0, y = 0, shape = reorder(as.factor(age_ini), age_ini), color = "Everyone early (reference)")) +
+  geom_rect(aes(ymin = increasepct_bl_cilo, ymax = increasepct_bl_ciup, xmin = -Inf, xmax = Inf, fill = "Everyone later"), 
+            color = "transparent", alpha = 0.03) + 
+  geom_hline(aes(yintercept = 0, color = "Everyone early (reference)")) + 
+  geom_hline(aes(yintercept = increasepct_bl_med, color = "Everyone later")) + 
+  geom_linerange(aes(ymin = increasepct_bs_cilo, ymax = increasepct_bs_ciup, color = "Seasonally targeted delay")) +
+  geom_point(aes(shape = reorder(as.factor(age_ini), age_ini), color = "Seasonally targeted delay")) + 
+  scale_color_manual(name = "Scenario", values = c(
+    "Everyone early (reference)" = "#21908CFF", "Seasonally targeted delay" = "#440154FF", "Everyone later" = "grey")) + 
   scale_fill_manual(name = "Scenario", values =c("Everyone later" = "grey"), guide = "none") +
   scale_shape_manual(name = "Early vaccination age (weeks)", values = c(17, 15, 16)) + 
   scale_x_continuous("Delay among targeted children (weeks)") + 
-  scale_y_continuous("Mean immunogenicity (model units)") + 
+  scale_y_continuous("Change in population mean immunogenicity (%)") + 
   facet_nested_wrap(pat_tidy+clu_tidy~., scales = "free", solo_line = TRUE, nest_line = TRUE, ncol = 6) +
-  guides(color = guide_legend(ncol = 1, order = 1), shape = guide_legend(ncol = 3, order = 2)) +
-  theme(legend.position = "inside",  legend.position.inside = c(0.83,0.1)) 
-
-pldat$delay12more %>%
-  bind_rows(pldat$delay12more_noextreme) %>%
-  filter(!(mod_best %in% c("bmv3_s08_menc_cs.rds", "bmv1_s08_vzv_csi_reg_6.rds"))) %>%
-  ggplot(aes(x = delay, y = imm_pop_med)) + 
-  geom_linerange(aes(ymin = imm_pop_cilo, ymax = imm_pop_ciup, color = extreme)) +
-  geom_point(aes(shape = reorder(as.factor(age_ini), age_ini), color = extreme)) + 
-  scale_fill_manual(name = "Scenario", values =c("Everyone later" = "grey"), guide = "none") +
-  scale_shape_manual(name = "Early vaccination age (weeks)", values = c(17, 15, 16)) + 
-  scale_x_continuous("Delay among targeted children (weeks)") + 
-  scale_y_continuous("Mean immunogenicity (model units)") + 
-  facet_nested_wrap(pat_tidy+clu_tidy~., scales = "free", solo_line = TRUE, nest_line = TRUE, ncol = 6) +
-  guides(color = guide_legend(ncol = 1, order = 1), shape = guide_legend(ncol = 3, order = 2)) +
-  theme(legend.position = "inside",  legend.position.inside = c(0.83,0.1)) 
+  guides(color = guide_legend(ncol = 1, order = 1), shape = guide_legend(ncol = 1, order = 2)) +
+  theme(legend.position = "inside",  legend.position.inside = c(0.75,0.08), legend.box = "horizontal")
 ```
 
-# Save results
+# Save results and plots
+```{r}
+library(cowplot)
+figimm_l$c <- readRDS(paste0(dirs$modres, "/figve_temp.rds"))
+figimm_l$c <- figimm_l$c + theme(legend.position = "right", legend.justification = c(0, 1), legend.title = element_blank())
+figimm_l$pl_top <- ggdraw() +
+  draw_plot(figimm_l$c, x = 0, y = 0, width = 0.55, height = 1) +
+  draw_plot(figimm_l$a, x = 0.55, y = 0, width = 0.45, height = 1)
+
+# Figure 5
+figimm_l$fg <- figimm_l$pl_top / free(figimm_l$b) +
+  plot_layout(heights = c(1, 2.3))
+
+# Save the plot
+ggsave(glue("../{dirs$figures}/fig5.pdf"), figimm_l$fg, width = 9, height = 12)
+```
+
+# Check results 
 
 ```{r}
-saveRDS(sim_extreme, glue("{dirs$modres}/modresimm_populationextreme/sim_extreme_all.rds"))
-saveRDS(sim_baseline, glue("{dirs$modres}/modresimm_populationextreme/sim_baseline_all.rds"))
-saveRDS(sim_delay12more, glue("{dirs$modres}/modresimm_populationextreme/sim_delay12more_ratio_all.rds"))
+res_report <- pldat$delay12more %>%
+  filter((mmrvhav == 1 & age_ini == 38) | (mmrvhav == 2 & age_ini == 6) | (mmrvhav == 3 & age_ini == 51)) %>%
+  group_by(pat, clu) %>%
+  filter(gapclosedpct_bls_mean >= 100) %>%
+  slice_min(delay, with_ties = FALSE) %>%
+  ungroup()
+
+# Increase from vaccinating everyone later
+res_report %>%
+  summarise(min = min(increasepct_bl_mean, na.rm = TRUE), 
+            max = max(increasepct_bl_mean, na.rm = TRUE))
+
+# Percentage of the later-age gain recovered by targeted vaccination
+res_report %>%
+  summarise(min = min(gapclosedpct_bls_mean, na.rm = TRUE),
+            max = max(gapclosedpct_bls_mean, na.rm = TRUE))
+
+# Percentage of the later-age gain recovered by targeted vaccination
+res_report %>%
+  summarise(min = min(increasepct_target_mean, na.rm = TRUE),
+            max = max(increasepct_target_mean, na.rm = TRUE))
 ```
+
+####################################################################################################
+# END
+####################################################################################################

@@ -162,7 +162,7 @@ fig1_l$fb2 <- lapply(fig1_l$dfb, fun_figimm)
 # Figure 1b.3: Maps of study locations for each subgroup of pathogens
 fig1_l$fb3 <- lapply(fig1_l$dfb, fun_figmap, x_agg = fig1_l$dfb_agg)
 # Extract legend
-fig1_l$fb_leg <- cowplot::get_plot_component(fig1_l$fb3[[1]], "guide-box", return_all = TRUE)[[4]]
+fig1_l$fb_leg <- cowplot::get_plot_component(fig1_l$fb3[[1]], "guide-box", return_all = TRUE)#[[4]]
 ## Patch plots together 
 fig1_l$fb <- fig1_l$fb1[[1]] + fig1_l$fb2[[1]] + (fig1_l$fb3[[1]] + theme(legend.position = "none")) + 
              fig1_l$fb1[[2]] + fig1_l$fb2[[2]] + (fig1_l$fb3[[2]] + theme(legend.position = "none")) + 
@@ -376,7 +376,7 @@ figsup8_l$fb1 <- lapply(figsup8_l$dfb, fun_figvacc)
 # Figure b.2: Density plots of immunogenicity results per region
 figsup8_l$fb2 <- lapply(figsup8_l$dfb, fun_figimm) 
 # Figure b.3: Maps of study locations for each subgroup of pathogens
-figsup8_l$fb3 <- lapply(figsup8_l$dfb, fun_figmap, x_agg = figsup8_l$dfb_agg) 
+figsup8_l$fb3 <- lapply(figsup8_l$dfb, fun_figmap, x_agg = figsup8_l$dfb_agg, tidynames = TRUE) 
 
 ## Patch plots together 
 figsup8_l$fb <- figsup8_l$fb1[[1]] + figsup8_l$fb2[[1]] + (figsup8_l$fb3[[1]] + theme(legend.position = "none")) + 
@@ -448,14 +448,14 @@ figsup13_l$fa2 <- figsup13_l$dfa %>%
         axis.text.y = element_blank(),
         axis.ticks.y = element_blank(),
         axis.line.y = element_blank(),
-        panel.grid.major.y = element_line())
+        panel.grid.major.y = element_line(color = "grey90"))
 ## Figure a.3: Stacked bar plot showing the sex ratio by pathogen
 figsup13_l$fa3 <- fun_figsex(figsup13_l$dfa %>% filter(Dose == "2")) 
 ## Patch plots together 
 figsup13_l$fa <- figsup13_l$fa1 + figsup13_l$fa2 + figsup13_l$fa3 + plot_layout(widths = c(2,4,0.5))
 ```
 
-# Figure sup 8b: Maps and additional density plots for selected pathogen -------------------------------
+# Figure sup 13b: Maps and additional density plots for selected pathogen -------------------------------
 
 # Prepare data for the plot 
 ```{r}
@@ -495,7 +495,7 @@ figsup13_l$dfb_agg <- bind_rows(lapply(datse2_l, function(x) {
   mutate(country = case_when(country == "United States" ~ "USA", .default = country))
 ```
 
-## Figure 8b
+## Figure 13b
 ```{r}
 ## Figure b.1: Time-series plots of vaccination weeks per region
 figsup13_l$fb1 <- lapply(figsup13_l$dfb, fun_figvacc)
@@ -511,11 +511,11 @@ ABC###
 
 ## Patch plots together 
 figsup13_l$fb <- figsup13_l$fb1[[1]] + figsup13_l$fb2[[1]] + (figsup13_l$fb3[[1]] + theme(legend.position = "none")) + 
-                figsup13_l$fb1[[2]] + figsup13_l$fb2[[2]] + (figsup13_l$fb3[[2]] + theme(legend.position = "none")) + 
-                plot_layout(design = design, widths = c(0.75, 0.75, 2, 0.75, 0.75, 2), heights = c(1, 1))
+                 figsup13_l$fb1[[2]] + figsup13_l$fb2[[2]] + (figsup13_l$fb3[[2]] + theme(legend.position = "none")) + 
+                 plot_layout(design = design, widths = c(0.75, 0.75, 2, 0.75, 0.75, 2), heights = c(1, 1))
 ```
 
-# Figure supplementary 8
+# Figure supplementary 13
 ```{r}
 ## Patch plots together 
 figsup13_l$fg <- free(figsup13_l$fa) + fig1_l$fb_leg + figsup13_l$fb + plot_layout(nrow = 3, heights  = c(1.4,0.2,2))

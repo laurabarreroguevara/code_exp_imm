@@ -333,7 +333,7 @@ supfig7 <-  (
 ggsave(supfig7, file = "../_figures/figsup7.pdf", width = 10, height = 10)
 ```
 
-# Supplementary figure: extra methods ==============================================================
+# Supplementary figure 10: extra methods ==============================================================
 ```{r}
 waic_extrapath <- bind_rows(waiccomb_best, waic_best) %>%
   group_by(pat, dat) %>%
@@ -430,7 +430,7 @@ supfig10 <-  (
 ggsave(supfig10, file = "../_figures/figsup10.pdf", width = 10, height = 8)
 ```
 
-# Supplementary figure: allsero rota ===============================================================
+# Supplementary figure 12: allsero rota ===============================================================
 ```{r}
 supfig12_l <- list()
 tidy_names_rota <- data.frame(dat = c("s08", "seallsero_s08"), dat_tidy = c("Seropositive", "All")) 
@@ -600,7 +600,7 @@ supfig15 <- (supfig15_l$amp + theme(strip.text.y = element_blank(), axis.title.y
   supfig15_l$phi + theme(axis.title.y = element_blank(), axis.text.y = element_blank())) / supfig15_l$sam
 
 # Save the plot
-ggsave(supfig15, file = "../_figures/figsup15s.pdf", width = 10, height = 6)
+ggsave(supfig15, file = "../_figures/figsup15.pdf", width = 10, height = 6)
 ```
 
 ####################################################################################################

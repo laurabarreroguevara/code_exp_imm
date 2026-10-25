@@ -248,7 +248,7 @@ tidy_names_mod <- data.frame(mod_name = unique(waic_best$mod_name_best)) %>%
                  "Seas by lat. (2)", "Seasonality", "Baseline")))
 ```
 
-# Supplementary figure 13
+# Supplementary figure 16
 ```{r}
 figsup13 <- waicvacbirth_df %>%
   left_join(tidy_names_mod, by = join_by(mod_name)) %>%
@@ -270,7 +270,7 @@ figsup13 <- waicvacbirth_df %>%
           axis.title.y = element_blank())
 
 # Save the plot
-ggsave(glue("{dirs$figures}/figsup13.pdf"), figsup13, width = 8, height = 7)
+ggsave(glue("{dirs$figures}/figsup16.pdf"), figsup13, width = 8, height = 7)
 ```
 
 # Figures ==========================================================================================
@@ -370,9 +370,9 @@ fig2_l$fa <- lapply(fig2_l$dfwaic, fun_figwaic)
 fig2_l$fb <- lapply(fig2_l$dfpred, fun_figpred)
 
 # Patch plots together 
-fig2_l$fa_leg <- cowplot::get_plot_component(fig2_l$fa[[1]], "guide-box", return_all = TRUE)[[4]] %>%
+fig2_l$fa_leg <- cowplot::get_plot_component(fig2_l$fa[[1]], "guide-box", return_all = TRUE) %>%
   cowplot::ggdraw()
-fig2_l$fb_leg <- cowplot::get_plot_component(fig2_l$fb_forleg, "guide-box", return_all = TRUE)[[4]] %>%
+fig2_l$fb_leg <- cowplot::get_plot_component(fig2_l$fb_forleg, "guide-box", return_all = TRUE) %>%
   cowplot::ggdraw()
 
 fig2_l$fab <- (fig2_l$fa[[1]] + theme(legend.position = "none")) + (fig2_l$fb[[1]]) + 
@@ -527,8 +527,8 @@ names(col_patcomb) <- c("Diphteria", "Mumps", "VZV", levels(droplevels(unique(pr
 # Plot for additional pathogens
 ```{r}
 figsup6_l <- list()
-figsup6_l$fa <- fun_figwaiccomb(filter(waiccomb_df, dat == "s08"))
-figsup6_l$fb <- fun_figpredcomb(filter(predcomb_pldf, dat == "s08"))
+figsup6_l$fa <- fun_figwaiccomb(filter(waiccomb_df, dat == "s08"), plncol = 4)
+figsup6_l$fb <- fun_figpredcomb(filter(predcomb_pldf, dat == "s08"), plncol = 2)
 
 # Patch plots together 
 figsup6_l$fab <- figsup6_l$fa + free(figsup6_l$fb) + plot_layout(ncol = 1, heights = c(1,9))
@@ -603,13 +603,15 @@ figsup9_l$fab <- figsup9_l$fa + free(figsup9_l$fb) + plot_layout(ncol = 1, heigh
 ggsave(glue("{dirs$figures}/figsup9.pdf"), figsup9_l$fab, width = 8, height = 10)
 ```
 
-# Supplementary figure XX --------------------------------------------------------------------------
+# Supplementary figure 14 --------------------------------------------------------------------------
 
 ```{r}
 figsup14_l <- list()
-figsup14_l$dfwaic <- filter(waic_pldf, pat %in% c("measl", "mumps", "rubel", "vzv"), dat %in% c("se2_s08", "semeth2_s08")) %>%
+figsup14_l$dfwaic <- filter(waic_pldf, pat %in% c("measl", "mumps", "rubel", "vzv"), 
+                            dat %in% c("se2_s08", "semeth2_s08")) %>%
   mutate(patcomb = pat, patcomb_tidy = pat_tidy) %>%
-  left_join(pat_meth %>% mutate(dat = ifelse(dat == "semeth_s08", "semeth2_s08", "se2_s08")), by = join_by(pat, dat)) %>%
+  left_join(pat_meth %>% mutate(dat = ifelse(dat == "semeth_s08", "semeth2_s08", "se2_s08")), 
+            by = join_by(pat, dat)) %>%
   mutate(imm_met_s1_tidy = case_when(
     pat == "rubel" ~ "ELISA",
     pat == "measl" ~ "ELISA",
@@ -618,9 +620,11 @@ figsup14_l$dfwaic <- filter(waic_pldf, pat %in% c("measl", "mumps", "rubel", "vz
          col_g = if_else(dat == "se2_s08", "1", "2")) %>%
   group_split(col_g)
 
-figsup14_l$dfpred <- filter(pred_pldf, pat %in% c("measl", "mumps", "rubel", "vzv"), dat %in% c("se2_s08", "semeth2_s08")) %>%
+figsup14_l$dfpred <- filter(pred_pldf, pat %in% c("measl", "mumps", "rubel", "vzv"), 
+                            dat %in% c("se2_s08", "semeth2_s08")) %>%
   mutate(patcomb = pat, patcomb_tidy = pat_tidy) %>%
-  left_join(pat_meth %>% mutate(dat = ifelse(dat == "semeth_s08", "semeth2_s08", "se2_s08")), by = join_by(pat, dat)) %>%
+  left_join(pat_meth %>% mutate(dat = ifelse(dat == "semeth_s08", "semeth2_s08", "se2_s08")), 
+            by = join_by(pat, dat)) %>%
   mutate(imm_met_s1_tidy = case_when(
     pat == "rubel" ~ "ELISA",
     pat == "measl" ~ "ELISA",
@@ -653,7 +657,7 @@ AB##
 
 # Patch plots together 
 figsup14_l$fa_leg <- fig2_l$fa_leg
-figsup14_l$fb_leg <- cowplot::get_plot_component(figsup14_l$fb_forleg, "guide-box", return_all = TRUE)[[4]] %>%
+figsup14_l$fb_leg <- cowplot::get_plot_component(figsup14_l$fb_forleg, "guide-box", return_all = TRUE) %>%
   cowplot::ggdraw()
 
 figsup14_l$fab <- (figsup14_l$fa[[1]] + theme(legend.position = "none")) + (figsup14_l$fb[[1]]) + 
@@ -665,23 +669,6 @@ figsup14_l$fg <- free(figsup14_l$fa_leg + figsup14_l$fb_leg) + figsup14_l$fab + 
 # Save the plot
 ggsave(glue("{dirs$figures}/figsup14.pdf"), figsup14_l$fg, width = 10, height = 6)
 ```
-
-
-```{r}
-figsupXX_l$fa <- figsupXX_l$dfwaic %>% fun_figwaic() + 
-    guides(color = guide_legend(nrow = 2)) 
-figsupXX_l$fb <- figsupXX_l$dfpred %>% fun_figpred() + 
-    guides(color = guide_legend(nrow = 2, byrow = TRUE)) + 
-    theme(legend.position = "top")
-
-figsupXX_l$fg <- (figsupXX_l$fa) + (figsupXX_l$fb) + plot_layout(ncol = 2, widths = c(0.7,1))
-
-# Save the plot
-ggsave(glue("{dirs$figures}/figsupXXw.pdf"), figsupXX_l$fg , width = 10, height = 5)
-```
-
-
-
 
 ###################################################################################################
 # END 

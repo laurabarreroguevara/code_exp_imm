@@ -5,8 +5,8 @@ date: '2022-08-12'
 ---
 
 ####################################################################################################
-Purpose of script: This script prepares the data for models of sensitivity analyses, applying 
-further exclusions based on spatial.
+Purpose of script: This script prepares the data for models of sensitivity analyses with two doses, 
+applying further exclusions based on spatial.
 ####################################################################################################
 
 # Sensitivity analysis with extra methods data =====================================================
@@ -102,8 +102,7 @@ setdiff(distinct(bind_rows(stu_ppat), study)$study,
         distinct(bind_rows(pat_df_l[str_subset(names(pat_df_l), "kgc", negate = TRUE)]), study)$study)
 ```
 
-
-# Age under 4!!
+# Age under 4
 ```{r}
 pat_df_l <- lapply(pat_df_l, function(dat) {filter(dat, age + (time_v1_v2) < 200)} )
 ```
@@ -169,7 +168,6 @@ pat_df_l <- sapply(names(pat_df_l), function(x) {
   return(data)
 }, simplify = FALSE)
 ```
-
 
 # Total participants 
 ```{r}
