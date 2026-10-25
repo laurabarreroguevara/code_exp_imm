@@ -411,7 +411,7 @@ figimm_l$b <- pldat$delay12more %>%
          (mmrvhav == 3 & age_ini %in% c(51) & delay %in% seq(5, 26, by = 4))) %>%
   select(scenario, pat, mod_best, clu, min_week, age_ini, delay, starts_with("increasepct"), pat_tidy, clu_tidy) %>%
   mutate(pat_tidy = factor(pat_tidy, levels = c(
-    "VZV", "Measles", "Rubella", "HAV", "Rotavirus", "Diphteria", "Polio (I) 1", "H. inf B",  
+    "VZV", "Measles", "Rubella", "HAV", "Rotavirus", "Diphtheria", "Polio (I) 1", "H. inf B",  
     "N. men C", "S. pn 04", "HBV", "Tetanus", "Pertu (W) PT", "Mumps")))  %>%
   filter(str_detect(mod_best, "semeth", negate = TRUE)) %>%
   ggplot(aes(x = delay, y = increasepct_bs_mean)) + 

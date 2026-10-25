@@ -34,7 +34,8 @@ all_datagaps <- readRDS(glue("{dirs$modres}/all_datagaps.rds"))
 all_datagapssim <- readRDS(glue("{dirs$modres}/all_datagapssim.rds")) 
 
 all_samplescosine <- readRDS(glue("{dirs$modres}/all_samplescosine.rds")) %>%
-  left_join(all_datagapssim, by = join_by(pat, mod, reg, clu, dat))
+  left_join(all_datagapssim, by = join_by(pat, mod, reg, clu, dat)) %>%
+  mutate(pat_tidy = if_else(pat_tidy == "Diphteria", "Diphtheria", pat_tidy))
 ```
 
 # Exploratory plots ================================================================================

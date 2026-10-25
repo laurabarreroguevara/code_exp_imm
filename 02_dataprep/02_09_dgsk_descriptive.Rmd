@@ -315,7 +315,7 @@ figsup8_l$dfa <- bind_rows(lapply(datsemeth_l, distinct, study, pid, sex, age, i
   left_join(tidy_names_pat, by = join_by(pat)) %>%
   mutate(imm_met_s1_tidy = toupper(imm_met_s1)) %>%
   mutate(pat_tidy = factor(paste0(pat_tidy, " (", imm_met_s1_tidy, ")"), levels = c(
-    "Diphteria (PRNT)", "Mumps (PRNT)", "VZV (ELISA)", "N. men A (BAC)", "N. men C (BAC)", "S. pn 01 (OPA)",
+    "Diphtheria (PRNT)", "Mumps (PRNT)", "VZV (ELISA)", "N. men A (BAC)", "N. men C (BAC)", "S. pn 01 (OPA)",
     "S. pn 03 (OPA)", "S. pn 04 (OPA)", "S. pn 05 (OPA)", "S. pn 06a (OPA)", "S. pn 06b (OPA)",
     "S. pn 07f (OPA)", "S. pn 09v (OPA)", "S. pn 14 (OPA)", "S. pn 18c (OPA)", "S. pn 19a (OPA)",
     "S. pn 19f (OPA)", "S. pn 23f (OPA)")))
@@ -343,7 +343,7 @@ figsup8_l$dfb <- bind_rows(datsemeth_l, .id = "pat") %>%
   left_join(tidy_names_pat, by = join_by(pat)) %>%
   mutate(imm_met_s1_tidy = toupper(imm_met_s1)) %>%
   mutate(pat_tidy = factor(paste0(pat_tidy, " (", imm_met_s1_tidy, ")"), levels = c(
-    "Diphteria (PRNT)", "Mumps (PRNT)", "VZV (ELISA)", "N. men A (BAC)", "N. men C (BAC)", "S. pn 01 (OPA)",
+    "Diphtheria (PRNT)", "Mumps (PRNT)", "VZV (ELISA)", "N. men A (BAC)", "N. men C (BAC)", "S. pn 01 (OPA)",
     "S. pn 03 (OPA)", "S. pn 04 (OPA)", "S. pn 05 (OPA)", "S. pn 06a (OPA)", "S. pn 06b (OPA)",
     "S. pn 07f (OPA)", "S. pn 09v (OPA)", "S. pn 14 (OPA)", "S. pn 18c (OPA)", "S. pn 19a (OPA)",
     "S. pn 19f (OPA)", "S. pn 23f (OPA)"))) %>%
@@ -392,7 +392,7 @@ figsup8_l$fg <- free(figsup8_l$fa) + fig1_l$fb_leg + figsup8_l$fb + plot_layout(
 ggsave(glue("../{dirs$figures}/figsup8.pdf"), figsup8_l$fg, width = 12, height = 14)
 ```
 
-# Supplementar figure 13: Descriptive of second doses ==============================================
+# Supplementary figure 13: Descriptive of second doses ==============================================
 
 # Read in the data (only s2 data)
 ```{r}

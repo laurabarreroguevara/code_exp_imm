@@ -32,7 +32,7 @@ tidy_names_pat <- data.frame(
     "multi_strep7", "multi_strep10", "multi_strep11", "multi_strep13",   
     "measl", "mumps", "rubel", "multi_mmr", "vzv", "multi_mmr-vzv"),
   pat_tidy = c(
-    "Rotavirus", "HAV", "HBV", "Diphteria", "Tetanus", 
+    "Rotavirus", "HAV", "HBV", "Diphtheria", "Tetanus", 
     "Pertu (W) PT", "DTP (W) multi",
     "Pertu (A) PT", "Pertu (A) FHA", "Pertu (A) PRN", "Pertu (A) multi", "DTP (A) multi", 
     "Polio (I) 1", "Polio (I) 2", "Polio (I) 3", "Polio (I) multi", 

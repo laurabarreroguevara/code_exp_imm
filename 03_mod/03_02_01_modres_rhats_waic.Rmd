@@ -250,13 +250,14 @@ tidy_names_mod <- data.frame(mod_name = unique(waic_best$mod_name_best)) %>%
 
 # Supplementary figure 16
 ```{r}
-figsup13 <- waicvacbirth_df %>%
+figsup16 <- waicvacbirth_df %>%
   left_join(tidy_names_mod, by = join_by(mod_name)) %>%
   mutate(
     vacbirth = ifelse(str_detect(mod, "sebirth"), "Birth model", "Vaccination model"),
     # Create dummy variable for the order 
     mod_name_f = tidytext::reorder_within(mod_name_tidy, -waic_diff, pat_tidy, fun = max)) %>%
   filter(pat %in% pat_sel) %>%
+  mutate(pat_tidy = if_else(pat_tidy == "Diphteria", "Diphtheria", pat_tidy)) %>%
   ggplot(aes(x = waic_diff, y = mod_name_f, color = vacbirth)) +
     geom_vline(aes(xintercept = 2), color = "grey") +
       geom_point(size = 2) +
@@ -270,7 +271,7 @@ figsup13 <- waicvacbirth_df %>%
           axis.title.y = element_blank())
 
 # Save the plot
-ggsave(glue("{dirs$figures}/figsup16.pdf"), figsup13, width = 8, height = 7)
+ggsave(glue("{dirs$figures}/figsup16.pdf"), figsup16, width = 8, height = 7)
 ```
 
 # Figures ==========================================================================================
@@ -339,6 +340,7 @@ names(col_clu) <- levels(pred_pldf$clu_tidy)
 
 fig2_l <- list()
 fig2_l$fb_forleg <- filter(pred_pldf, type == "2data") %>%
+  mutate(pat_tidy = if_else(pat_tidy == "Diphteria", "Diphtheria", pat_tidy)) %>%
   ggplot(aes(x = value, group = name_draw, color = clu_tidy)) + 
     geom_line(stat = "ecdf") + 
     scale_color_manual("Latitudinal\nclassification", values = col_clu) + 
@@ -349,16 +351,18 @@ fig2_l$fb_forleg <- filter(pred_pldf, type == "2data") %>%
 # Plot for only main pathogens
 ```{r}
 fig2_l$dfwaic <- filter(waic_pldf, pat %in% pat_sel, dat == "s08") %>%
+  mutate(pat_tidy = if_else(pat_tidy == "Diphteria", "Diphtheria", pat_tidy)) %>%
   mutate(pat_tidy = factor(as.character(pat_tidy), levels = c(
     "Rotavirus", "VZV", "Measles", "Rubella", "Polio (I) 1", "H. inf B", "S. pn 04", "Pertu (W) PT", 
-    "HAV", "Diphteria", "Mumps", "N. men C", "Tetanus", "HBV")),
+    "HAV", "Diphtheria", "Mumps", "N. men C", "Tetanus", "HBV")),
   col_g = if_else(pat %in% pat_sel[1:7], "1", "2")) %>%
   group_split(col_g)
 
 fig2_l$dfpred <- filter(pred_pldf, pat %in% pat_sel, dat == "s08") %>%
+  mutate(pat_tidy = if_else(pat_tidy == "Diphteria", "Diphtheria", pat_tidy)) %>%
   mutate(pat_tidy = factor(as.character(pat_tidy), levels = c(
     "Rotavirus", "VZV", "Measles", "Rubella", "Polio (I) 1", "H. inf B", "S. pn 04", "Pertu (W) PT", 
-    "HAV", "Diphteria", "Mumps", "N. men C", "Tetanus", "HBV")),
+    "HAV", "Diphtheria", "Mumps", "N. men C", "Tetanus", "HBV")),
   col_g = if_else(pat %in% pat_sel[1:7], "1", "2")) %>%
   group_split(col_g)
 ```
@@ -521,7 +525,7 @@ predcomb_pldf <- waiccomb_best$mod_best %>%
 # Tidy colors
 ```{r}
 col_patcomb <- c("grey50", "grey50", "grey50", viridis(21, option = "turbo"))
-names(col_patcomb) <- c("Diphteria", "Mumps", "VZV", levels(droplevels(unique(predcomb_pldf$pat_tidy))))
+names(col_patcomb) <- c("Diphtheria", "Mumps", "VZV", levels(droplevels(unique(predcomb_pldf$pat_tidy))))
 ```
 
 # Plot for additional pathogens
@@ -572,6 +576,7 @@ pat_meth <- lapply(dati_l, bind_rows, .id = "pat") %>%
 ```{r}
 figsup9_l <- list()
 figsup9_l$dfwaic <- filter(waic_pldf, pat %in% c("mumps", "dipht", "vzv"), dat %in% c("semeth_s08")) %>%
+  mutate(pat_tidy = if_else(pat_tidy == "Diphteria", "Diphtheria", pat_tidy)) %>%
   mutate(patcomb = pat, patcomb_tidy = pat_tidy) %>%
   bind_rows(filter(waiccomb_df, dat %in% c("semeth_s08"))) %>%
   left_join(pat_meth, by = join_by(pat, dat)) %>%
@@ -579,13 +584,14 @@ figsup9_l$dfwaic <- filter(waic_pldf, pat %in% c("mumps", "dipht", "vzv"), dat %
     patcomb == "men" ~ "BAC",
     patcomb == "strep" ~ "OPA",
     .default = imm_met_s1_tidy)) %>%
-  mutate(patcomb_tidy = factor(paste0(patcomb_tidy, " (", imm_met_s1_tidy, ")"), levels = c("Diphteria (PRNT)", "Mumps (PRNT)", "VZV (ELISA)", "N. men (BAC)", "S. pn (OPA)"))) 
+  mutate(patcomb_tidy = factor(paste0(patcomb_tidy, " (", imm_met_s1_tidy, ")"), levels = c("Diphtheria (PRNT)", "Mumps (PRNT)", "VZV (ELISA)", "N. men (BAC)", "S. pn (OPA)"))) 
 
 figsup9_l$dfpred <- filter(pred_pldf, pat %in% c("mumps", "dipht", "vzv"), dat %in% c("semeth_s08")) %>%
+  mutate(pat_tidy = if_else(pat_tidy == "Diphteria", "Diphtheria", pat_tidy)) %>%
   mutate(patcomb = pat, patcomb_tidy = pat_tidy) %>%
   bind_rows(filter(predcomb_pldf, dat %in% c("semeth_s08"))) %>%
   left_join(pat_meth, by = join_by(pat, dat)) %>%
-  mutate(patcomb_tidy = factor(paste0(patcomb_tidy, " (", imm_met_s1_tidy, ")"), levels = c("Diphteria (PRNT)", "Mumps (PRNT)", "VZV (ELISA)", "N. men (BAC)", "S. pn (OPA)"))) %>%
+  mutate(patcomb_tidy = factor(paste0(patcomb_tidy, " (", imm_met_s1_tidy, ")"), levels = c("Diphtheria (PRNT)", "Mumps (PRNT)", "VZV (ELISA)", "N. men (BAC)", "S. pn (OPA)"))) %>%
   mutate(imm_cutoff_s1 = if_else(pat == "mumps", 64, imm_cutoff_s1)) 
 
 figsup9_l$dfwaic %>%

@@ -231,7 +231,8 @@ dat_pl <- prob_threshold %>%
   mutate(threshold_status = if_else(pat == "rota", "seroprotection", threshold_status)) %>%
   filter(threshold_status == "seroprotection") %>%
   left_join(datpl_phisumm %>% rename(mod_best = mod)) %>%
-  filter(pat %in% pat_sel)
+  filter(pat %in% pat_sel)  %>%
+  mutate(pat_tidy = if_else(pat_tidy == "Diphteria", "Diphtheria", pat_tidy))
 
 dat_sum <-  map_df(prob_threshold_l, \(dat) dat$dat_sum) %>%
   left_join(distinct(all_datagapssim, mod_best = mod, clu, included), by = join_by(mod_best, clu)) %>%
@@ -250,7 +251,8 @@ dat_sum <-  map_df(prob_threshold_l, \(dat) dat$dat_sum) %>%
   filter(threshold_status == "seroprotection") %>%
   left_join(datpl_phisumm %>% rename(mod_best = mod),
             by = join_by(pat, pat_tidy, mod_best, clu, included, clu_tidy)) %>%
-  filter(pat %in% pat_sel)
+  filter(pat %in% pat_sel)  %>%
+  mutate(pat_tidy = if_else(pat_tidy == "Diphteria", "Diphtheria", pat_tidy))
 ```
 
 # Figure 5a and save it 

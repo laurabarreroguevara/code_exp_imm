@@ -42,14 +42,19 @@ df_converged <- filter(waic_df, dat %in% c("s08", "semeth_s08"), mod_out == "imm
 
 ```{r}
 # Extract covars coefficients
-all_coefcovars <-readRDS(file = glue("{dirs$modres}/all_coefcovars.rds"))
+all_coefcovars <-readRDS(file = glue("{dirs$modres}/all_coefcovars.rds")) %>%
+  mutate(pat_tidy = if_else(pat_tidy == "Diphteria", "Diphtheria", pat_tidy))
 # Extract random effects coefficients
-all_coefre <- readRDS(file = glue("{dirs$modres}/all_coefre.rds"))
+all_coefre <- readRDS(file = glue("{dirs$modres}/all_coefre.rds")) %>%
+  mutate(pat_tidy = if_else(pat_tidy == "Diphteria", "Diphtheria", pat_tidy))
 # Extract draws from the posterior for covars coefficients factors
-all_samplecovarsfct <- readRDS(file = glue("{dirs$modres}/all_samplescovarsfct.rds"))
-all_coefrescor <- readRDS(file = glue("{dirs$modres}/all_coefrescor.rds"))
-all_samplesshape <- readRDS(file = glue("{dirs$modres}/all_samplesshape.rds"))
-```
+all_samplecovarsfct <- readRDS(file = glue("{dirs$modres}/all_samplescovarsfct.rds")) %>%
+  mutate(pat_tidy = if_else(pat_tidy == "Diphteria", "Diphtheria", pat_tidy))
+all_coefrescor <- readRDS(file = glue("{dirs$modres}/all_coefrescor.rds")) %>%
+  mutate(pat_tidy = if_else(pat_tidy == "Diphteria", "Diphtheria", pat_tidy))
+all_samplesshape <- readRDS(file = glue("{dirs$modres}/all_samplesshape.rds")) %>%
+  mutate(pat_tidy = if_else(pat_tidy == "Diphteria", "Diphtheria", pat_tidy))
+```  
 
 # Figure 4 =========================================================================================
 
@@ -294,12 +299,12 @@ pl_cov_l$mvn <- dat_rescor %>%
       "MMRV", "MMR", "Hib-Men", "DTP (A)", "DTP (W)", "N. men",  "S. pn10",  "S. pn7",
       "Pertu (A)", "Polio (I)")),
   patuni_mvntidy1 = factor(pat_tidyuni1, levels = c(
-       "Diphteria", "Tetanus", "Pertu (A) PT", "Measles", "Mumps", "Rubella", "Varicella", "H. inf B", "N. men A", "N. men C",
+       "Diphtheria", "Tetanus", "Pertu (A) PT", "Measles", "Mumps", "Rubella", "Varicella", "H. inf B", "N. men A", "N. men C",
        "Per PRN", "Per FHA", "Polio (I) 1", "Polio (I) 2", "Polio (I) 3", "S. pn 01", "S. pn 04", "S. pn 05",
        "S. pn 06a", "S. pn 06b", "S. pn 07f", "S. pn 09v", "S. pn 14", "S. pn 18c", "S. pn 19a",
        "S. pn 19f", "S. pn 23f")),
      patuni_mvntidy2 = factor(pat_tidyuni2, levels = c(
-       "Diphteria", "Tetanus", "Pertu (A) PT", "Measles", "Mumps", "Rubella", "Varicella", "H. inf B", "N. men A", "N. men C",
+       "Diphtheria", "Tetanus", "Pertu (A) PT", "Measles", "Mumps", "Rubella", "Varicella", "H. inf B", "N. men A", "N. men C",
        "Per PRN", "Per FHA", "Polio (I) 1", "Polio (I) 2", "Polio (I) 3", "S. pn 01", "S. pn 04", "S. pn 05",
        "S. pn 06a", "S. pn 06b", "S. pn 07f", "S. pn 09v", "S. pn 14", "S. pn 18c", "S. pn 19a",
        "S. pn 19f", "S. pn 23f"))) %>%
@@ -329,9 +334,9 @@ fig4a  <- (pl_cov_l$age + pl_cov_l$sex + pl_cov_l$vac_conc + pl_cov_l$vac_name_v
            pl_cov_l$time_v1_v2 + pl_cov_l$time_v2_v3 +  pl_cov_l$time_vl_s1 + pl_cov_l$shape) + 
   plot_layout(ncol = 4)
 
-fig4 <- (free(fig4a) + free(pl_cov_l$mvn)) + plot_layout(ncol = 1, heights = c(1.3,1))
+fig4 <- (free(fig4a) + free(pl_cov_l$mvn)) + plot_layout(ncol = 1, heights = c(1.4,1))
  
-ggsave(fig4, file = "../_figures/fig4.pdf", width = 11.5, height = 12)
+ggsave(fig4, file = "../_figures/fig4.pdf", width = 11.5, height = 12.5)
 ```
 
 ####################################################################################################
