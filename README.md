@@ -124,7 +124,13 @@ This folder contains functions for model fitting and result analysis.
 - `fun_slurmshsimpred`: Generate a SLURM shell script to run simulation-based R model-fitting jobs.
 - `fun_venewdata`: Functions to obtain vaccine seroprotection new data.
 
+## License ##
 
+The source code in this repository is distributed under the
+MIT License. See the [LICENSE](LICENSE) file for details.
+
+The clinical trial data are subject to separate access
+restrictions and are not covered by this license.
 
 
 
