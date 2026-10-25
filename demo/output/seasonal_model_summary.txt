@@ -1,0 +1,30 @@
+ Family: gamma 
+  Links: mu = log 
+Formula: antibody_titer ~ age_weeks + sex + region + region:(sin_week + cos_week) + (1 | study) 
+   Data: structure(list(study = structure(c(1L, 1L, 1L, 1L, (Number of observations: 320) 
+  Draws: 2 chains, each with iter = 1000; warmup = 500; thin = 1;
+         total post-warmup draws = 1000
+
+Multilevel Hyperparameters:
+~study (Number of levels: 8) 
+              Estimate Est.Error l-95% CI u-95% CI Rhat Bulk_ESS Tail_ESS
+sd(Intercept)     0.10      0.05     0.04     0.22 1.01      268      403
+
+Regression Coefficients:
+                     Estimate Est.Error l-95% CI u-95% CI Rhat Bulk_ESS Tail_ESS
+Intercept                3.89      0.08     3.72     4.05 1.00      399      498
+age_weeks                0.02      0.00     0.02     0.03 1.01     1869      701
+sexM                    -0.09      0.03    -0.14    -0.03 1.00     1085      723
+regionSouth              0.01      0.08    -0.18     0.18 1.00      292      307
+regionNorth:sin_week     0.14      0.03     0.09     0.20 1.01     1220      887
+regionSouth:sin_week    -0.17      0.03    -0.23    -0.12 1.00     1100      625
+regionNorth:cos_week     0.40      0.03     0.34     0.46 1.00     1685      924
+regionSouth:cos_week    -0.43      0.03    -0.48    -0.36 1.00     1638      698
+
+Further Distributional Parameters:
+      Estimate Est.Error l-95% CI u-95% CI Rhat Bulk_ESS Tail_ESS
+shape    14.90      1.17    12.82    17.35 1.00     1275      819
+
+Draws were sampled using sample(hmc). For each parameter, Bulk_ESS
+and Tail_ESS are effective sample size measures, and Rhat is the potential
+scale reduction factor on split chains (at convergence, Rhat = 1).

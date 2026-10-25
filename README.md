@@ -3,11 +3,14 @@
 This repository contains the R code required to reproduce the analyses presented in the paper *“The immune response to childhood vaccines is seasonal”*, by Laura Andrea Barrero Guevara, Gaelle Féghali, Sarah Kramer, and Matthieu Domenech de Cellès.
 
 ## Installation ##
-All analyses were conducted in R 4.4.1 (2024-06-14). Package versions were managed with `renv` (version 1.0.7) to ensure reproducibility. To restore the project environment:
+All analyses were conducted in R 4.3.1 (2024-06-14). Package versions were managed with `renv` (version 1.0.2) to ensure reproducibility. To restore the project environment:
+Brms package 2.20.1.
 
 1. Open the R project `codes.proj`.
 2. `renv` should automatically bootstrap itself by downloading and installing the appropriate version into the project library.
 3. Run: `r renv::restore()`
+
+Typical installation time should take less than 30 minutes. 
 
 ## Repository overview ## 
 Files named `fun_XX` correspond to R functions and are stored in the folders `fun_data`, `fun_mod`, and `fun_figures`. The main scripts are organized into the folders `01_metadata`, `02_dataprep`, and `03_mod`.

@@ -49,7 +49,7 @@ tidy_names_pat <- data.frame(
 # List of immunogencity names
 tidy_names_imm <- data.frame(
   imm_name = c("measl", "mumps", "rubel", "vzv", 
-               "pertupt", "pertufha", "pertuprn", "dipht", "tetan", 
+               "dipht", "tetan", "pertupt", "pertufha", "pertuprn", 
                "polio1", "polio2", "polio3", "mena", "menc", "meny"),
   imm_name_tidy = c("Measles", "Mumps", "Rubella", "Varicella", 
                     "Diphteria", "Tetanus", "Pertussis PT", "Pertussis FHA", "Pertussis PRN",
